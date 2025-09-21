@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 class ApiService {
 
+<<<<<<< HEAD
   // ---------------------------
   // ✅ Mark Current Treatment as Complete
   // ---------------------------
@@ -70,6 +71,8 @@ class ApiService {
     }
   }
 
+=======
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
   // --------------------------
   // ✅ Request Signup OTP
   // --------------------------
@@ -132,13 +135,21 @@ class ApiService {
       return 'Signup OTP verification failed: $e';
     }
   }
+<<<<<<< HEAD
   static const String baseUrl = 'https://paras-backend-0gwt.onrender.com';
+=======
+  static const String baseUrl = 'https://tooth-care-app.onrender.com';
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
 
   // --------------------------
   // ✅ Step 1: Verify OTP Only (no password reset)
   // --------------------------
   static Future<dynamic> verifyOtp(String emailOrPhone, String otp) async {
+<<<<<<< HEAD
   final url = Uri.parse('https://paras-backend-0gwt.onrender.com/auth/verify-otp');
+=======
+    final url = Uri.parse('https://tooth-care-app.onrender.com/auth/verify-otp');
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
     final Map<String, dynamic> body = {};
     if (emailOrPhone.contains('@')) {
       body['email'] = emailOrPhone;
@@ -168,7 +179,11 @@ class ApiService {
   // ✅ Step 2: Reset Password (requires OTP)
   // --------------------------
   static Future<dynamic> resetPassword(String emailOrPhone, String otp, String newPassword) async {
+<<<<<<< HEAD
   final url = Uri.parse('https://paras-backend-0gwt.onrender.com/auth/reset-password');
+=======
+    final url = Uri.parse('https://tooth-care-app.onrender.com/auth/reset-password');
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
     final Map<String, dynamic> body = {};
     if (emailOrPhone.contains('@')) {
       body['email'] = emailOrPhone;
@@ -301,6 +316,20 @@ class ApiService {
     }
   }
 
+<<<<<<< HEAD
+=======
+  // Helper: Map backend signup errors to user-friendly messages
+  static String _mapSignupError(String? detail) {
+    if (detail == null) return "Signup failed. Please try again.";
+    if (detail.contains("Username already exists"))
+      return "This username is already taken. Please choose another.";
+    if (detail.contains("email already exists"))
+      return "This email is already registered. Try logging in or use another email.";
+    if (detail.toLowerCase().contains("weak password"))
+      return "Password is too weak. Please choose a stronger password.";
+    return detail;
+  }
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
 
   // Helper: Map backend login errors to user-friendly messages
   static String _mapLoginError(String? detail) {
@@ -374,6 +403,7 @@ class ApiService {
   }
 
   // --------------------------
+<<<<<<< HEAD
   // ✅ Rotate Episode If Due (15+ days)
   // --------------------------
   static Future<bool> rotateIfDue() async {
@@ -394,6 +424,8 @@ class ApiService {
   }
 
   // --------------------------
+=======
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
   // ✅ Get All Progress Entries
   // --------------------------
   static Future<List<dynamic>?> getProgressEntries() async {
@@ -508,7 +540,11 @@ class ApiService {
 
 
   static Future<dynamic> requestReset(String emailOrPhone) async {
+<<<<<<< HEAD
   final url = Uri.parse('https://paras-backend-0gwt.onrender.com/auth/request-reset');
+=======
+    final url = Uri.parse('https://tooth-care-app.onrender.com/auth/request-reset');
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
     final Map<String, dynamic> body = {};
     if (emailOrPhone.contains('@')) {
       body['email'] = emailOrPhone;
@@ -542,3 +578,10 @@ class ApiService {
   }
 
 }
+<<<<<<< HEAD
+=======
+
+
+
+// Add this inside your ApiService class
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec

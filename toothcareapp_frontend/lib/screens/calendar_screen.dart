@@ -31,6 +31,57 @@ class CalendarScreen extends StatelessWidget {
               padding: const EdgeInsets.symmetric(vertical: 20.0, horizontal: 8.0),
               child: Column(
                 children: [
+<<<<<<< HEAD
+=======
+                  // Recovery Dashboard Card (added feature)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 18),
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2196F3),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Expanded(
+                              child: Text(
+                                'Recovery Dashboard',
+                                style: TextStyle(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                            const Icon(Icons.favorite_border, color: Colors.white),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Day $dayOfRecovery of recovery',
+                          style: const TextStyle(
+                              fontSize: 16, color: Colors.white),
+                        ),
+                        const SizedBox(height: 12),
+                        LinearProgressIndicator(
+                          value: (dayOfRecovery / totalRecoveryDays).clamp(0, 1),
+                          backgroundColor: Colors.white24,
+                          color: Colors.white,
+                          minHeight: 5,
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Recovery Progress: $progressPercent%',
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 14),
+                        ),
+                      ],
+                    ),
+                  ),
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
 
                   // Blue header card
                   Container(
@@ -224,6 +275,7 @@ class CalendarScreen extends StatelessWidget {
   }
 
   static Widget _buildCalendarGrid(DateTime procedureDate) {
+<<<<<<< HEAD
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final proc = DateTime(procedureDate.year, procedureDate.month, procedureDate.day);
@@ -234,11 +286,21 @@ class CalendarScreen extends StatelessWidget {
     List<Widget> rows = [];
     List<Widget> week = [];
     final weekdayOfFirst = firstDayOfMonth.weekday;
+=======
+    DateTime now = DateTime.now();
+    DateTime firstDayOfMonth = DateTime(now.year, now.month, 1);
+    int daysInMonth = DateTime(now.year, now.month + 1, 0).day;
+
+    List<Widget> rows = [];
+    List<Widget> week = [];
+    int weekdayOfFirst = firstDayOfMonth.weekday;
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
     for (int i = 1; i < weekdayOfFirst; i++) {
       week.add(Container(width: 36, height: 36));
     }
 
     for (int d = 1; d <= daysInMonth; d++) {
+<<<<<<< HEAD
       final date = DateTime(now.year, now.month, d);
       final dateOnly = DateTime(date.year, date.month, date.day);
 
@@ -255,6 +317,21 @@ class CalendarScreen extends StatelessWidget {
         dotColor = const Color(0xFFB5E0D3); // Completed since procedure
       }
 
+=======
+      DateTime date = DateTime(now.year, now.month, d);
+      Color? dotColor;
+      if (date.year == procedureDate.year &&
+          date.month == procedureDate.month &&
+          date.day == procedureDate.day) {
+        dotColor = const Color(0xFFFFE0E6); // Procedure
+      } else if (date.isBefore(now)) {
+        dotColor = const Color(0xFFB5E0D3); // Completed
+      } else if (date.day == now.day) {
+        dotColor = const Color(0xFF2196F3); // Today
+      }
+      // Special styling for today
+      bool isToday = date.day == now.day && date.month == now.month && date.year == now.year;
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
       week.add(
         Padding(
           padding: const EdgeInsets.all(2.0),
@@ -262,7 +339,13 @@ class CalendarScreen extends StatelessWidget {
             decoration: BoxDecoration(
               color: dotColor ?? const Color(0xFFF5F6FA),
               borderRadius: BorderRadius.circular(8),
+<<<<<<< HEAD
               border: isToday ? Border.all(color: const Color(0xFF2196F3), width: 2) : null,
+=======
+              border: isToday
+                  ? Border.all(color: const Color(0xFF2196F3), width: 2)
+                  : null,
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
             ),
             width: 36,
             height: 36,
@@ -270,8 +353,14 @@ class CalendarScreen extends StatelessWidget {
               child: Text(
                 '$d',
                 style: TextStyle(
+<<<<<<< HEAD
                   // Ensure visibility when today's cell has blue background
                   color: isToday ? Colors.white : (dotColor != null ? Colors.black : Colors.grey[700]),
+=======
+                  color: isToday
+                      ? const Color(0xFF2196F3)
+                      : (dotColor != null ? Colors.black : Colors.grey[700]),
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -279,6 +368,7 @@ class CalendarScreen extends StatelessWidget {
           ),
         ),
       );
+<<<<<<< HEAD
 
       if (week.length == 7) {
         rows.add(Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: week));
@@ -289,6 +379,22 @@ class CalendarScreen extends StatelessWidget {
     if (week.isNotEmpty) {
       while (week.length < 7) week.add(Container(width: 36, height: 36));
       rows.add(Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: week));
+=======
+      if ((week.length) == 7) {
+        rows.add(Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: week
+        ));
+        week = [];
+      }
+    }
+    if (week.isNotEmpty) {
+      while (week.length < 7) week.add(Container(width: 36, height: 36));
+      rows.add(Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: week,
+      ));
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
     }
 
     return Column(
@@ -296,7 +402,14 @@ class CalendarScreen extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+<<<<<<< HEAD
               .map((e) => Expanded(child: Center(child: Text(e, style: const TextStyle(fontWeight: FontWeight.w600)))))
+=======
+              .map((e) => Expanded(
+              child: Center(
+                child: Text(e, style: const TextStyle(fontWeight: FontWeight.w600)),
+              )))
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
               .toList(),
         ),
         const SizedBox(height: 4),

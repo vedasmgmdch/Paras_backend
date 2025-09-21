@@ -23,9 +23,13 @@ class _TreatmentHistoryScreenState extends State<TreatmentHistoryScreen> {
     final subtype = (t['treatment_subtype'] ?? t['subtype'] ?? '').toString().trim();
     final dateStr = (t['procedure_date'] ?? '').toString().trim();
     final time = (t['procedure_time'] ?? '').toString().trim();
+<<<<<<< HEAD
     // Handle possible variations: true/false, 'true'/'false', 1/0
     final rawLocked = t['locked'];
     final isLocked = rawLocked == true || rawLocked == 1 || (rawLocked is String && rawLocked.toString().toLowerCase() == 'true');
+=======
+    final completed = t['procedure_completed'] == true;
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
 
     // Defensive fallback UI
     final displayTreatment = treatment.isNotEmpty ? treatment : "No Treatment";
@@ -33,9 +37,28 @@ class _TreatmentHistoryScreenState extends State<TreatmentHistoryScreen> {
     final displayDate = dateStr.isNotEmpty ? dateStr : "-";
     final displayTime = time.isNotEmpty ? time : "-";
 
+<<<<<<< HEAD
     // Backend contract: locked=true indicates a past (completed) episode.
     // Use locked for card labeling to stay consistent with grouping below.
     final actuallyCompleted = isLocked;
+=======
+    // Parse procedure_date
+    DateTime? procedureDate;
+    if (dateStr.isNotEmpty) {
+      procedureDate = DateTime.tryParse(dateStr);
+    }
+
+    // Calculate if healing period is over (14 days)
+    bool isHealingOver = false;
+    if (procedureDate != null) {
+      final healingEnd = procedureDate.add(const Duration(days: 14));
+      if (DateTime.now().isAfter(healingEnd)) {
+        isHealingOver = true;
+      }
+    }
+
+    final actuallyCompleted = completed || isHealingOver;
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
@@ -52,7 +75,11 @@ class _TreatmentHistoryScreenState extends State<TreatmentHistoryScreen> {
         subtitle: Text("Date: $displayDate\nTime: $displayTime"),
         trailing: actuallyCompleted
             ? const Text("Completed", style: TextStyle(color: Colors.green))
+<<<<<<< HEAD
             : const Text("Current", style: TextStyle(color: Colors.orange)),
+=======
+            : const Text("Ongoing", style: TextStyle(color: Colors.orange)),
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
         onTap: () {
           // Optionally: navigate to treatment instructions or details
         },
@@ -67,6 +94,7 @@ class _TreatmentHistoryScreenState extends State<TreatmentHistoryScreen> {
         title: const Text("Treatment History"),
         backgroundColor: Colors.blue,
         elevation: 2,
+<<<<<<< HEAD
         actions: [
           IconButton(
             tooltip: 'Refresh',
@@ -92,6 +120,8 @@ class _TreatmentHistoryScreenState extends State<TreatmentHistoryScreen> {
             },
           ),
         ],
+=======
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
       ),
       body: FutureBuilder<List<dynamic>?>(
         future: _historyFuture,
@@ -132,6 +162,7 @@ class _TreatmentHistoryScreenState extends State<TreatmentHistoryScreen> {
               ],
             );
           }
+<<<<<<< HEAD
           // Separate current vs completed using backend's locked flag.
           bool isLocked(dynamic t) {
             final m = t as Map;
@@ -150,6 +181,15 @@ class _TreatmentHistoryScreenState extends State<TreatmentHistoryScreen> {
           }
           ongoingTreatments.sort((a, b) => parseDate(b).compareTo(parseDate(a)));
           completedTreatments.sort((a, b) => parseDate(b).compareTo(parseDate(a)));
+=======
+          // Separate ongoing and completed treatments for sectioned display
+          final ongoingTreatments = treatments.where((t) =>
+          (t['procedure_completed'] == false || t['procedure_completed'] == null)
+          ).toList();
+          final completedTreatments = treatments.where((t) =>
+          t['procedure_completed'] == true
+          ).toList();
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
 
           return ListView(
             children: [
@@ -186,6 +226,7 @@ class _TreatmentHistoryScreenState extends State<TreatmentHistoryScreen> {
         },
       ),
       floatingActionButton: FloatingActionButton.extended(
+<<<<<<< HEAD
         onPressed: () async {
           // Mark current treatment as complete before starting new one
           final success = await ApiService.markEpisodeComplete();
@@ -195,6 +236,9 @@ class _TreatmentHistoryScreenState extends State<TreatmentHistoryScreen> {
             );
             return;
           }
+=======
+        onPressed: () {
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
           Navigator.of(context).pop();
         },
         icon: const Icon(Icons.add),

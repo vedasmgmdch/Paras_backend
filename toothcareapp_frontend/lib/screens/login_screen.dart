@@ -29,8 +29,12 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _persistLoginToken(String username, String token) async {
     final prefs = await SharedPreferences.getInstance();
+<<<<<<< HEAD
     // Store under the same key ApiService uses
     await prefs.setString('token', token);
+=======
+    await prefs.setString('user_token', token);
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
     await prefs.setString('username', username);
   }
 
@@ -46,7 +50,11 @@ class _LoginScreenState extends State<LoginScreen> {
     final appState = Provider.of<AppState>(context, listen: false);
     final result = await ApiService.login(_username, _password);
 
+<<<<<<< HEAD
     if (result != null) {
+=======
+    if (result != null && result is String) {
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
       setState(() {
         _error = result;
         _loading = false;
@@ -63,9 +71,13 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
+<<<<<<< HEAD
     // Persist and sync token immediately so the rest of the app sees it
     await _persistLoginToken(_username, token);
     await appState.setToken(token);
+=======
+    await _persistLoginToken(_username, token);
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
 
     final userDetails = await ApiService.getUserDetails();
     if (userDetails != null) {
@@ -74,7 +86,11 @@ class _LoginScreenState extends State<LoginScreen> {
           fullName: userDetails['name'] ?? '',
           dob: DateTime.tryParse(userDetails['dob'] ?? '') ?? DateTime.now(),
           gender: userDetails['gender'] ?? '',
+<<<<<<< HEAD
           username: (userDetails['username'] ?? _username).toString(),
+=======
+          username: userDetails['username'] ?? '',
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
           password: _password,
           phone: userDetails['phone'] ?? '',
           email: userDetails['email'] ?? '',
@@ -296,6 +312,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
                         ElevatedButton(
+<<<<<<< HEAD
                           onPressed: _loading ? null : _handleLogin,
                           child: _loading
                               ? const SizedBox(
@@ -307,6 +324,10 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ),
                                 )
                               : const Text("Login"),
+=======
+                          onPressed: _handleLogin,
+                          child: const Text("Login"),
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
                         ),
                         const SizedBox(width: 16),
                         TextButton(

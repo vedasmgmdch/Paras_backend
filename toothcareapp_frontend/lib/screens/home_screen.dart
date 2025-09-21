@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../app_state.dart';
 import 'calendar_screen.dart';
+<<<<<<< HEAD
 import 'reminders_screen.dart';
+=======
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
 import 'tto_instructions_screen.dart';
 import 'pfd_instructions_screen.dart';
 import 'prd_instructions_screen.dart';
@@ -19,9 +22,15 @@ import 'progress_screen.dart';
 import 'profile_screen.dart';
 import 'category_screen.dart';
 import 'treatment_screen.dart';
+<<<<<<< HEAD
 import 'package:flutter/services.dart';
 import 'treatment_history_screen.dart';
 // Removed debug/test imports
+=======
+import 'package:url_launcher/url_launcher.dart';
+import 'treatment_history_screen.dart';
+import '../auth_callbacks.dart'; // <-- ADD THIS IMPORT
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -362,7 +371,20 @@ class HomeMainContent extends StatelessWidget {
       );
     }
 
+<<<<<<< HEAD
   // final today = DateTime.now();
+=======
+    final today = DateTime.now();
+    final int totalRecoveryDays = 14;
+    final actualProcedureDate = procedureDate ?? today;
+    final int dayOfRecovery = today
+        .difference(DateTime(actualProcedureDate.year,
+        actualProcedureDate.month, actualProcedureDate.day))
+        .inDays +
+        1;
+    final int progressPercent =
+    ((dayOfRecovery / totalRecoveryDays) * 100).clamp(0, 100).toInt();
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
 
     final activities = [
       {
@@ -487,6 +509,7 @@ class HomeMainContent extends StatelessWidget {
                       ],
                     ),
                   ),
+<<<<<<< HEAD
                 // Recovery Dashboard (blue theme to match Progress screen)
                 Container(
                   margin: const EdgeInsets.symmetric(vertical: 8),
@@ -494,6 +517,13 @@ class HomeMainContent extends StatelessWidget {
                   width: double.infinity,
                   decoration: BoxDecoration(
                     color: const Color(0xFF1E88E5),
+=======
+                Container(
+                  margin: const EdgeInsets.only(top: 16, bottom: 16),
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2196F3),
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Column(
@@ -511,6 +541,7 @@ class HomeMainContent extends StatelessWidget {
                               ),
                             ),
                           ),
+<<<<<<< HEAD
                           Chip(
                             label: Text(
                               appState.procedureCompleted == true
@@ -638,6 +669,29 @@ class HomeMainContent extends StatelessWidget {
                             },
                           ),
                         ],
+=======
+                          const Icon(Icons.favorite_border, color: Colors.white),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Day $dayOfRecovery of recovery',
+                        style: const TextStyle(
+                            fontSize: 16, color: Colors.white),
+                      ),
+                      const SizedBox(height: 12),
+                      LinearProgressIndicator(
+                        value: (dayOfRecovery / totalRecoveryDays).clamp(0, 1),
+                        backgroundColor: Colors.white24,
+                        color: Colors.white,
+                        minHeight: 5,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Recovery Progress: $progressPercent%',
+                        style: const TextStyle(
+                            color: Colors.white, fontSize: 14),
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
                       ),
                     ],
                   ),
@@ -649,6 +703,57 @@ class HomeMainContent extends StatelessWidget {
                       borderRadius: BorderRadius.circular(16)),
                   child: Padding(
                     padding: const EdgeInsets.all(18.0),
+<<<<<<< HEAD
+=======
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.calendar_today,
+                                color: Color(0xFF2196F3)),
+                            const SizedBox(width: 10),
+                            const Text(
+                              'Recovery Progress',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold, fontSize: 20),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+                        _buildCalendarGrid(actualProcedureDate, dayOfRecovery,
+                            totalRecoveryDays),
+                        const SizedBox(height: 12),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            _buildLegendDot(const Color(0xFFFFE0E6)),
+                            const SizedBox(width: 4),
+                            const Text('Procedure',
+                                style: TextStyle(fontSize: 14)),
+                            const SizedBox(width: 16),
+                            _buildLegendDot(const Color(0xFFB5E0D3)),
+                            const SizedBox(width: 4),
+                            const Text('Completed',
+                                style: TextStyle(fontSize: 14)),
+                            const SizedBox(width: 16),
+                            _buildLegendDot(const Color(0xFF2196F3)),
+                            const SizedBox(width: 4),
+                            const Text('Today', style: TextStyle(fontSize: 14)),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Card(
+                  margin: const EdgeInsets.symmetric(vertical: 8),
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(18.0),
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -666,6 +771,7 @@ class HomeMainContent extends StatelessWidget {
                                           fontSize: 20)),
                                   const Spacer(),
                                   GestureDetector(
+<<<<<<< HEAD
                                     onTap: () {
                                       Navigator.of(context).push(
                                         MaterialPageRoute(
@@ -673,6 +779,9 @@ class HomeMainContent extends StatelessWidget {
                                         ),
                                       );
                                     },
+=======
+                                    onTap: () {},
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
                                     child: const Text(
                                       '+ Add',
                                       style: TextStyle(
@@ -727,6 +836,7 @@ class HomeMainContent extends StatelessWidget {
                           children: activities.map((activity) {
                             return GestureDetector(
                               onTap: () {
+<<<<<<< HEAD
                                 String? url;
                                 if (activity['title'] == 'Gentle Brushing') {
                                   url = 'https://www.youtube.com/watch?v=mJ3t9w6h9rE';
@@ -737,6 +847,17 @@ class HomeMainContent extends StatelessWidget {
                                   Clipboard.setData(ClipboardData(text: url));
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(content: Text('Link copied to clipboard: $url')),
+=======
+                                if (activity['title'] == 'Gentle Brushing') {
+                                  launchUrl(
+                                    Uri.parse('https://www.youtube.com/watch?v=mJ3t9w6h9rE'),
+                                    mode: LaunchMode.externalApplication,
+                                  );
+                                } else if (activity['title'] == 'Soft Foods') {
+                                  launchUrl(
+                                    Uri.parse('https://www.youtube.com/watch?v=Oj3BGyGW2Tw'),
+                                    mode: LaunchMode.externalApplication,
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
                                   );
                                 }
                               },
@@ -849,4 +970,97 @@ class HomeMainContent extends StatelessWidget {
       ),
     );
   }
+<<<<<<< HEAD
+=======
+  Widget _buildCalendarGrid(
+      DateTime procedureDate, int dayOfRecovery, int recoveryDays) {
+    DateTime now = DateTime.now();
+    DateTime firstDayOfMonth = DateTime(now.year, now.month, 1);
+    int daysInMonth = DateTime(now.year, now.month + 1, 0).day;
+
+    List<Widget> rows = [];
+    List<Widget> week = [];
+    int weekdayOfFirst = firstDayOfMonth.weekday;
+    for (int i = 1; i < weekdayOfFirst; i++) {
+      week.add(Container());
+    }
+
+    for (int d = 1; d <= daysInMonth; d++) {
+      DateTime date = DateTime(now.year, now.month, d);
+      Color? dotColor;
+      if (date.year == procedureDate.year &&
+          date.month == procedureDate.month &&
+          date.day == procedureDate.day) {
+        dotColor = const Color(0xFFFFE0E6); // Procedure
+      } else if (date.isBefore(now)) {
+        dotColor = const Color(0xFFB5E0D3); // Completed
+      } else if (date.day == now.day) {
+        dotColor = const Color(0xFF2196F3); // Today
+      }
+      week.add(
+        Padding(
+          padding: const EdgeInsets.all(4.0),
+          child: Container(
+            decoration: BoxDecoration(
+              color: dotColor ?? const Color(0xFFF5F6FA),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            width: 32,
+            height: 32,
+            child: Center(
+              child: Text(
+                '$d',
+                style: TextStyle(
+                    color: (dotColor != null &&
+                        dotColor != const Color(0xFFF5F6FA))
+                        ? Colors.black
+                        : Colors.grey[700],
+                    fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+        ),
+      );
+      if ((week.length) == 7) {
+        rows.add(Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: week));
+        week = [];
+      }
+    }
+    if (week.isNotEmpty) {
+      while (week.length < 7) week.add(Container());
+      rows.add(Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: week));
+    }
+
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+              .map((e) => Expanded(
+              child: Center(
+                child: Text(e,
+                    style: const TextStyle(fontWeight: FontWeight.w600)),
+              )))
+              .toList(),
+        ),
+        const SizedBox(height: 4),
+        ...rows,
+      ],
+    );
+  }
+
+  Widget _buildLegendDot(Color color) {
+    return Container(
+      width: 14,
+      height: 14,
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+    );
+  }
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
 }

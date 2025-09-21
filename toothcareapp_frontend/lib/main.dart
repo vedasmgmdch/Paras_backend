@@ -3,23 +3,31 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'app_state.dart';
 import 'services/api_service.dart';
+<<<<<<< HEAD
 import 'services/notification_service.dart';
 import 'services/reminder_store.dart';
 import 'services/push_service.dart';
+=======
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
 import 'screens/welcome_screen.dart';
 import 'screens/category_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/treatment_screen.dart';
 import 'screens/pfd_instructions_screen.dart';
 import 'screens/prd_instructions_screen.dart';
+<<<<<<< HEAD
 // ignore_for_file: avoid_print
 import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
+=======
+import 'auth_callbacks.dart';
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
 
 // Add RouteObserver for navigation events (must be after all imports)
 final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<void>>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+<<<<<<< HEAD
   // Initialize AlarmManager so alarms can fire when app is killed
   try {
     await AndroidAlarmManager.initialize();
@@ -46,6 +54,8 @@ void main() async {
       }
     }
   } catch (_) {}
+=======
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
 
   final appState = AppState();
   await appState.syncTokenFromPrefs();       // <-- Ensure token is loaded!
@@ -64,11 +74,14 @@ void main() async {
       child: const ToothCareGuideApp(),
     ),
   );
+<<<<<<< HEAD
 
   // Initialize push after app launch so SharedPreferences token is ready
   if (appState.token != null) {
     await PushService.initializeAndRegister();
   }
+=======
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
 }
 
 // Utility function to parse "HH:mm:ss" or "HH:mm" string to TimeOfDay
@@ -333,11 +346,14 @@ class _AppEntryGateState extends State<AppEntryGate> {
           if (token != null) {
             appState.setToken(token);
           }
+<<<<<<< HEAD
 
           // Register push token as soon as logged in
           if (appState.token != null) {
             await PushService.initializeAndRegister();
           }
+=======
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
           appState.setUserDetails(
             fullName: name,
             dob: DateTime.parse(dob),
@@ -369,7 +385,10 @@ class _AppEntryGateState extends State<AppEntryGate> {
               content: Text(error),
             ),
           );
+<<<<<<< HEAD
           return error; // satisfy Future<String?>
+=======
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
         } else {
           final appState = Provider.of<AppState>(context, listen: false);
           // --- Ensure token is stored after login ---
@@ -448,7 +467,10 @@ class _AppEntryGateState extends State<AppEntryGate> {
               );
             }
           });
+<<<<<<< HEAD
           return null; // Ensure Future<String?> completes
+=======
+>>>>>>> dee5a0178bd2fcc3468c62fa4f2e7372c5fc83ec
         }
       },
     );
