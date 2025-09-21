@@ -34,6 +34,7 @@ class Patient(Base):
     instruction_statuses = relationship("InstructionStatus", back_populates="patient", cascade="all, delete-orphan")
     episodes = relationship("TreatmentEpisode", back_populates="patient", cascade="all, delete-orphan")
     device_tokens = relationship("DeviceToken", back_populates="patient", cascade="all, delete-orphan")
+    scheduled_pushes = relationship("ScheduledPush", back_populates="patient", cascade="all, delete-orphan")
 
     def set_password(self, raw_password):
         self.password = pwd_context.hash(raw_password)
@@ -133,3 +134,15 @@ class InstructionStatus(Base):
     instruction_text = Column(String, nullable=False)
     followed = Column(Boolean, default=False)
     patient = relationship("Patient", back_populates="instruction_statuses")
+
+class ScheduledPush(Base):
+    __tablename__ = "scheduled_pushes"
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, index=True)
+    title = Column(String, nullable=False)
+    body = Column(String, nullable=False)
+    send_at = Column(DateTime, nullable=False, index=True)  # stored as UTC
+    sent = Column(Boolean, default=False, nullable=False)
+    sent_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    patient = relationship("Patient", back_populates="scheduled_pushes")

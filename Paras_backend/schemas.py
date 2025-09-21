@@ -213,3 +213,19 @@ class DeviceTokenResponse(BaseModel):
 class PushTestRequest(BaseModel):
     title: str
     body: str
+
+class ScheduledPushCreate(BaseModel):
+    title: str
+    body: str
+    send_at: datetime  # ISO8601; expected UTC or with timezone
+
+class ScheduledPushResponse(BaseModel):
+    id: int
+    patient_id: int
+    title: str
+    body: str
+    send_at: datetime
+    sent: bool
+    sent_at: Optional[datetime] = None
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)

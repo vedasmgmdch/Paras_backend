@@ -18,6 +18,8 @@ import schemas
 from database import engine
 
 from utils import send_registration_email, send_fcm_notification
+import os
+from fastapi import Request
 from routes import auth
 
 app = FastAPI()
@@ -381,6 +383,54 @@ async def rotate_if_due_endpoint(db: AsyncSession = Depends(get_db), current_use
 # ---------------------------
 # Push notifications endpoints
 # ---------------------------
+@app.post("/push/schedule", response_model=schemas.ScheduledPushResponse)
+async def schedule_push(payload: schemas.ScheduledPushCreate, db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
+    row = models.ScheduledPush(
+        patient_id=current_user.id,
+        title=payload.title,
+        body=payload.body,
+        send_at=payload.send_at,
+        sent=False,
+        created_at=datetime.utcnow(),
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+@app.get("/push/scheduled", response_model=list[schemas.ScheduledPushResponse])
+async def list_scheduled_pushes(db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
+    res = await db.execute(select(models.ScheduledPush).where(models.ScheduledPush.patient_id == current_user.id).order_by(models.ScheduledPush.send_at.asc()))
+    return res.scalars().all()
+
+@app.post("/push/dispatch-due")
+async def dispatch_due_pushes(request: Request, db: AsyncSession = Depends(get_db)):
+    cron_secret = os.getenv("CRON_SECRET")
+    key = request.headers.get("X-CRON-KEY")
+    if not cron_secret or key != cron_secret:
+        raise HTTPException(status_code=403, detail="Invalid cron key")
+    now = datetime.utcnow()
+    res = await db.execute(
+        select(models.ScheduledPush)
+        .where(models.ScheduledPush.sent == False)
+        .where(models.ScheduledPush.send_at <= now)
+    )
+    pushes = res.scalars().all()
+    sent = 0
+    for push in pushes:
+        # Get all device tokens for patient
+        token_res = await db.execute(select(models.DeviceToken.token).where(models.DeviceToken.patient_id == push.patient_id))
+        tokens = [row[0] for row in token_res.all()]
+        for t in tokens:
+            ok = send_fcm_notification(t, getattr(push, "title"), getattr(push, "body"))
+            if ok:
+                sent += 1
+        setattr(push, "sent", True)
+        setattr(push, "sent_at", datetime.utcnow())
+        db.add(push)
+    if pushes:
+        await db.commit()
+    return {"sent": sent, "dispatched": len(pushes)}
 @app.post("/push/register-device", response_model=schemas.DeviceTokenResponse)
 async def register_device(payload: schemas.DeviceRegisterRequest, db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
     # Upsert by unique token; if token exists, reassign to current user and update platform
