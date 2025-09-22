@@ -535,14 +535,40 @@ async def dispatch_due_pushes(request: Request, db: AsyncSession = Depends(get_d
         or request.query_params.get("cron_key")
         or request.query_params.get("key")
     )
+    form_obj = None
     if not provided_key:
         try:
-            form = await request.form()
-            provided_key = form.get("cron_key") if form else None
+            form_obj = await request.form()
+            provided_key = form_obj.get("cron_key") if form_obj else None
         except Exception:
             provided_key = None
     if not cron_secret or provided_key != cron_secret:
         raise HTTPException(status_code=403, detail="Invalid cron key")
+    # Determine dry-run mode
+    def _truthy(v: Optional[str]) -> bool:
+        return str(v).lower() in {"1", "true", "yes", "on"}
+    dry_run = _truthy(request.query_params.get("dry_run"))
+    if not dry_run:
+        if form_obj is None:
+            try:
+                form_obj = await request.form()
+            except Exception:
+                form_obj = None
+        if form_obj:
+            dv = form_obj.get("dry_run")
+            if dv is not None:
+                dry_run = _truthy(dv if isinstance(dv, str) else str(dv))
+    # Optional limit of pushes per call
+    def _as_int(v: Optional[str], default: int) -> int:
+        try:
+            return int(str(v))
+        except Exception:
+            return default
+    limit = _as_int(request.query_params.get("limit"), default=50)
+    if form_obj and not request.query_params.get("limit"):
+        lv = form_obj.get("limit")
+        if lv is not None:
+            limit = _as_int(lv if isinstance(lv, str) else str(lv), default=50)
     now = datetime.utcnow()
     res = await db.execute(
         select(models.ScheduledPush)
@@ -550,6 +576,11 @@ async def dispatch_due_pushes(request: Request, db: AsyncSession = Depends(get_d
         .where(models.ScheduledPush.send_at <= now)
     )
     pushes = res.scalars().all()
+    if limit and len(pushes) > limit:
+        pushes = pushes[:limit]
+    # If dry-run, return quickly without sending
+    if dry_run:
+        return {"sent": 0, "dispatched": len(pushes), "mode": "dry_run"}
     sent = 0
     for push in pushes:
         # Get all device tokens for patient

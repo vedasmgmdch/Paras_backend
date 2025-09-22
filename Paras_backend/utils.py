@@ -31,6 +31,7 @@ def send_mailgun_email(to_email, subject, body):
 import os
 EMAIL_MODE = os.getenv("EMAIL_MODE", "smtp")
 print(f"[DEBUG] EMAIL_MODE at startup: {EMAIL_MODE}")
+FCM_HTTP_TIMEOUT = float(os.getenv("FCM_HTTP_TIMEOUT", "5"))
 
 from passlib.context import CryptContext
 from jose import jwt
@@ -192,7 +193,7 @@ def _send_fcm_v1(token: str, title: str, body: str, data: dict | None, sa_info: 
             "data": data or {},
         }
     }
-    resp = requests.post(url, data=json.dumps(payload), headers=headers, timeout=10)
+    resp = requests.post(url, data=json.dumps(payload), headers=headers, timeout=FCM_HTTP_TIMEOUT)
     if resp.status_code in (200, 202):
         return True
     print(f"FCM v1 send failed {resp.status_code}: {resp.text}")
@@ -210,7 +211,7 @@ def _send_fcm_legacy(token: str, title: str, body: str, data: dict | None, serve
         "data": data or {},
         "priority": "high",
     }
-    resp = requests.post(url, json=payload, headers=headers, timeout=10)
+    resp = requests.post(url, json=payload, headers=headers, timeout=FCM_HTTP_TIMEOUT)
     if resp.status_code == 200:
         return True
     print(f"FCM legacy send failed {resp.status_code}: {resp.text}")
