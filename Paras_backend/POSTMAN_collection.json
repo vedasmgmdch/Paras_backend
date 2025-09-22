@@ -1,0 +1,67 @@
+{
+  "info": {
+    "name": "MGM Backend Simple Tests",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Login (get token)",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{BASE_URL}}/login",
+          "host": ["{{BASE_URL}}"],
+          "path": ["login"]
+        },
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            {"key": "username", "value": "{{USERNAME}}"},
+            {"key": "password", "value": "{{PASSWORD}}"}
+          ]
+        }
+      }
+    },
+    {
+      "name": "Push: Ping (no body)",
+      "request": {
+        "method": "POST",
+        "header": [{"key":"X-Auth-Token","value":"{{TOKEN}}"}],
+        "url": {"raw": "{{BASE_URL}}/push/ping","host":["{{BASE_URL}}"],"path":["push","ping"]}
+      }
+    },
+    {
+      "name": "Push: Now",
+      "request": {
+        "method": "POST",
+        "header": [{"key":"X-Auth-Token","value":"{{TOKEN}}"}],
+        "url": {"raw": "{{BASE_URL}}/push/now","host":["{{BASE_URL}}"],"path":["push","now"]},
+        "body": {"mode": "raw", "raw": "{\n  \"title\": \"Ping\",\n  \"body\": \"It works!\"\n}"}
+      }
+    },
+    {
+      "name": "Push: Schedule & Dispatch",
+      "request": {
+        "method": "POST",
+        "header": [{"key":"X-Auth-Token","value":"{{TOKEN}}"}],
+        "url": {"raw": "{{BASE_URL}}/push/schedule-and-dispatch","host":["{{BASE_URL}}"],"path":["push","schedule-and-dispatch"]},
+        "body": {"mode": "raw", "raw": "{\n  \"title\": \"Test\",\n  \"body\": \"Hello\",\n  \"send_at\": \"2025-09-23T09:00:00Z\",\n  \"force_now\": true\n}"}
+      }
+    },
+    {
+      "name": "Push: Dispatch Mine (dry-run)",
+      "request": {
+        "method": "POST",
+        "header": [{"key":"X-Auth-Token","value":"{{TOKEN}}"}],
+        "url": {"raw": "{{BASE_URL}}/push/dispatch-mine?dry_run=true&limit=5","host":["{{BASE_URL}}"],"path":["push","dispatch-mine"],"query":[{"key":"dry_run","value":"true"},{"key":"limit","value":"5"}]}
+      }
+    }
+  ],
+  "variable": [
+    {"key":"BASE_URL","value":"https://paras-backend-0gwt.onrender.com"},
+    {"key":"USERNAME","value":"demo"},
+    {"key":"PASSWORD","value":"demo"},
+    {"key":"TOKEN","value":"<paste access_token here>"}
+  ]
+}

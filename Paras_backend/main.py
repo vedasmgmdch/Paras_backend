@@ -725,7 +725,25 @@ async def list_my_devices(db: AsyncSession = Depends(get_db), current_user: mode
     return res.scalars().all()
 
 @app.post("/push/test")
-async def push_test(payload: schemas.PushTestRequest, db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
+async def push_test(
+    request: Request,
+    payload: Optional[schemas.PushTestRequest] = Body(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: models.Patient = Depends(get_current_user),
+):
+    if payload is None:
+        try:
+            form = await request.form()
+        except Exception:
+            form = None
+        if form:
+            title = form.get("title")
+            body = form.get("body")
+            if not (title and body):
+                raise HTTPException(status_code=422, detail="Field required: title, body")
+            payload = schemas.PushTestRequest(title=str(title), body=str(body))
+        else:
+            raise HTTPException(status_code=422, detail="Body required: JSON or form with title, body")
     res = await db.execute(select(models.DeviceToken.token).where(models.DeviceToken.patient_id == current_user.id))
     tokens = [row[0] for row in res.all()]
     if not tokens:
@@ -737,8 +755,27 @@ async def push_test(payload: schemas.PushTestRequest, db: AsyncSession = Depends
     return {"sent": sent, "total": len(tokens)}
 
 @app.post("/push/now")
-async def push_now(payload: schemas.PushTestRequest, db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
-    return await push_test(payload, db, current_user)
+async def push_now(
+    request: Request,
+    payload: Optional[schemas.PushTestRequest] = Body(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: models.Patient = Depends(get_current_user),
+):
+    return await push_test(request, payload, db, current_user)
+
+@app.post("/push/ping")
+async def push_ping(db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
+    res = await db.execute(select(models.DeviceToken.token).where(models.DeviceToken.patient_id == current_user.id))
+    tokens = [row[0] for row in res.all()]
+    if not tokens:
+        raise HTTPException(status_code=400, detail="No registered device tokens")
+    title = "Hello from MGM"
+    body = "This is a quick test push."
+    sent = 0
+    for t in tokens:
+        if send_fcm_notification(t, title, body):
+            sent += 1
+    return {"sent": sent, "total": len(tokens), "title": title, "body": body}
 
 # Simpler: Dispatch due pushes for the authenticated user (no cron key)
 @app.post("/push/dispatch-mine")
