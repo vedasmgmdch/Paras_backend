@@ -521,9 +521,27 @@ async def list_scheduled_pushes(db: AsyncSession = Depends(get_db), current_user
 
 @app.post("/push/dispatch-due")
 async def dispatch_due_pushes(request: Request, db: AsyncSession = Depends(get_db)):
+    """Dispatch all due scheduled pushes.
+    Auth: supply the cron secret in one of the following (first match wins):
+      - Header: X-CRON-KEY: <secret>
+      - Query param: ?cron_key=<secret> or ?key=<secret>
+      - Form body field (x-www-form-urlencoded or multipart): cron_key=<secret>
+    """
     cron_secret = os.getenv("CRON_SECRET")
-    key = request.headers.get("X-CRON-KEY")
-    if not cron_secret or key != cron_secret:
+    # Collect provided key from multiple sources to avoid header stripping
+    provided_key = (
+        request.headers.get("X-CRON-KEY")
+        or request.headers.get("x-cron-key")
+        or request.query_params.get("cron_key")
+        or request.query_params.get("key")
+    )
+    if not provided_key:
+        try:
+            form = await request.form()
+            provided_key = form.get("cron_key") if form else None
+        except Exception:
+            provided_key = None
+    if not cron_secret or provided_key != cron_secret:
         raise HTTPException(status_code=403, detail="Invalid cron key")
     now = datetime.utcnow()
     res = await db.execute(
