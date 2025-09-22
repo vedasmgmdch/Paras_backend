@@ -68,6 +68,22 @@ def _extract_bearer_from_request(request: Request) -> Optional[str]:
         parts = v.strip().split(" ", 1)
         if len(parts) == 2 and parts[0].lower() == "bearer" and parts[1]:
             return parts[1]
+    # Try common cookies
+    cookie_auth = request.cookies.get("Authorization") or request.cookies.get("authorization")
+    if cookie_auth:
+        parts = cookie_auth.strip().split(" ", 1)
+        if len(parts) == 2 and parts[0].lower() == "bearer" and parts[1]:
+            return parts[1]
+    # Try query params (?access_token=... or ?token=...)
+    qp = request.query_params
+    for key in ("access_token", "token"):
+        val = qp.get(key)
+        if val:
+            # Accept raw token or "Bearer <token>"
+            parts = val.strip().split(" ", 1)
+            if len(parts) == 2 and parts[0].lower() == "bearer" and parts[1]:
+                return parts[1]
+            return val
     return None
 
 async def get_bearer_token(request: Request) -> str:
@@ -81,6 +97,26 @@ async def get_bearer_token(request: Request) -> str:
             headers={"WWW-Authenticate": "Bearer"},
         )
     return token
+
+# Temporary debug endpoint to inspect how auth headers arrive in the deployment
+@app.get("/auth/debug")
+async def debug_auth(request: Request):
+    token = _extract_bearer_from_request(request)
+    candidate_headers = {
+        "authorization": request.headers.get("authorization"),
+        "Authorization": request.headers.get("Authorization"),
+        "x-authorization": request.headers.get("x-authorization"),
+        "X-Authorization": request.headers.get("X-Authorization"),
+        "x-forwarded-authorization": request.headers.get("x-forwarded-authorization"),
+        "X-Forwarded-Authorization": request.headers.get("X-Forwarded-Authorization"),
+    }
+    return {
+        "seen_headers": candidate_headers,
+        "has_token": bool(token),
+        "token_preview": (token[:12] + "..." + token[-6:]) if token and len(token) > 24 else token,
+        "from_cookie": bool(request.cookies.get("Authorization") or request.cookies.get("authorization")),
+        "query_params": {k: request.query_params.get(k) for k in ["access_token", "token"]},
+    }
 
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
