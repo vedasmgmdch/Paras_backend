@@ -57,6 +57,8 @@ def _extract_bearer_from_request(request: Request) -> Optional[str]:
         "Authorization",
         "x-authorization",
         "X-Authorization",
+        "x-auth-token",
+        "X-Auth-Token",
         "x-forwarded-authorization",
         "X-Forwarded-Authorization",
     ]
@@ -64,7 +66,14 @@ def _extract_bearer_from_request(request: Request) -> Optional[str]:
         v = request.headers.get(h)
         if not v:
             continue
-        # Expect format: "Bearer <token>"
+        # For X-Auth-Token allow either raw token or "Bearer <token>"
+        if h.lower() == "x-auth-token":
+            parts = v.strip().split(" ", 1)
+            if len(parts) == 2 and parts[0].lower() == "bearer" and parts[1]:
+                return parts[1]
+            # treat the whole value as the token when no Bearer prefix
+            return v.strip()
+        # Other headers must be in the form "Bearer <token>"
         parts = v.strip().split(" ", 1)
         if len(parts) == 2 and parts[0].lower() == "bearer" and parts[1]:
             return parts[1]
@@ -107,6 +116,8 @@ async def debug_auth(request: Request):
         "Authorization": request.headers.get("Authorization"),
         "x-authorization": request.headers.get("x-authorization"),
         "X-Authorization": request.headers.get("X-Authorization"),
+    "x-auth-token": request.headers.get("x-auth-token"),
+    "X-Auth-Token": request.headers.get("X-Auth-Token"),
         "x-forwarded-authorization": request.headers.get("x-forwarded-authorization"),
         "X-Forwarded-Authorization": request.headers.get("X-Forwarded-Authorization"),
     }
