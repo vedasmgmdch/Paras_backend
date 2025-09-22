@@ -514,6 +514,88 @@ async def schedule_push(
     await db.refresh(row)
     return row
 
+@app.post("/push/schedule-and-dispatch")
+async def schedule_and_optionally_dispatch(
+    request: Request,
+    payload: Optional[schemas.ScheduledPushCreate] = Body(None),
+    force_now: Optional[bool] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: models.Patient = Depends(get_current_user),
+):
+    # Allow force_now via query param or JSON/form
+    def _truthy(v: Optional[str | bool]) -> bool:
+        if isinstance(v, bool):
+            return v
+        return str(v).lower() in {"1", "true", "yes", "on"}
+    if force_now is None:
+        force_now = _truthy(request.query_params.get("force_now"))
+        if not force_now:
+            try:
+                data = await request.json()
+                if isinstance(data, dict) and "force_now" in data:
+                    force_now = _truthy(data["force_now"])  # type: ignore[index]
+            except Exception:
+                try:
+                    form = await request.form()
+                    if form and "force_now" in form:
+                        fv = form.get("force_now")
+                        force_now = _truthy(fv if isinstance(fv, str) else (str(fv) if fv is not None else None))
+                except Exception:
+                    pass
+
+    # Reuse schedule_push logic to accept JSON or form
+    if payload is None:
+        try:
+            form = await request.form()
+        except Exception:
+            form = None
+        if form:
+            title = form.get("title")
+            body = form.get("body")
+            send_at = form.get("send_at") or form.get("scheduled_time")
+            if not (title and body and send_at):
+                raise HTTPException(status_code=422, detail="Field required: title, body, send_at")
+            s = str(send_at)
+            if s.endswith("Z"):
+                s = s[:-1] + "+00:00"
+            try:
+                dt = datetime.fromisoformat(s)
+            except Exception:
+                raise HTTPException(status_code=422, detail="Invalid send_at datetime format. Use ISO8601")
+            payload = schemas.ScheduledPushCreate(title=str(title), body=str(body), send_at=dt)
+        else:
+            raise HTTPException(status_code=422, detail="Body required: JSON or form with title, body, send_at")
+
+    # Create the scheduled row
+    row = models.ScheduledPush(
+        patient_id=current_user.id,
+        title=payload.title,
+        body=payload.body,
+        send_at=payload.send_at,
+        sent=False,
+        created_at=datetime.utcnow(),
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+
+    # Dispatch immediately if due or forced
+    if force_now or payload.send_at <= datetime.utcnow():
+        token_res = await db.execute(select(models.DeviceToken.token).where(models.DeviceToken.patient_id == current_user.id))
+        tokens = [r[0] for r in token_res.all()]
+        sent = 0
+        for t in tokens:
+            if send_fcm_notification(t, getattr(row, "title"), getattr(row, "body")):
+                sent += 1
+        setattr(row, "sent", True)
+        setattr(row, "sent_at", datetime.utcnow())
+        db.add(row)
+        await db.commit()
+        await db.refresh(row)
+        return {"scheduled": row.id, "sent": sent, "dispatched": 1}
+
+    return {"scheduled": row.id, "sent": 0, "dispatched": 0}
+
 @app.get("/push/scheduled", response_model=list[schemas.ScheduledPushResponse])
 async def list_scheduled_pushes(db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
     res = await db.execute(select(models.ScheduledPush).where(models.ScheduledPush.patient_id == current_user.id).order_by(models.ScheduledPush.send_at.asc()))
@@ -536,14 +618,28 @@ async def dispatch_due_pushes(request: Request, db: AsyncSession = Depends(get_d
         or request.query_params.get("key")
     )
     form_obj = None
+    json_obj = None
     if not provided_key:
         try:
             form_obj = await request.form()
             provided_key = form_obj.get("cron_key") if form_obj else None
         except Exception:
             provided_key = None
+    if not provided_key:
+        try:
+            json_obj = await request.json()
+            if isinstance(json_obj, dict):
+                provided_key = json_obj.get("cron_key") or json_obj.get("key")
+        except Exception:
+            pass
     if not cron_secret or provided_key != cron_secret:
-        raise HTTPException(status_code=403, detail="Invalid cron key")
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid cron key",
+            headers={
+                "X-Usage-Hint": "Send cron key via header X-CRON-KEY, query ?cron_key=, or body {cron_key} (form or json)"
+            },
+        )
     # Determine dry-run mode
     def _truthy(v: Optional[str]) -> bool:
         return str(v).lower() in {"1", "true", "yes", "on"}
@@ -558,6 +654,10 @@ async def dispatch_due_pushes(request: Request, db: AsyncSession = Depends(get_d
             dv = form_obj.get("dry_run")
             if dv is not None:
                 dry_run = _truthy(dv if isinstance(dv, str) else str(dv))
+    if not dry_run and isinstance(json_obj, dict):
+        dv = json_obj.get("dry_run")
+        if dv is not None:
+            dry_run = _truthy(dv if isinstance(dv, str) else str(dv))
     # Optional limit of pushes per call
     def _as_int(v: Optional[str], default: int) -> int:
         try:
@@ -567,6 +667,10 @@ async def dispatch_due_pushes(request: Request, db: AsyncSession = Depends(get_d
     limit = _as_int(request.query_params.get("limit"), default=50)
     if form_obj and not request.query_params.get("limit"):
         lv = form_obj.get("limit")
+        if lv is not None:
+            limit = _as_int(lv if isinstance(lv, str) else str(lv), default=50)
+    if (not request.query_params.get("limit")) and isinstance(json_obj, dict):
+        lv = json_obj.get("limit")
         if lv is not None:
             limit = _as_int(lv if isinstance(lv, str) else str(lv), default=50)
     now = datetime.utcnow()
@@ -631,3 +735,53 @@ async def push_test(payload: schemas.PushTestRequest, db: AsyncSession = Depends
         if send_fcm_notification(t, payload.title, payload.body):
             sent += 1
     return {"sent": sent, "total": len(tokens)}
+
+@app.post("/push/now")
+async def push_now(payload: schemas.PushTestRequest, db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
+    return await push_test(payload, db, current_user)
+
+# Simpler: Dispatch due pushes for the authenticated user (no cron key)
+@app.post("/push/dispatch-mine")
+async def dispatch_my_due_pushes(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: models.Patient = Depends(get_current_user),
+):
+    def _truthy(v: Optional[str]) -> bool:
+        return str(v).lower() in {"1", "true", "yes", "on"}
+    dry_run = _truthy(request.query_params.get("dry_run"))
+    def _as_int(v: Optional[str], default: int) -> int:
+        try:
+            return int(str(v))
+        except Exception:
+            return default
+    limit = _as_int(request.query_params.get("limit"), default=20)
+
+    now = datetime.utcnow()
+    res = await db.execute(
+        select(models.ScheduledPush)
+        .where(models.ScheduledPush.patient_id == current_user.id)
+        .where(models.ScheduledPush.sent == False)
+        .where(models.ScheduledPush.send_at <= now)
+        .order_by(models.ScheduledPush.id.asc())
+    )
+    pushes = res.scalars().all()
+    if limit and len(pushes) > limit:
+        pushes = pushes[:limit]
+    if dry_run:
+        return {"sent": 0, "dispatched": len(pushes), "mode": "dry_run"}
+
+    sent = 0
+    for push in pushes:
+        token_res = await db.execute(select(models.DeviceToken.token).where(models.DeviceToken.patient_id == current_user.id))
+        tokens = [row[0] for row in token_res.all()]
+        for t in tokens:
+            ok = send_fcm_notification(t, getattr(push, "title"), getattr(push, "body"))
+            if ok:
+                sent += 1
+        setattr(push, "sent", True)
+        setattr(push, "sent_at", datetime.utcnow())
+        db.add(push)
+    if pushes:
+        await db.commit()
+    return {"sent": sent, "dispatched": len(pushes)}
