@@ -5,7 +5,7 @@ from typing import List, Optional
 import models
 from database import get_db
 
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 
@@ -47,6 +47,41 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 doctor_oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/doctor-login")
 
+# --- Auth helpers: tolerate proxies that move Authorization to X-Forwarded-Authorization ---
+def _extract_bearer_from_request(request: Request) -> Optional[str]:
+    """Return the bearer token from common auth headers.
+    Some proxies/CDNs forward Authorization as X-Forwarded-Authorization.
+    """
+    candidate_headers = [
+        "authorization",
+        "Authorization",
+        "x-authorization",
+        "X-Authorization",
+        "x-forwarded-authorization",
+        "X-Forwarded-Authorization",
+    ]
+    for h in candidate_headers:
+        v = request.headers.get(h)
+        if not v:
+            continue
+        # Expect format: "Bearer <token>"
+        parts = v.strip().split(" ", 1)
+        if len(parts) == 2 and parts[0].lower() == "bearer" and parts[1]:
+            return parts[1]
+    return None
+
+async def get_bearer_token(request: Request) -> str:
+    token = _extract_bearer_from_request(request)
+    if not token:
+        # Fall back to OAuth2PasswordBearer parsing (for docs/compat)
+        # If that also fails, raise 401
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return token
+
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 
@@ -59,7 +94,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)):
+async def get_current_user(token: str = Depends(get_bearer_token), db: AsyncSession = Depends(get_db)):
     cred_exc = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -79,7 +114,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession
         raise cred_exc
     return user
 
-async def get_current_doctor(token: str = Depends(doctor_oauth2_scheme), db: AsyncSession = Depends(get_db)):
+async def get_current_doctor(token: str = Depends(get_bearer_token), db: AsyncSession = Depends(get_db)):
     cred_exc = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials (doctor)",
@@ -384,7 +419,41 @@ async def rotate_if_due_endpoint(db: AsyncSession = Depends(get_db), current_use
 # Push notifications endpoints
 # ---------------------------
 @app.post("/push/schedule", response_model=schemas.ScheduledPushResponse)
-async def schedule_push(payload: schemas.ScheduledPushCreate, db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
+async def schedule_push(
+    request: Request,
+    payload: Optional[schemas.ScheduledPushCreate] = Body(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: models.Patient = Depends(get_current_user),
+):
+    # Accept JSON body (preferred) or form-encoded fallback
+    def _parse_iso_dt(s: str) -> datetime:
+        # Support trailing 'Z' by converting to +00:00
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        try:
+            return datetime.fromisoformat(s)
+        except Exception:
+            raise HTTPException(status_code=422, detail="Invalid send_at datetime format. Use ISO8601, e.g. 2025-09-22T15:30:00Z")
+
+    if payload is None:
+        try:
+            form = await request.form()
+        except Exception:
+            form = None
+        if form:
+            title = form.get("title")
+            body = form.get("body")
+            send_at_str = form.get("send_at") or form.get("scheduled_time")
+            if not (title and body and send_at_str):
+                raise HTTPException(status_code=422, detail="Field required: title, body, send_at")
+            # Convert potential UploadFile values to str explicitly
+            title_s = title if isinstance(title, str) else str(title)
+            body_s = body if isinstance(body, str) else str(body)
+            send_at_s = send_at_str if isinstance(send_at_str, str) else str(send_at_str)
+            payload = schemas.ScheduledPushCreate(title=title_s, body=body_s, send_at=_parse_iso_dt(send_at_s))
+        else:
+            raise HTTPException(status_code=422, detail="Body required: JSON or form with title, body, send_at")
+
     row = models.ScheduledPush(
         patient_id=current_user.id,
         title=payload.title,
@@ -425,6 +494,7 @@ async def dispatch_due_pushes(request: Request, db: AsyncSession = Depends(get_d
             ok = send_fcm_notification(t, getattr(push, "title"), getattr(push, "body"))
             if ok:
                 sent += 1
+
         setattr(push, "sent", True)
         setattr(push, "sent_at", datetime.utcnow())
         db.add(push)
