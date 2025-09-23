@@ -702,7 +702,36 @@ async def dispatch_due_pushes(request: Request, db: AsyncSession = Depends(get_d
         await db.commit()
     return {"sent": sent, "dispatched": len(pushes)}
 @app.post("/push/register-device", response_model=schemas.DeviceTokenResponse)
-async def register_device(payload: schemas.DeviceRegisterRequest, db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
+async def register_device(
+    request: Request,
+    payload: Optional[schemas.DeviceRegisterRequest] = Body(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: models.Patient = Depends(get_current_user),
+):
+    if payload is None:
+        # Try form first
+        form = None
+        try:
+            form = await request.form()
+        except Exception:
+            form = None
+        if form:
+            platform = form.get("platform")
+            token = form.get("token")
+            if not (platform and token):
+                # fall through to query/JSON error
+                pass
+            else:
+                payload = schemas.DeviceRegisterRequest(platform=str(platform), token=str(token))
+        if payload is None:
+            # Try query params as a last resort
+            qp = request.query_params
+            qplat = qp.get("platform")
+            qtok = qp.get("token")
+            if qplat and qtok:
+                payload = schemas.DeviceRegisterRequest(platform=qplat, token=qtok)
+        if payload is None:
+            raise HTTPException(status_code=422, detail="Body required: JSON or form with platform, token")
     # Upsert by unique token; if token exists, reassign to current user and update platform
     existing_q = await db.execute(select(models.DeviceToken).where(models.DeviceToken.token == payload.token))
     existing = existing_q.scalars().first()
