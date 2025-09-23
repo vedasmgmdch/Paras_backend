@@ -219,11 +219,24 @@ def _send_fcm_legacy(token: str, title: str, body: str, data: dict | None, serve
 
 def send_fcm_notification(token: str, title: str, body: str, data: dict | None = None) -> bool:
     sa_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
-    project_id = os.getenv("FIREBASE_PROJECT_ID")
-    if sa_json and project_id:
+    if not sa_json:
+        sa_b64 = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON_B64")
+        if sa_b64:
+            try:
+                import base64
+                sa_json = base64.b64decode(sa_b64).decode("utf-8")
+            except Exception as e:
+                print(f"Failed to decode FIREBASE_SERVICE_ACCOUNT_JSON_B64: {e}")
+                sa_json = None
+    project_id_env = os.getenv("FIREBASE_PROJECT_ID")
+    if sa_json:
         try:
             sa_info = json.loads(sa_json)
-            return _send_fcm_v1(token, title, body, data, sa_info, project_id)
+            project_id = project_id_env or sa_info.get("project_id")
+            if project_id:
+                return _send_fcm_v1(token, title, body, data, sa_info, project_id)
+            else:
+                print("FIREBASE_PROJECT_ID not set and missing project_id in service account JSON")
         except Exception as e:
             print(f"FCM v1 error, falling back to legacy: {e}")
     server_key = os.getenv("FCM_SERVER_KEY")
