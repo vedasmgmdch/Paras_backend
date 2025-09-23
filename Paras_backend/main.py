@@ -741,11 +741,31 @@ async def register_device(
         db.add(existing)
         await db.commit()
         await db.refresh(existing)
+        # Enforce single-device-per-user if enabled
+        if os.getenv("PUSH_SINGLE_DEVICE", "true").lower() in {"1", "true", "yes", "on"}:
+            others_q = await db.execute(
+                select(models.DeviceToken)
+                .where(models.DeviceToken.patient_id == current_user.id)
+                .where(models.DeviceToken.id != object.__getattribute__(existing, 'id'))
+            )
+            for d in others_q.scalars().all():
+                await db.delete(d)
+            await db.commit()
         return existing
     row = models.DeviceToken(patient_id=current_user.id, platform=payload.platform, token=payload.token)
     db.add(row)
     await db.commit()
     await db.refresh(row)
+    # Enforce single-device-per-user if enabled
+    if os.getenv("PUSH_SINGLE_DEVICE", "true").lower() in {"1", "true", "yes", "on"}:
+        others_q = await db.execute(
+            select(models.DeviceToken)
+            .where(models.DeviceToken.patient_id == current_user.id)
+            .where(models.DeviceToken.id != object.__getattribute__(row, 'id'))
+        )
+        for d in others_q.scalars().all():
+            await db.delete(d)
+        await db.commit()
     return row
 
 @app.get("/push/devices", response_model=List[schemas.DeviceTokenResponse])
