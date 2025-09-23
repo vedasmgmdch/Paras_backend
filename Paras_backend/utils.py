@@ -254,3 +254,73 @@ def send_fcm_to_tokens(tokens: list[str], title: str, body: str, data: dict | No
         else:
             results["failure"] += 1
     return results
+
+# --- Extended debug variant that returns raw responses and error hints ---
+def send_fcm_notification_ex(token: str, title: str, body: str, data: dict | None = None) -> dict:
+    """Send a single FCM message and return a structured result.
+
+    Returns dict with keys: ok (bool), status (int|None), body (str|None), api ('v1'|'legacy'|None),
+    error (str|None)
+    """
+    sa_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+    api_used = None
+    if not sa_json:
+        sa_b64 = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON_B64")
+        if sa_b64:
+            try:
+                import base64
+                sa_json = base64.b64decode(sa_b64).decode("utf-8")
+            except Exception as e:
+                return {"ok": False, "status": None, "body": f"B64 decode error: {e}", "api": None, "error": "CONFIG"}
+    project_id_env = os.getenv("FIREBASE_PROJECT_ID")
+    if sa_json:
+        try:
+            sa_info = json.loads(sa_json)
+            project_id = project_id_env or sa_info.get("project_id")
+            if project_id:
+                api_used = "v1"
+                access_token = _get_v1_access_token(sa_info)
+                url = f"https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
+                headers = {
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json; UTF-8",
+                }
+                payload = {
+                    "message": {
+                        "token": token,
+                        "notification": {"title": title, "body": body},
+                        "data": data or {},
+                    }
+                }
+                resp = requests.post(url, data=json.dumps(payload), headers=headers, timeout=FCM_HTTP_TIMEOUT)
+                ok = resp.status_code in (200, 202)
+                return {"ok": ok, "status": resp.status_code, "body": resp.text, "api": api_used, "error": None if ok else "SEND_FAILED"}
+            else:
+                # fall through to legacy
+                pass
+        except Exception as e:
+            # fall back to legacy
+            last_err = str(e)
+        else:
+            last_err = None
+    else:
+        last_err = "NO_V1_CONFIG"
+
+    server_key = os.getenv("FCM_SERVER_KEY")
+    if not server_key:
+        return {"ok": False, "status": None, "body": f"{last_err or 'No server key'}", "api": None, "error": "CONFIG"}
+    api_used = "legacy"
+    url = "https://fcm.googleapis.com/fcm/send"
+    headers = {
+        "Authorization": f"key={server_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "to": token,
+        "notification": {"title": title, "body": body},
+        "data": data or {},
+        "priority": "high",
+    }
+    resp = requests.post(url, json=payload, headers=headers, timeout=FCM_HTTP_TIMEOUT)
+    ok = resp.status_code == 200
+    return {"ok": ok, "status": resp.status_code, "body": resp.text, "api": api_used, "error": None if ok else "SEND_FAILED"}

@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, date
 import os
-from typing import List, Optional
+from typing import List, Optional, Any
 
 import models
 from database import get_db
@@ -17,7 +17,7 @@ from sqlalchemy import select
 import schemas
 from database import engine
 
-from utils import send_registration_email, send_fcm_notification
+from utils import send_registration_email, send_fcm_notification, send_fcm_notification_ex
 import os
 from fastapi import Request
 from routes import auth
@@ -777,11 +777,22 @@ async def push_test(
     tokens = [row[0] for row in res.all()]
     if not tokens:
         raise HTTPException(status_code=400, detail="No registered device tokens")
+    debug = request.query_params.get("debug", "").lower() in {"1", "true", "yes", "on"}
     sent = 0
+    details = []
     for t in tokens:
-        if send_fcm_notification(t, payload.title, payload.body):
-            sent += 1
-    return {"sent": sent, "total": len(tokens)}
+        if debug:
+            res = send_fcm_notification_ex(t, payload.title, payload.body)
+            if res.get("ok"):
+                sent += 1
+            details.append({"token": t[-12:] if len(t) > 12 else t, **res})
+        else:
+            if send_fcm_notification(t, payload.title, payload.body):
+                sent += 1
+    resp: dict[str, Any] = {"sent": sent, "total": len(tokens)}
+    if debug:
+        resp["debug"] = {"details": details}
+    return resp
 
 @app.post("/push/now")
 async def push_now(
@@ -793,18 +804,82 @@ async def push_now(
     return await push_test(request, payload, db, current_user)
 
 @app.post("/push/ping")
-async def push_ping(db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
+async def push_ping(request: Request, db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
     res = await db.execute(select(models.DeviceToken.token).where(models.DeviceToken.patient_id == current_user.id))
     tokens = [row[0] for row in res.all()]
     if not tokens:
         raise HTTPException(status_code=400, detail="No registered device tokens")
     title = "Hello from MGM"
     body = "This is a quick test push."
+    debug = request.query_params.get("debug", "").lower() in {"1", "true", "yes", "on"}
     sent = 0
+    details = []
     for t in tokens:
-        if send_fcm_notification(t, title, body):
-            sent += 1
-    return {"sent": sent, "total": len(tokens), "title": title, "body": body}
+        if debug:
+            res_det = send_fcm_notification_ex(t, title, body)
+            if res_det.get("ok"):
+                sent += 1
+            details.append({"token": t[-12:] if len(t) > 12 else t, **res_det})
+        else:
+            if send_fcm_notification(t, title, body):
+                sent += 1
+    resp: dict[str, Any] = {"sent": sent, "total": len(tokens), "title": title, "body": body}
+    if debug:
+        resp["debug"] = {"details": details}
+    return resp
+
+@app.post("/push/prune-invalid")
+async def prune_invalid_devices(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: models.Patient = Depends(get_current_user),
+):
+    debug = request.query_params.get("debug", "").lower() in {"1", "true", "yes", "on"}
+    dry_run = request.query_params.get("dry_run", "").lower() in {"1", "true", "yes", "on"}
+    res = await db.execute(select(models.DeviceToken).where(models.DeviceToken.patient_id == current_user.id))
+    devices = res.scalars().all()
+    if not devices:
+        return {"removed": 0, "checked": 0}
+    removed = 0
+    details = []
+    title = "MGM token check"
+    body = "Verifying your notification token."
+    for dev in devices:
+        det = send_fcm_notification_ex(object.__getattribute__(dev, 'token'), title, body)
+        is_invalid = False
+        txt = (det.get("body") or "").upper()
+        if not det.get("ok"):
+            for marker in ("UNREGISTERED", "NOT_FOUND", "INVALID_ARGUMENT", "MISMATCH_SENDER_ID"):
+                if marker in txt:
+                    is_invalid = True
+                    break
+        if is_invalid:
+            if not dry_run:
+                await db.delete(dev)
+            removed += 1
+        if debug:
+            details.append({
+                "id": object.__getattribute__(dev, 'id'),
+                "token": object.__getattribute__(dev, 'token')[-12:],
+                "result": det,
+                "invalid": is_invalid,
+            })
+    if not dry_run and removed:
+        await db.commit()
+    resp = {"removed": removed, "checked": len(devices), "dry_run": dry_run}
+    if debug:
+        resp["debug"] = details
+    return resp
+
+@app.delete("/push/devices/{device_id}")
+async def delete_device(device_id: int, db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
+    res = await db.execute(select(models.DeviceToken).where(models.DeviceToken.id == device_id).where(models.DeviceToken.patient_id == current_user.id))
+    dev = res.scalars().first()
+    if not dev:
+        raise HTTPException(status_code=404, detail="Device not found")
+    await db.delete(dev)
+    await db.commit()
+    return {"deleted": device_id}
 
 # Simpler: Dispatch due pushes for the authenticated user (no cron key)
 @app.post("/push/dispatch-mine")
