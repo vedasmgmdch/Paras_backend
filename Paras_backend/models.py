@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, Date, DateTime, ForeignKey, Boolean, Time
+from sqlalchemy import Index
 from sqlalchemy.orm import relationship
 from datetime import datetime
 
@@ -146,3 +147,31 @@ class ScheduledPush(Base):
     sent_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     patient = relationship("Patient", back_populates="scheduled_pushes")
+
+# --- Hybrid reminder model (local + server fallback) ---
+class Reminder(Base):
+    __tablename__ = "reminders"
+    __table_args__ = (
+        # Composite index to speed due reminder scans per patient
+        Index('ix_reminder_patient_due_active', 'patient_id', 'next_fire_utc', 'active'),
+    )
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Human readable content
+    title = Column(String, nullable=False)
+    body = Column(String, nullable=False)
+    # Time fields
+    hour = Column(Integer, nullable=False)          # 0-23 user local hour of day
+    minute = Column(Integer, nullable=False)        # 0-59 user local minute
+    timezone = Column(String, nullable=False)       # IANA tz name from device
+    # Scheduling state
+    active = Column(Boolean, default=True, nullable=False)
+    next_fire_local = Column(DateTime, nullable=False, index=True)  # next local datetime in user's tz (stored naive or as UTC? we store UTC converted)
+    next_fire_utc = Column(DateTime, nullable=False, index=True)    # cached UTC instant for dispatch comparison
+    last_sent_utc = Column(DateTime, nullable=True)
+    last_ack_local_date = Column(Date, nullable=True)  # date (in user tz) we received an acknowledgement to suppress fallback that day
+    grace_minutes = Column(Integer, default=20, nullable=False)     # suppress push until grace window passes
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    patient = relationship("Patient")

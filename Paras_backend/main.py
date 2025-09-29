@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, date
 import os
 from typing import List, Optional, Any
+from pydantic import BaseModel
 
 import models
 from database import get_db
@@ -20,7 +21,13 @@ from database import engine
 from utils import send_registration_email, send_fcm_notification, send_fcm_notification_ex
 import os
 from fastapi import Request
+from sqlalchemy import and_, select
+from datetime import datetime, timedelta
+import pytz
 from routes import auth
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.interval import IntervalTrigger
+import asyncio
 
 app = FastAPI()
 
@@ -34,10 +41,50 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/healthz")
+async def healthz():
+    # Cheap DB probe (optional, ignore errors to still return ok if DB transiently slow)
+    try:
+        async with get_db() as db:  # type: ignore
+            await db.execute(select(1))
+        db_ok = True
+    except Exception:
+        db_ok = False
+    return {"ok": True, "db": db_ok}
+
 @app.on_event("startup")
 async def startup():
     async with engine.begin() as conn:
         await conn.run_sync(models.Base.metadata.create_all)
+    if os.getenv("SCHEDULER_ENABLED", "1") == "1":
+        print("[Startup] Scheduler enabled (SCHEDULER_ENABLED=1)")
+        scheduler = AsyncIOScheduler()
+        async def _run_dispatch():
+            from fastapi import Request as _Req
+            scope = {"type": "http", "headers": []}
+            fake_request = _Req(scope)
+            async with get_db() as db:  # type: ignore
+                try:
+                    await dispatch_due_pushes(fake_request, db)  # type: ignore[arg-type]
+                except Exception as e:
+                    print(f"[Scheduler] dispatch_due_pushes error: {e}")
+        scheduler.add_job(_run_dispatch, IntervalTrigger(seconds=60), id="dispatch_due", replace_existing=True)
+        scheduler.start()
+    else:
+        print("[Startup] Scheduler disabled via SCHEDULER_ENABLED env var")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    # Attempt graceful scheduler shutdown if running
+    try:
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler as _S
+        for inst in list(_S._instances):  # type: ignore[attr-defined]
+            try:
+                inst.shutdown(wait=False)
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 SECRET_KEY = os.getenv("SECRET_KEY", "secret")
 ALGORITHM = "HS256"
@@ -83,6 +130,7 @@ def _extract_bearer_from_request(request: Request) -> Optional[str]:
         parts = cookie_auth.strip().split(" ", 1)
         if len(parts) == 2 and parts[0].lower() == "bearer" and parts[1]:
             return parts[1]
+
     # Try query params (?access_token=... or ?token=...)
     qp = request.query_params
     for key in ("access_token", "token"):
@@ -95,6 +143,25 @@ def _extract_bearer_from_request(request: Request) -> Optional[str]:
             return val
     return None
 
+# --- Reminder scheduling helper (module level) ---
+def _compute_next_fire(now_utc: datetime, hour: int, minute: int, tz_name: str) -> tuple[datetime, datetime]:
+    """Return (next_local_dt, next_utc_dt) naive datetimes.
+    now_utc must be naive UTC. We compute the next local wall-clock occurrence and its UTC instant.
+    """
+    try:
+        tz = pytz.timezone(tz_name)
+    except Exception:
+        tz = pytz.UTC
+    if now_utc.tzinfo is not None:
+        now_utc = now_utc.astimezone(pytz.UTC).replace(tzinfo=None)
+    now_local = now_utc.replace(tzinfo=pytz.UTC).astimezone(tz)
+    candidate = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if candidate <= now_local:
+        candidate = candidate + timedelta(days=1)
+    candidate = tz.normalize(candidate)
+    candidate_utc = candidate.astimezone(pytz.UTC).replace(tzinfo=None)
+    return candidate.replace(tzinfo=None), candidate_utc
+
 async def get_bearer_token(request: Request) -> str:
     token = _extract_bearer_from_request(request)
     if not token:
@@ -105,10 +172,12 @@ async def get_bearer_token(request: Request) -> str:
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
     return token
 
 # Temporary debug endpoint to inspect how auth headers arrive in the deployment
 @app.get("/auth/debug")
+
 async def debug_auth(request: Request):
     token = _extract_bearer_from_request(request)
     candidate_headers = {
@@ -153,6 +222,7 @@ async def get_current_user(token: str = Depends(get_bearer_token), db: AsyncSess
         if username is None:
             raise cred_exc
     except JWTError:
+
         raise cred_exc
 
     result = await db.execute(select(models.Patient).where(models.Patient.username == username))
@@ -162,6 +232,7 @@ async def get_current_user(token: str = Depends(get_bearer_token), db: AsyncSess
     return user
 
 async def get_current_doctor(token: str = Depends(get_bearer_token), db: AsyncSession = Depends(get_db)):
+
     cred_exc = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials (doctor)",
@@ -463,6 +534,243 @@ async def rotate_if_due_endpoint(db: AsyncSession = Depends(get_db), current_use
     return schemas.RotateIfDueResponse(rotated=True, new_episode_id=new_id)
 
 # ---------------------------
+# Reminder endpoints (hybrid system)
+# ---------------------------
+@app.post("/reminders", response_model=schemas.ReminderResponse)
+async def create_reminder(payload: schemas.ReminderCreate, db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
+    if not (0 <= payload.hour <= 23 and 0 <= payload.minute <= 59):
+        raise HTTPException(status_code=422, detail="Invalid hour/minute")
+    now_utc = datetime.utcnow()
+    next_local, next_utc = _compute_next_fire(now_utc, payload.hour, payload.minute, payload.timezone)
+    row = models.Reminder(
+        patient_id=current_user.id,
+        title=payload.title,
+        body=payload.body,
+        hour=payload.hour,
+        minute=payload.minute,
+        timezone=payload.timezone,
+        active=payload.active,
+        grace_minutes=payload.grace_minutes,
+        next_fire_local=next_local,
+        next_fire_utc=next_utc,
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+@app.get("/reminders", response_model=list[schemas.ReminderResponse])
+async def list_reminders(db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
+    res = await db.execute(select(models.Reminder).where(models.Reminder.patient_id == current_user.id).order_by(models.Reminder.id.asc()))
+    return res.scalars().all()
+
+@app.patch("/reminders/{reminder_id}", response_model=schemas.ReminderResponse)
+async def update_reminder(reminder_id: int, payload: schemas.ReminderUpdate, db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
+    res = await db.execute(select(models.Reminder).where(models.Reminder.patient_id == current_user.id).where(models.Reminder.id == reminder_id))
+    row = res.scalars().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    changed_time = False
+    if payload.title is not None:
+        setattr(row, 'title', payload.title)
+    if payload.body is not None:
+        setattr(row, 'body', payload.body)
+    if payload.hour is not None:
+        if not 0 <= payload.hour <= 23:
+            raise HTTPException(status_code=422, detail="Invalid hour")
+        setattr(row, 'hour', payload.hour); changed_time = True
+    if payload.minute is not None:
+        if not 0 <= payload.minute <= 59:
+            raise HTTPException(status_code=422, detail="Invalid minute")
+        setattr(row, 'minute', payload.minute); changed_time = True
+    if payload.timezone is not None:
+        setattr(row, 'timezone', payload.timezone); changed_time = True
+    if payload.active is not None:
+        setattr(row, 'active', payload.active)
+    if payload.grace_minutes is not None:
+        setattr(row, 'grace_minutes', payload.grace_minutes)
+    now_utc = datetime.utcnow()
+    if changed_time:
+        next_local, next_utc = _compute_next_fire(now_utc, getattr(row, 'hour'), getattr(row, 'minute'), getattr(row, 'timezone'))
+        setattr(row, 'next_fire_local', next_local)
+        setattr(row, 'next_fire_utc', next_utc)
+    if payload.ack_today:
+        # mark acknowledgement for today's local date
+        try:
+            tz = pytz.timezone(getattr(row, 'timezone'))
+        except Exception:
+            tz = pytz.UTC
+        now_local = now_utc.replace(tzinfo=pytz.UTC).astimezone(tz)
+        setattr(row, 'last_ack_local_date', now_local.date())
+    setattr(row, 'updated_at', now_utc)
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+@app.delete("/reminders/{reminder_id}")
+async def delete_reminder(reminder_id: int, db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
+    res = await db.execute(select(models.Reminder).where(models.Reminder.patient_id == current_user.id).where(models.Reminder.id == reminder_id))
+    row = res.scalars().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    await db.delete(row)
+    await db.commit()
+    return {"deleted": reminder_id}
+
+@app.post("/reminders/reschedule-all")
+async def reschedule_all(db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
+    now_utc = datetime.utcnow()
+    res = await db.execute(select(models.Reminder).where(models.Reminder.patient_id == current_user.id))
+    rows = res.scalars().all()
+    count = 0
+    for r in rows:
+        next_local, next_utc = _compute_next_fire(now_utc, getattr(r, 'hour'), getattr(r, 'minute'), getattr(r, 'timezone'))
+        setattr(r, 'next_fire_local', next_local)
+        setattr(r, 'next_fire_utc', next_utc)
+        setattr(r, 'updated_at', now_utc)
+        db.add(r); count += 1
+    if count:
+        await db.commit()
+    return {"rescheduled": count}
+
+@app.post("/reminders/{reminder_id}/ack", response_model=schemas.ReminderResponse)
+async def acknowledge_reminder(reminder_id: int, db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
+    res = await db.execute(select(models.Reminder).where(models.Reminder.patient_id == current_user.id).where(models.Reminder.id == reminder_id))
+    row = res.scalars().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    now_utc = datetime.utcnow()
+    try:
+        tz = pytz.timezone(getattr(row, 'timezone'))
+    except Exception:
+        tz = pytz.UTC
+    now_local = now_utc.replace(tzinfo=pytz.UTC).astimezone(tz)
+    setattr(row, 'last_ack_local_date', now_local.date())
+    setattr(row, 'updated_at', now_utc)
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+class ReminderSyncItem(BaseModel):
+    id: Optional[int] = None
+    title: str
+    body: str
+    hour: int
+    minute: int
+    timezone: str
+    active: bool
+    grace_minutes: int
+    ack_today: bool | None = None
+
+class ReminderSyncRequest(BaseModel):
+    items: list[ReminderSyncItem]
+    prune_missing: bool = False  # if true, server deletes any reminders not listed
+
+@app.post("/reminders/sync")
+async def sync_reminders(payload: ReminderSyncRequest, db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
+    now_utc = datetime.utcnow()
+    existing_q = await db.execute(select(models.Reminder).where(models.Reminder.patient_id == current_user.id))
+    existing = {int(getattr(r, 'id')): r for r in existing_q.scalars().all()}
+    seen_ids: set[int] = set()
+    created = 0
+    updated = 0
+    for item in payload.items:
+        if item.id and int(item.id) in existing:
+            row = existing[int(item.id)]
+            changed_time = False
+            if getattr(row, 'title') != item.title:
+                setattr(row, 'title', item.title)
+            if getattr(row, 'body') != item.body:
+                setattr(row, 'body', item.body)
+            if getattr(row, 'hour') != item.hour:
+                setattr(row, 'hour', item.hour)
+                changed_time = True
+            if getattr(row, 'minute') != item.minute:
+                setattr(row, 'minute', item.minute)
+                changed_time = True
+            if getattr(row, 'timezone') != item.timezone:
+                setattr(row, 'timezone', item.timezone)
+                changed_time = True
+            if getattr(row, 'active') != item.active:
+                setattr(row, 'active', item.active)
+            if getattr(row, 'grace_minutes') != item.grace_minutes:
+                setattr(row, 'grace_minutes', item.grace_minutes)
+            if item.ack_today:
+                try:
+                    tz = pytz.timezone(item.timezone)
+                except Exception:
+                    tz = pytz.UTC
+                now_local = now_utc.replace(tzinfo=pytz.UTC).astimezone(tz)
+                setattr(row, 'last_ack_local_date', now_local.date())
+            if changed_time:
+                next_local, next_utc = _compute_next_fire(now_utc, item.hour, item.minute, item.timezone)
+                setattr(row, 'next_fire_local', next_local)
+                setattr(row, 'next_fire_utc', next_utc)
+            setattr(row, 'updated_at', now_utc)
+            db.add(row)
+            updated += 1
+            seen_ids.add(int(getattr(row, 'id')))
+        else:
+            next_local, next_utc = _compute_next_fire(now_utc, item.hour, item.minute, item.timezone)
+            row = models.Reminder(
+                patient_id=current_user.id,
+                title=item.title,
+                body=item.body,
+                hour=item.hour,
+                minute=item.minute,
+                timezone=item.timezone,
+                active=item.active,
+                grace_minutes=item.grace_minutes,
+                next_fire_local=next_local,
+                next_fire_utc=next_utc,
+            )
+            if item.ack_today:
+                try:
+                    tz = pytz.timezone(item.timezone)
+                except Exception:
+                    tz = pytz.UTC
+                now_local = now_utc.replace(tzinfo=pytz.UTC).astimezone(tz)
+                setattr(row, 'last_ack_local_date', now_local.date())
+            db.add(row)
+            created += 1
+    await db.commit()
+    # Prune if requested
+    pruned = 0
+    if payload.prune_missing:
+        existing_q2 = await db.execute(select(models.Reminder).where(models.Reminder.patient_id == current_user.id))
+        for row in existing_q2.scalars().all():
+            if row.id not in seen_ids and row.id in existing:
+                await db.delete(row); pruned += 1
+        if pruned:
+            await db.commit()
+    return {"created": created, "updated": updated, "pruned": pruned}
+
+@app.get("/reminders/health")
+async def reminders_health(db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
+    now_utc = datetime.utcnow()
+    res = await db.execute(select(models.Reminder).where(models.Reminder.patient_id == current_user.id))
+    rows = res.scalars().all()
+    total = len(rows)
+    active = sum(1 for r in rows if getattr(r, 'active'))
+    due_now = sum(1 for r in rows if getattr(r, 'next_fire_utc') <= now_utc)
+    pending_after_grace = 0
+    for r in rows:
+        if getattr(r, 'next_fire_utc') <= now_utc:
+            try:
+                tz = pytz.timezone(getattr(r, 'timezone'))
+            except Exception:
+                tz = pytz.UTC
+            local_now = now_utc.replace(tzinfo=pytz.UTC).astimezone(tz)
+            scheduled_local = getattr(r, 'next_fire_local')
+            if scheduled_local:
+                sched_local = tz.localize(scheduled_local) if scheduled_local.tzinfo is None else scheduled_local.astimezone(tz)
+                if local_now > sched_local + timedelta(minutes=getattr(r, 'grace_minutes') or 0):
+                    pending_after_grace += 1
+    return {"total": total, "active": active, "due_now": due_now, "pending_after_grace": pending_after_grace}
+
+# ---------------------------
 # Push notifications endpoints
 # ---------------------------
 @app.post("/push/schedule", response_model=schemas.ScheduledPushResponse)
@@ -698,9 +1006,61 @@ async def dispatch_due_pushes(request: Request, db: AsyncSession = Depends(get_d
         setattr(push, "sent", True)
         setattr(push, "sent_at", datetime.utcnow())
         db.add(push)
-    if pushes:
+    # --- Reminder fallback processing ---
+    now2 = datetime.utcnow()
+    # Fetch active reminders whose next_fire_utc has passed
+    rem_res = await db.execute(
+        select(models.Reminder)
+        .where(models.Reminder.active == True)
+        .where(models.Reminder.next_fire_utc <= now2)
+    )
+    reminders = rem_res.scalars().all()
+    dispatched_rem = 0
+    for r in reminders:
+        # Check grace & acknowledgement: skip if ack today
+        try:
+            tz = pytz.timezone(getattr(r, 'timezone'))
+        except Exception:
+            tz = pytz.UTC
+        now_local = now2.replace(tzinfo=pytz.UTC).astimezone(tz)
+        # If already acknowledged today, skip sending
+        if getattr(r, 'last_ack_local_date') == now_local.date():
+            # Still advance to next day to avoid tight loop
+            next_local, next_utc = _compute_next_fire(now2, getattr(r, 'hour'), getattr(r, 'minute'), getattr(r, 'timezone'))
+            setattr(r, 'next_fire_local', next_local)
+            setattr(r, 'next_fire_utc', next_utc)
+            setattr(r, 'updated_at', now2)
+            db.add(r)
+            continue
+        # If within grace window since local scheduled time, skip for now
+        scheduled_local_time = getattr(r, 'next_fire_local')
+        # next_fire_local is the *target*; we only send when we reach/past it + inside grace start
+        # Grace logic: wait grace_minutes before we send fallback (to allow local notification to fire first)
+        grace_minutes = getattr(r, 'grace_minutes') or 0
+        if scheduled_local_time:
+            # Convert scheduled_local_time (stored naive as local?) to localized dt
+            sched_local = tz.localize(scheduled_local_time) if scheduled_local_time.tzinfo is None else scheduled_local_time.astimezone(tz)
+            grace_deadline = sched_local + timedelta(minutes=grace_minutes)
+            if now_local < grace_deadline:
+                # Skip until grace window passed
+                continue
+        # Send fallback push
+        token_res = await db.execute(select(models.DeviceToken.token).where(models.DeviceToken.patient_id == getattr(r, 'patient_id')))
+        tokens = [row[0] for row in token_res.all()]
+        for t in tokens:
+            if send_fcm_notification(t, getattr(r, 'title'), getattr(r, 'body')):
+                sent += 1
+                dispatched_rem += 1
+        setattr(r, 'last_sent_utc', now2)
+        # Advance to next day occurrence
+        next_local, next_utc = _compute_next_fire(now2, getattr(r, 'hour'), getattr(r, 'minute'), getattr(r, 'timezone'))
+        setattr(r, 'next_fire_local', next_local)
+        setattr(r, 'next_fire_utc', next_utc)
+        setattr(r, 'updated_at', now2)
+        db.add(r)
+    if pushes or reminders:
         await db.commit()
-    return {"sent": sent, "dispatched": len(pushes)}
+    return {"sent": sent, "dispatched_pushes": len(pushes), "dispatched_reminders": dispatched_rem}
 @app.post("/push/register-device", response_model=schemas.DeviceTokenResponse)
 async def register_device(
     request: Request,

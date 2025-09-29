@@ -229,3 +229,36 @@ class ScheduledPushResponse(BaseModel):
     sent_at: Optional[datetime] = None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
+
+# ---- Hybrid Reminder Schemas ----
+class ReminderBase(BaseModel):
+    title: str
+    body: str
+    hour: int  # 0-23
+    minute: int  # 0-59
+    timezone: str  # IANA tz (e.g., 'Asia/Kolkata')
+    active: bool = True
+    grace_minutes: int = 20
+
+class ReminderCreate(ReminderBase):
+    pass
+
+class ReminderUpdate(BaseModel):
+    title: Optional[str] = None
+    body: Optional[str] = None
+    hour: Optional[int] = None
+    minute: Optional[int] = None
+    timezone: Optional[str] = None
+    active: Optional[bool] = None
+    grace_minutes: Optional[int] = None
+    ack_today: Optional[bool] = None  # client can pass true to acknowledge local fire today
+
+class ReminderResponse(ReminderBase):
+    id: int
+    next_fire_local: datetime
+    next_fire_utc: datetime
+    last_sent_utc: Optional[datetime] = None
+    last_ack_local_date: Optional[date] = None
+    created_at: datetime
+    updated_at: datetime
+    model_config = ConfigDict(from_attributes=True)
