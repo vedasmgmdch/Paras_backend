@@ -37,3 +37,50 @@ Additionally, on startup a sweep acknowledges any reminders earlier today (minus
 
 ---
 Updated: 2025-10-01
+
+### New Diagnostics & Controls (2025-10-01)
+
+Added internal refactor + richer debug:
+
+1. Unified internal dispatcher `_internal_dispatch_due` used by both the public cron endpoint and the in-process scheduler. This removed fragile fake Request objects that caused `KeyError: 'query_string'` and silently prevented fallback dispatch.
+2. Debug decision tracing:
+  * Add `?debug=1` to `POST /push/dispatch-due` to receive a `decisions` array with reasons: `scheduled_push`, `skip_ack_today`, `skip_in_grace`, `send`.
+  * Set environment variable `DISPATCH_DEBUG=1` to print scheduler cycle summaries every minute.
+3. New endpoint `GET /reminders/debug` (auth required) returns raw timing fields: next_fire_local, next_fire_utc, last_ack_local_date, last_sent_utc, grace_minutes, and whether the reminder is currently due.
+
+### Environment Variables
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `REMINDER_DEFAULT_GRACE` | Override grace_minutes on create/sync when client sends 0/none | unset (no override) |
+| `REMINDER_DEFAULT_GRACE_OVERRIDE_ON_UPDATE` | If truthy, also override on PATCH when not explicitly supplied | 0 (disabled) |
+| `DISPATCH_DEBUG` | Print scheduler dispatch debug dict each run | 0 |
+| `SCHEDULER_ENABLED` | Enable periodic dispatcher | 1 |
+
+### Frontend Sweep Change
+
+The prior startup behavior auto‑ACKed any reminders earlier the same day (`_sweepMissedToday()`), which could suppress legitimate fallback pushes if the local notification never fired. This sweep is now gated:
+
+```
+HybridRemindersService.enableSweep = false; // default
+```
+
+Setting it to `true` restores legacy behavior; leave disabled to allow the server fallback to fire when local delivery failed.
+
+### Troubleshooting Flow
+
+1. Call `/reminders/debug` → confirm a reminder shows `due: true` once past local time.
+2. Check `/push/dispatch-due?cron_key=...&dry_run=1&debug=1` → look for decision:
+  * `skip_in_grace`: Wait or reduce grace (`REMINDER_DEFAULT_GRACE=5`).
+  * `skip_ack_today`: Client acknowledged; verify user actually saw local notification. If not, ensure sweep remains disabled.
+  * `send`: Should shortly appear in device (verify FCM token valid via `/push/diag`).
+3. If no reminders listed but expected: verify timezone and hour/minute values on creation; ensure scheduler enabled.
+
+### Suggested Next Enhancements
+
+* Chain one-shot scheduling strategy (server: store next occurrence; client: schedule only next alarm) to avoid fragile repeating components.
+* Add per-reminder metrics (last decision, skip reason counters).
+* Automatic grace tuning: dynamically shrink grace if multiple consecutive days skip due to ACK sweep.
+
+---
+Document extended: 2025-10-01 (afternoon diagnostics pass)

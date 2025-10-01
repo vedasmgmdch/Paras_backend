@@ -124,13 +124,8 @@ async def startup():
         _dispatch_lock = asyncio.Lock()
         async def _run_dispatch():
             if _dispatch_lock.locked():
-                # Skip overlapping run
                 return
             async with _dispatch_lock:
-                from fastapi import Request as _Req
-                scope = {"type": "http", "headers": []}
-                fake_request = _Req(scope)
-                # Properly consume the get_db async generator
                 agen = get_db()
                 db = None
                 try:
@@ -139,11 +134,13 @@ async def startup():
                     db = None
                 try:
                     if db is not None:
-                        await dispatch_due_pushes(fake_request, db)  # type: ignore[arg-type]
+                        debug_env = os.getenv("DISPATCH_DEBUG", "0").lower() in {"1","true","yes","on"}
+                        res = await _internal_dispatch_due(db, dry_run=False, limit=50, debug=debug_env)
+                        if debug_env:
+                            print(f"[Scheduler][debug] {res}")
                 except Exception as e:
-                    print(f"[Scheduler] dispatch_due_pushes error: {e}")
+                    print(f"[Scheduler] dispatch internal error: {e}")
                 finally:
-                    # Close the generator to ensure session closed
                     try:
                         await agen.aclose()  # type: ignore
                     except Exception:
@@ -824,6 +821,24 @@ async def dispatch_due_pushes(request: Request, db: AsyncSession = Depends(get_d
         lv = json_obj.get("limit")
         if lv is not None:
             limit = _as_int(lv if isinstance(lv, str) else str(lv), default=50)
+    # Delegate to internal processor
+    debug = request.query_params.get("debug") in {"1","true","yes","on"}
+    result = await _internal_dispatch_due(db, dry_run=dry_run, limit=limit, debug=debug)
+    return result
+
+# --- Internal shared logic for scheduled push + reminder fallback dispatch ---
+async def _internal_dispatch_due(
+    db: AsyncSession,
+    dry_run: bool = False,
+    limit: int = 50,
+    debug: bool = False,
+) -> dict[str, Any]:
+    """Core logic used by both the public endpoint and background scheduler.
+    Returns counts; if debug=True includes per-item decision traces.
+    """
+    decisions: list[dict[str, Any]] = [] if debug else []
+    sent = 0
+    # Scheduled pushes first
     now = datetime.utcnow()
     res = await db.execute(
         select(models.ScheduledPush)
@@ -833,25 +848,29 @@ async def dispatch_due_pushes(request: Request, db: AsyncSession = Depends(get_d
     pushes = res.scalars().all()
     if limit and len(pushes) > limit:
         pushes = pushes[:limit]
-    # If dry-run, return quickly without sending
     if dry_run:
-        return {"sent": 0, "dispatched": len(pushes), "mode": "dry_run"}
-    sent = 0
+        return {"sent": 0, "dispatched_pushes": len(pushes), "dispatched_reminders": 0, "mode": "dry_run"}
     for push in pushes:
-        # Get all device tokens for patient
         token_res = await db.execute(select(models.DeviceToken.token).where(models.DeviceToken.patient_id == push.patient_id))
         tokens = [row[0] for row in token_res.all()]
+        push_sent_tokens = 0
         for t in tokens:
-            ok = send_fcm_notification(t, getattr(push, "title"), getattr(push, "body"))
-            if ok:
+            if send_fcm_notification(t, getattr(push, "title"), getattr(push, "body")):
                 sent += 1
-
+                push_sent_tokens += 1
         setattr(push, "sent", True)
         setattr(push, "sent_at", datetime.utcnow())
         db.add(push)
-    # --- Reminder fallback processing ---
+        if debug:
+            decisions.append({
+                "type": "scheduled_push",
+                "id": object.__getattribute__(push, 'id'),
+                "tokens": len(tokens),
+                "sent_tokens": push_sent_tokens,
+            })
+
+    # Reminder fallback
     now2 = datetime.utcnow()
-    # Fetch active reminders whose next_fire_utc has passed
     rem_res = await db.execute(
         select(models.Reminder)
         .where(models.Reminder.active == True)
@@ -859,51 +878,100 @@ async def dispatch_due_pushes(request: Request, db: AsyncSession = Depends(get_d
     )
     reminders = rem_res.scalars().all()
     dispatched_rem = 0
+    server_only = os.getenv("REMINDERS_SERVER_ONLY", "0").lower() in {"1","true","yes","on"}
     for r in reminders:
-        # Check grace & acknowledgement: skip if ack today
+        reason = "send"
         try:
             tz = pytz.timezone(getattr(r, 'timezone'))
         except Exception:
             tz = pytz.UTC
         now_local = now2.replace(tzinfo=pytz.UTC).astimezone(tz)
-        # If already acknowledged today, skip sending
-        if getattr(r, 'last_ack_local_date') == now_local.date():
-            # Still advance to next day to avoid tight loop
+        if server_only:
+            # In server-only mode we skip ack/grace logic entirely and always push once due
+            token_res = await db.execute(select(models.DeviceToken.token).where(models.DeviceToken.patient_id == getattr(r, 'patient_id')))
+            tokens = [row[0] for row in token_res.all()]
+            sent_tokens = 0
+            for t in tokens:
+                if send_fcm_notification(t, getattr(r, 'title'), getattr(r, 'body')):
+                    sent += 1
+                    sent_tokens += 1
+            if sent_tokens:
+                dispatched_rem += 1
+            setattr(r, 'last_sent_utc', now2)
             next_local, next_utc = _compute_next_fire(now2, getattr(r, 'hour'), getattr(r, 'minute'), getattr(r, 'timezone'))
             setattr(r, 'next_fire_local', next_local)
             setattr(r, 'next_fire_utc', next_utc)
             setattr(r, 'updated_at', now2)
             db.add(r)
+            if debug:
+                decisions.append({
+                    "type": "reminder",
+                    "id": object.__getattribute__(r,'id'),
+                    "action": "server_only_send",
+                    "sent_tokens": sent_tokens,
+                })
             continue
-        # If within grace window since local scheduled time, skip for now
+        # Skip if acknowledged today
+        if getattr(r, 'last_ack_local_date') == now_local.date():
+            reason = "skip_ack_today"
+            next_local, next_utc = _compute_next_fire(now2, getattr(r, 'hour'), getattr(r, 'minute'), getattr(r, 'timezone'))
+            setattr(r, 'next_fire_local', next_local)
+            setattr(r, 'next_fire_utc', next_utc)
+            setattr(r, 'updated_at', now2)
+            db.add(r)
+            if debug:
+                decisions.append({
+                    "type": "reminder",
+                    "id": object.__getattribute__(r,'id'),
+                    "action": reason,
+                })
+            continue
+        # Grace window check
         scheduled_local_time = getattr(r, 'next_fire_local')
-        # next_fire_local is the *target*; we only send when we reach/past it + inside grace start
-        # Grace logic: wait grace_minutes before we send fallback (to allow local notification to fire first)
         grace_minutes = getattr(r, 'grace_minutes') or 0
         if scheduled_local_time:
-            # Convert scheduled_local_time (stored naive as local?) to localized dt
-            sched_local = tz.localize(scheduled_local_time) if scheduled_local_time.tzinfo is None else scheduled_local_time.astimezone(tz)
+            try:
+                sched_local = tz.localize(scheduled_local_time) if scheduled_local_time.tzinfo is None else scheduled_local_time.astimezone(tz)
+            except Exception:
+                sched_local = now_local
             grace_deadline = sched_local + timedelta(minutes=grace_minutes)
             if now_local < grace_deadline:
-                # Skip until grace window passed
+                reason = "skip_in_grace"
+                if debug:
+                    decisions.append({
+                        "type": "reminder",
+                        "id": object.__getattribute__(r,'id'),
+                        "action": reason,
+                        "grace_deadline": grace_deadline.isoformat(),
+                        "now_local": now_local.isoformat(),
+                    })
                 continue
-        # Send fallback push
+        # Send
         token_res = await db.execute(select(models.DeviceToken.token).where(models.DeviceToken.patient_id == getattr(r, 'patient_id')))
         tokens = [row[0] for row in token_res.all()]
+        sent_tokens = 0
         for t in tokens:
             if send_fcm_notification(t, getattr(r, 'title'), getattr(r, 'body')):
                 sent += 1
-                dispatched_rem += 1
+                sent_tokens += 1
+        if sent_tokens:
+            dispatched_rem += 1
         setattr(r, 'last_sent_utc', now2)
-        # Advance to next day occurrence
         next_local, next_utc = _compute_next_fire(now2, getattr(r, 'hour'), getattr(r, 'minute'), getattr(r, 'timezone'))
         setattr(r, 'next_fire_local', next_local)
         setattr(r, 'next_fire_utc', next_utc)
         setattr(r, 'updated_at', now2)
         db.add(r)
+        if debug:
+            decisions.append({
+                "type": "reminder",
+                "id": object.__getattribute__(r,'id'),
+                "action": reason,
+                "sent_tokens": sent_tokens,
+            })
+
     if pushes or reminders:
         await db.commit()
-    # Update in-memory health stats
     global REMINDER_DISPATCH_LAST_RUN, REMINDER_DISPATCH_LAST_COUNTS
     REMINDER_DISPATCH_LAST_RUN = datetime.utcnow()
     REMINDER_DISPATCH_LAST_COUNTS = {
@@ -911,7 +979,11 @@ async def dispatch_due_pushes(request: Request, db: AsyncSession = Depends(get_d
         "dispatched_pushes": len(pushes),
         "dispatched_reminders": dispatched_rem,
     }
-    return {"sent": sent, "dispatched_pushes": len(pushes), "dispatched_reminders": dispatched_rem}
+    base = {"sent": sent, "dispatched_pushes": len(pushes), "dispatched_reminders": dispatched_rem}
+    if debug:
+        # decisions is a list of dicts; acceptable dynamic payload
+        base["decisions"] = decisions  # type: ignore[assignment]
+    return base
 @app.post("/push/register-device", response_model=schemas.DeviceTokenResponse)
 async def register_device(
     request: Request,
@@ -1195,6 +1267,15 @@ async def create_reminder(
 ):
     _validate_reminder_time(payload.hour, payload.minute)
     now_utc = datetime.utcnow()
+    # Apply default grace override if env set and payload omitted / zero
+    try:
+        default_grace_env = os.getenv("REMINDER_DEFAULT_GRACE")
+        if default_grace_env is not None and (payload.grace_minutes is None or payload.grace_minutes == 0):
+            g = int(default_grace_env)
+            if g >= 0:
+                object.__setattr__(payload, 'grace_minutes', g)
+    except Exception:
+        pass
     next_local, next_utc = _compute_next_local_utc(now_utc, payload.hour, payload.minute, payload.timezone)
     row = models.Reminder(
         patient_id=current_user.id,
@@ -1263,6 +1344,14 @@ async def update_reminder(
         object.__setattr__(row, 'active', payload.active)
     if payload.grace_minutes is not None:
         object.__setattr__(row, 'grace_minutes', payload.grace_minutes)
+    elif os.getenv("REMINDER_DEFAULT_GRACE_OVERRIDE_ON_UPDATE", "0").lower() in {"1","true","yes","on"}:
+        # Optional force override on update when not explicitly provided
+        try:
+            g = int(os.getenv("REMINDER_DEFAULT_GRACE", ""))
+            if g >= 0:
+                object.__setattr__(row, 'grace_minutes', g)
+        except Exception:
+            pass
     if payload.ack_today:
         # Acknowledge local fire for today in user's timezone
         try:
@@ -1350,6 +1439,15 @@ async def sync_reminders(
             sent_ids.add(item.id)
         else:
             nl, nu = _compute_next_local_utc(now_utc, item.hour, item.minute, item.timezone)
+            # Apply default grace if not provided (or zero) and env set
+            gm = item.grace_minutes
+            try:
+                if (gm is None or gm == 0) and os.getenv("REMINDER_DEFAULT_GRACE") is not None:
+                    g = int(os.getenv("REMINDER_DEFAULT_GRACE", "0"))
+                    if g >= 0:
+                        gm = g
+            except Exception:
+                pass
             row = models.Reminder(
                 patient_id=current_user.id,
                 title=item.title,
@@ -1358,7 +1456,7 @@ async def sync_reminders(
                 minute=item.minute,
                 timezone=item.timezone,
                 active=item.active,
-                grace_minutes=item.grace_minutes,
+                grace_minutes=gm,
                 next_fire_local=nl,
                 next_fire_utc=nu,
                 created_at=now_utc,
@@ -1412,3 +1510,37 @@ async def ack_reminder(
     db.add(row)
     await db.commit()
     return ReminderAckResponse(acknowledged=True, reminder_id=payload.reminder_id, local_date=local_today)
+
+@app.get("/reminders/debug")
+async def reminders_debug(
+    db: AsyncSession = Depends(get_db),
+    current_user: models.Patient = Depends(get_current_user),
+    limit: int = 100,
+):
+    """Return raw reminder timing fields for diagnostics.
+    Not for production exposure without auth; uses patient auth context.
+    """
+    res = await db.execute(
+        select(models.Reminder)
+        .where(models.Reminder.patient_id == current_user.id)
+        .order_by(models.Reminder.next_fire_utc.asc())
+    )
+    rows = res.scalars().all()
+    out = []
+    now = datetime.utcnow()
+    for r in rows[:limit]:
+        out.append({
+            "id": object.__getattribute__(r,'id'),
+            "title": object.__getattribute__(r,'title'),
+            "hour": object.__getattribute__(r,'hour'),
+            "minute": object.__getattribute__(r,'minute'),
+            "tz": object.__getattribute__(r,'timezone'),
+            "active": object.__getattribute__(r,'active'),
+            "grace_minutes": object.__getattribute__(r,'grace_minutes'),
+            "next_fire_local": object.__getattribute__(r,'next_fire_local').isoformat() if object.__getattribute__(r,'next_fire_local') else None,
+            "next_fire_utc": object.__getattribute__(r,'next_fire_utc').isoformat() if object.__getattribute__(r,'next_fire_utc') else None,
+            "last_ack_local_date": str(object.__getattribute__(r,'last_ack_local_date')) if object.__getattribute__(r,'last_ack_local_date') else None,
+            "last_sent_utc": object.__getattribute__(r,'last_sent_utc').isoformat() if object.__getattribute__(r,'last_sent_utc') else None,
+            "due": (object.__getattribute__(r,'next_fire_utc') <= now) if object.__getattribute__(r,'next_fire_utc') else False,
+        })
+    return {"now_utc": now.isoformat(), "reminders": out}
