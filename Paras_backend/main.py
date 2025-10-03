@@ -474,6 +474,19 @@ async def get_my_profile(current_user: models.Patient = Depends(get_current_user
     await _rotate_if_due(db, current_user)
     return current_user
 
+# -------------------------------------------------
+# Temporary public endpoint: list patients by doctor
+# SECURITY NOTE: This endpoint is unauthenticated right now to support
+# prototype doctor UI. It should be protected (require doctor auth)
+# before production deployment.
+# -------------------------------------------------
+@app.get("/patients/by-doctor", response_model=List[schemas.PatientPublic])
+async def list_patients_by_doctor(doctor: str, db: AsyncSession = Depends(get_db)):
+    stmt = select(models.Patient).where(models.Patient.doctor == doctor)
+    res = await db.execute(stmt)
+    patients = res.scalars().all()
+    return patients
+
 @app.post("/feedback", response_model=schemas.FeedbackResponse)
 async def submit_feedback(feedback: schemas.FeedbackCreate, db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
     new_feedback = models.Feedback(patient_id=current_user.id, message=feedback.message)
@@ -860,6 +873,7 @@ async def _internal_dispatch_due(
                 push_sent_tokens += 1
         setattr(push, "sent", True)
         setattr(push, "sent_at", datetime.utcnow())
+
         db.add(push)
         if debug:
             decisions.append({
