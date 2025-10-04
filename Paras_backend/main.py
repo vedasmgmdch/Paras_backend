@@ -619,9 +619,15 @@ async def doctor_list_instruction_status(
     username: str,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
+    filter_treatment: Optional[str] = None,
+    filter_subtype: Optional[str] = None,
     db: AsyncSession = Depends(get_db)
 ):
-    # Lookup patient
+    """Return raw instruction-status rows for the patient.
+    Optional filters:
+      - date_from / date_to (inclusive)
+      - filter_treatment / filter_subtype to scope to current episode treatment
+    """
     res = await db.execute(select(models.Patient).where(models.Patient.username == username))
     patient = res.scalars().first()
     if not patient:
@@ -631,6 +637,10 @@ async def doctor_list_instruction_status(
         q = q.where(models.InstructionStatus.date >= date_from)
     if date_to:
         q = q.where(models.InstructionStatus.date <= date_to)
+    if filter_treatment:
+        q = q.where(models.InstructionStatus.treatment == filter_treatment)
+    if filter_subtype:
+        q = q.where(models.InstructionStatus.subtype == filter_subtype)
     result = await db.execute(
         q.order_by(
             models.InstructionStatus.date.desc(),
@@ -639,6 +649,95 @@ async def doctor_list_instruction_status(
         )
     )
     return result.scalars().all()
+
+@app.get("/doctor/patients/{username}/instruction-status/full", response_model=schemas.InstructionStatusFullResponse)
+async def doctor_instruction_status_full(
+    username: str,
+    days: int = 14,
+    filter_treatment: Optional[str] = None,
+    filter_subtype: Optional[str] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """Combined instruction status raw rows + aggregated daily summary for last N days.
+
+    NOTE: Does not yet synthesize missing (unsubmitted) instructions; only returns actual rows.
+    Use filter_treatment / filter_subtype to narrow scope.
+    """
+    from datetime import date as _date, timedelta as _td
+    days = max(1, min(days, 60))
+    # Patient lookup
+    res = await db.execute(select(models.Patient).where(models.Patient.username == username))
+    patient = res.scalars().first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    date_to = _date.today()
+    date_from = date_to - _td(days=days-1)
+    q = select(models.InstructionStatus).where(models.InstructionStatus.patient_id == patient.id, models.InstructionStatus.date >= date_from, models.InstructionStatus.date <= date_to)
+    if filter_treatment:
+        q = q.where(models.InstructionStatus.treatment == filter_treatment)
+    if filter_subtype:
+        q = q.where(models.InstructionStatus.subtype == filter_subtype)
+    q = q.order_by(models.InstructionStatus.date.desc(), models.InstructionStatus.group.asc(), models.InstructionStatus.instruction_index.asc())
+    rows = (await db.execute(q)).scalars().all()
+    # Aggregate daily
+    by_date: dict[str, dict[str,int]] = {}
+    for r in rows:
+        ds = r.date.isoformat()
+        if ds not in by_date:
+            by_date[ds] = {"followed":0, "unfollowed":0}
+        if getattr(r, "followed", False):
+            by_date[ds]["followed"] += 1
+        else:
+            by_date[ds]["unfollowed"] += 1
+    daily_summary = []
+    for i in range(days):
+        d = date_from + _td(days=i)
+        ds = d.isoformat()
+        rec = by_date.get(ds, {"followed":0, "unfollowed":0})
+        total = rec["followed"] + rec["unfollowed"]
+        ratio = (rec["followed"] / total) if total else 0.0
+        daily_summary.append({
+            "date": ds,
+            "followed": rec["followed"],
+            "unfollowed": rec["unfollowed"],
+            "total": total,
+            "followed_ratio": round(ratio,3)
+        })
+    patient_public = {
+        "id": patient.id,
+        "name": patient.name,
+        "dob": patient.dob,
+        "gender": patient.gender,
+        "phone": patient.phone,
+        "email": patient.email,
+        "username": patient.username,
+        "department": patient.department,
+        "doctor": patient.doctor,
+        "treatment": patient.treatment,
+        "treatment_subtype": patient.treatment_subtype,
+        "procedure_date": patient.procedure_date,
+        "procedure_time": patient.procedure_time,
+        "procedure_completed": patient.procedure_completed,
+    }
+    return {
+        "patient": patient_public,
+        "range": {"from": date_from.isoformat(), "to": date_to.isoformat(), "days": days},
+        "instructions": [
+            {
+                "id": r.id,
+                "patient_id": r.patient_id,
+                "date": r.date,
+                "treatment": r.treatment,
+                "subtype": r.subtype,
+                "group": r.group,
+                "instruction_index": r.instruction_index,
+                "instruction_text": r.instruction_text,
+                "followed": r.followed,
+                "synthetic": False,
+            } for r in rows
+        ],
+        "daily_summary": daily_summary,
+    }
 
 # ------------------------------------------------------------------
 # Doctor read-only progress entries for a patient (TEMP: no auth)

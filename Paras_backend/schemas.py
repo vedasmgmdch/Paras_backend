@@ -146,6 +146,22 @@ class InstructionStatusResponse(InstructionStatusItem):
     patient_id: int
     model_config = ConfigDict(from_attributes=True)
 
+class DailyInstructionSummary(BaseModel):
+    date: date
+    followed: int
+    unfollowed: int
+    total: int
+    followed_ratio: float
+
+class InstructionStatusExtended(InstructionStatusResponse):
+    synthetic: bool = False  # True if server synthesized a placeholder (not currently populated, reserved)
+
+class InstructionStatusFullResponse(BaseModel):
+    patient: PatientPublic
+    range: dict
+    instructions: List[InstructionStatusExtended]
+    daily_summary: List[DailyInstructionSummary]
+
 class DepartmentDoctorSelection(BaseModel):
     department: str
     doctor: str
