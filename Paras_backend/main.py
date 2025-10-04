@@ -688,6 +688,27 @@ async def doctor_instruction_status_debug(username: str, db: AsyncSession = Depe
         for r in rows
     ]
 
+@app.get("/doctor/patients/{username}/info")
+async def doctor_patient_info(username: str, db: AsyncSession = Depends(get_db), current_doctor: models.Doctor = Depends(get_current_doctor)):
+    """Return high-level patient metadata for doctor dashboard.
+    Includes: username, name, department, doctor, treatment, subtype, procedure_date, procedure_completed.
+    Authorization: doctor must be authenticated; we do not (yet) restrict doctor-patient assignment; add check later if needed.
+    """
+    res = await db.execute(select(models.Patient).where(models.Patient.username == username))
+    patient = res.scalars().first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    return {
+        "username": patient.username,
+        "name": patient.name,
+        "department": patient.department,
+        "doctor": patient.doctor,
+        "treatment": patient.treatment,
+        "subtype": patient.treatment_subtype,
+    "procedure_date": patient.procedure_date.isoformat() if getattr(patient, 'procedure_date', None) is not None else None,
+        "procedure_completed": patient.procedure_completed,
+    }
+
 @app.get("/instruction-status", response_model=List[schemas.InstructionStatusResponse])
 async def list_instruction_status(date_from: Optional[date] = None, date_to: Optional[date] = None, db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
     q = select(models.InstructionStatus).where(models.InstructionStatus.patient_id == current_user.id)
