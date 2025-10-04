@@ -487,6 +487,118 @@ async def list_patients_by_doctor(doctor: str, db: AsyncSession = Depends(get_db
     patients = res.scalars().all()
     return patients
 
+# ------------------------------------------------------------------
+# Instruction progress (last N days) for a patient (TEMP: no auth)
+# SECURITY: Should be protected by doctor auth & assignment validation.
+# ------------------------------------------------------------------
+@app.get("/doctor/patients/{username}/instruction-progress")
+async def patient_instruction_progress(username: str, days: int = 14, db: AsyncSession = Depends(get_db)):
+    from datetime import date, timedelta
+    days = max(1, min(days, 60))  # clamp range
+    result = await db.execute(select(models.Patient).where(models.Patient.username == username))
+    patient = result.scalars().first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    date_from = date.today() - timedelta(days=days - 1)
+    q = select(models.InstructionStatus).where(
+        models.InstructionStatus.patient_id == patient.id,
+        models.InstructionStatus.date >= date_from
+    )
+    res = await db.execute(q)
+    rows = res.scalars().all()
+    by_date: dict[str, dict[str, int]] = {}
+    total_followed = 0
+    total_unfollowed = 0
+    for r in rows:
+        ds = r.date.isoformat()
+        if ds not in by_date:
+            by_date[ds] = {"followed": 0, "unfollowed": 0}
+        if getattr(r, "followed", False):
+            by_date[ds]["followed"] += 1
+            total_followed += 1
+        else:
+            by_date[ds]["unfollowed"] += 1
+            total_unfollowed += 1
+    # build sequence for each day even if zero
+    daily = []
+    for i in range(days):
+        d = date_from + timedelta(days=i)
+        key = d.isoformat()
+        rec = by_date.get(key, {"followed": 0, "unfollowed": 0})
+        total = rec["followed"] + rec["unfollowed"]
+        pct = (rec["followed"] / total) if total else 0.0
+        daily.append({
+            "date": key,
+            "followed": rec["followed"],
+            "unfollowed": rec["unfollowed"],
+            "total": total,
+            "followed_ratio": round(pct, 3)
+        })
+    return {
+        "patient": {
+            "username": patient.username,
+            "department": patient.department,
+            "doctor": patient.doctor,
+        },
+        "summary": {
+            "days": days,
+            "followed": total_followed,
+            "unfollowed": total_unfollowed,
+            "total": total_followed + total_unfollowed,
+            "followed_ratio": round((total_followed / (total_followed + total_unfollowed)) if (total_followed + total_unfollowed) else 0.0, 3)
+        },
+        "daily": daily
+    }
+
+# ------------------------------------------------------------------
+# Doctor read-only instruction status list for a patient (TEMP: no auth)
+# SECURITY: Protect with doctor auth & assignment validation before production.
+# Mirrors /instruction-status but requires specifying patient username.
+# ------------------------------------------------------------------
+@app.get("/doctor/patients/{username}/instruction-status", response_model=List[schemas.InstructionStatusResponse])
+async def doctor_list_instruction_status(
+    username: str,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    # Lookup patient
+    res = await db.execute(select(models.Patient).where(models.Patient.username == username))
+    patient = res.scalars().first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    q = select(models.InstructionStatus).where(models.InstructionStatus.patient_id == patient.id)
+    if date_from:
+        q = q.where(models.InstructionStatus.date >= date_from)
+    if date_to:
+        q = q.where(models.InstructionStatus.date <= date_to)
+    result = await db.execute(
+        q.order_by(
+            models.InstructionStatus.date.desc(),
+            models.InstructionStatus.group.asc(),
+            models.InstructionStatus.instruction_index.asc(),
+        )
+    )
+    return result.scalars().all()
+
+# ------------------------------------------------------------------
+# Doctor read-only progress entries for a patient (TEMP: no auth)
+# SECURITY: Protect with doctor auth & assignment validation before production.
+# Mirrors /progress GET but for specified patient.
+# ------------------------------------------------------------------
+@app.get("/doctor/patients/{username}/progress", response_model=List[schemas.ProgressEntry])
+async def doctor_get_patient_progress(username: str, db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(models.Patient).where(models.Patient.username == username))
+    patient = res.scalars().first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    result = await db.execute(
+        select(models.Progress)
+        .where(models.Progress.patient_id == patient.id)
+        .order_by(models.Progress.timestamp.desc())
+    )
+    return result.scalars().all()
+
 @app.post("/feedback", response_model=schemas.FeedbackResponse)
 async def submit_feedback(feedback: schemas.FeedbackCreate, db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
     new_feedback = models.Feedback(patient_id=current_user.id, message=feedback.message)
