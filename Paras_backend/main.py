@@ -632,18 +632,20 @@ async def save_instruction_status(payload: schemas.InstructionStatusBulkCreate, 
     await _rotate_if_due(db, current_user)
     # Upsert semantics: for each (date, group, instruction_index) replace previous row
     saved: list[models.InstructionStatus] = []
+    # Track which (date, group) we have already cleared this request to avoid repeated deletes
+    cleared: set[tuple] = set()
     for item in payload.items:
-        # Delete any existing matching record to keep only latest state
-        existing_q = select(models.InstructionStatus).where(
-            models.InstructionStatus.patient_id == current_user.id,
-            models.InstructionStatus.date == item.date,
-            models.InstructionStatus.group == item.group,
-            models.InstructionStatus.instruction_index == item.instruction_index,
-        )
-        existing_res = await db.execute(existing_q)
-        existing = existing_res.scalars().all()
-        for ex in existing:
-            await db.delete(ex)
+        key = (item.date, item.group)
+        if key not in cleared:
+            existing_q = select(models.InstructionStatus).where(
+                models.InstructionStatus.patient_id == current_user.id,
+                models.InstructionStatus.date == item.date,
+                models.InstructionStatus.group == item.group,
+            )
+            existing_res = await db.execute(existing_q)
+            for ex in existing_res.scalars().all():
+                await db.delete(ex)
+            cleared.add(key)
         row = models.InstructionStatus(
             patient_id=current_user.id,
             date=item.date,
