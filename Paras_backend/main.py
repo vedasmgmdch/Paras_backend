@@ -630,8 +630,20 @@ async def get_progress(db: AsyncSession = Depends(get_db), current_user: models.
 @app.post("/instruction-status", response_model=List[schemas.InstructionStatusResponse])
 async def save_instruction_status(payload: schemas.InstructionStatusBulkCreate, db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
     await _rotate_if_due(db, current_user)
+    # Upsert semantics: for each (date, group, instruction_index) replace previous row
     saved: list[models.InstructionStatus] = []
     for item in payload.items:
+        # Delete any existing matching record to keep only latest state
+        existing_q = select(models.InstructionStatus).where(
+            models.InstructionStatus.patient_id == current_user.id,
+            models.InstructionStatus.date == item.date,
+            models.InstructionStatus.group == item.group,
+            models.InstructionStatus.instruction_index == item.instruction_index,
+        )
+        existing_res = await db.execute(existing_q)
+        existing = existing_res.scalars().all()
+        for ex in existing:
+            await db.delete(ex)
         row = models.InstructionStatus(
             patient_id=current_user.id,
             date=item.date,
@@ -648,6 +660,31 @@ async def save_instruction_status(payload: schemas.InstructionStatusBulkCreate, 
     for r in saved:
         await db.refresh(r)
     return saved
+
+@app.get("/doctor/patients/{username}/instruction-status-debug")
+async def doctor_instruction_status_debug(username: str, db: AsyncSession = Depends(get_db)):
+    """UNAUTHENTICATED DEBUG: Returns raw instruction-status rows for a patient (limit 200).
+    NOTE: Remove / secure before production. Helps verify persistence problems.
+    """
+    res = await db.execute(select(models.Patient).where(models.Patient.username == username))
+    patient = res.scalars().first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    q = select(models.InstructionStatus).where(models.InstructionStatus.patient_id == patient.id).order_by(models.InstructionStatus.date.desc()).limit(200)
+    rows = (await db.execute(q)).scalars().all()
+    return [
+        {
+            "id": r.id,
+            "date": r.date.isoformat(),
+            "group": r.group,
+            "idx": r.instruction_index,
+            "text": r.instruction_text,
+            "followed": r.followed,
+            "treatment": r.treatment,
+            "subtype": r.subtype,
+        }
+        for r in rows
+    ]
 
 @app.get("/instruction-status", response_model=List[schemas.InstructionStatusResponse])
 async def list_instruction_status(date_from: Optional[date] = None, date_to: Optional[date] = None, db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
