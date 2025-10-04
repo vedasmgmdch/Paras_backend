@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, date
 import os
 from typing import List, Optional, Any
 from pydantic import BaseModel
+import asyncio  # moved here so exception handlers can reference
 
 import models
 from database import get_db
@@ -22,6 +23,7 @@ from utils import send_registration_email, send_fcm_notification, send_fcm_notif
 import os
 from fastapi import Request
 from sqlalchemy import and_, select
+from sqlalchemy import func
 from datetime import datetime, timedelta
 import pytz
 from routes import auth
@@ -56,6 +58,13 @@ async def healthz():
     except Exception:
         db_ok = False
     return {"ok": True, "db": db_ok}
+
+@app.get("/diag/echo")
+async def diag_echo():
+    """Minimal fast diagnostic endpoint to verify service reachability and latency.
+    Returns server UTC timestamp and a static message without touching the DB."""
+    now = datetime.utcnow().isoformat() + "Z"
+    return {"echo": "ok", "utc": now}
 
 @app.get("/reminders/health")
 async def reminders_health(db: AsyncSession = Depends(get_db)):
@@ -482,10 +491,60 @@ async def get_my_profile(current_user: models.Patient = Depends(get_current_user
 # -------------------------------------------------
 @app.get("/patients/by-doctor", response_model=List[schemas.PatientPublic])
 async def list_patients_by_doctor(doctor: str, db: AsyncSession = Depends(get_db)):
-    stmt = select(models.Patient).where(models.Patient.doctor == doctor)
-    res = await db.execute(stmt)
-    patients = res.scalars().all()
-    return patients
+    start = datetime.utcnow()
+    print(f"[patients/by-doctor] inbound doctor='{doctor}' @ {start.isoformat()}Z")
+    try:
+        stmt = select(models.Patient).where(models.Patient.doctor == doctor)
+        # Enforce DB execution timeout (5s) to surface stalls
+        async def _run():
+            res = await db.execute(stmt)
+            return res.scalars().all()
+        patients = await asyncio.wait_for(_run(), timeout=5.0)
+        elapsed = (datetime.utcnow() - start).total_seconds()*1000
+        print(f"[patients/by-doctor] doctor='{doctor}' count={len(patients)} elapsed_ms={elapsed:.1f}")
+        return patients
+    except asyncio.TimeoutError:
+        elapsed = (datetime.utcnow() - start).total_seconds()*1000
+        print(f"[patients/by-doctor][timeout] doctor='{doctor}' after {elapsed:.1f}ms")
+        raise HTTPException(status_code=504, detail="DB timeout fetching patients")
+    except Exception as e:
+        print(f"[patients/by-doctor][error] doctor='{doctor}' error={e}")
+        raise
+
+@app.get("/patients/by-doctor-debug")
+async def list_patients_by_doctor_debug(doctor: str, db: AsyncSession = Depends(get_db)):
+    """Debug variant: returns minimal patient identifiers and uses case-insensitive & prefix-less matching.
+
+    Matching logic:
+      - Exact doctor
+      - Case-insensitive
+      - Strips a leading 'Dr. ' from either side for comparison
+    """
+    start = datetime.utcnow()
+    print(f"[patients/by-doctor-debug] inbound doctor='{doctor}'")
+    cleaned = doctor.strip()
+    lowered = cleaned.lower()
+    def _strip_prefix(s: str) -> str:
+        s = s.strip()
+        if s.lower().startswith("dr. "):
+            return s[4:].strip()
+        if s.lower().startswith("dr "):
+            return s[3:].strip()
+        return s
+    target = _strip_prefix(lowered)
+    # Build OR conditions
+    cond = func.lower(models.Patient.doctor) == lowered
+    cond = cond | (func.lower(models.Patient.doctor) == target)
+    cond = cond | func.lower(models.Patient.doctor).ilike(f"%{target}%")
+    try:
+        res = await db.execute(select(models.Patient.username, models.Patient.doctor).where(cond))
+        rows = res.all()
+        elapsed = (datetime.utcnow() - start).total_seconds()*1000
+        print(f"[patients/by-doctor-debug] matched={len(rows)} elapsed_ms={elapsed:.1f}")
+        return [{"username": r[0], "doctor": r[1]} for r in rows]
+    except Exception as e:
+        print(f"[patients/by-doctor-debug][error] {e}")
+        raise HTTPException(status_code=500, detail="debug query failed")
 
 # ------------------------------------------------------------------
 # Instruction progress (last N days) for a patient (TEMP: no auth)
