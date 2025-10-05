@@ -14,7 +14,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 import schemas
 from database import engine
@@ -127,6 +127,29 @@ async def push_diag(request: Request):
 async def startup():
     async with engine.begin() as conn:
         await conn.run_sync(models.Base.metadata.create_all)
+        # --- InstructionStatus hardening: dedupe & ensure unique index for idempotent upserts ---
+        try:
+            # Remove duplicate logical rows keeping the latest (highest id)
+            await conn.execute(text(
+                """
+                WITH ranked AS (
+                  SELECT id, ROW_NUMBER() OVER (
+                    PARTITION BY patient_id, date, "group", instruction_index
+                    ORDER BY id DESC
+                  ) AS rn
+                  FROM instruction_status
+                )
+                DELETE FROM instruction_status WHERE id IN (
+                  SELECT id FROM ranked WHERE rn > 1
+                );
+                """
+            ))
+            # Create unique index to support ON CONFLICT upserts (ignore if already exists)
+            await conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_instruction_identity ON instruction_status (patient_id, date, \"group\", instruction_index);"
+            ))
+        except Exception as e:
+            print(f"[Startup] InstructionStatus index init warning: {e}")
     if os.getenv("SCHEDULER_ENABLED", "1") == "1":
         print("[Startup] Scheduler enabled (SCHEDULER_ENABLED=1)")
         scheduler = AsyncIOScheduler()
@@ -1012,39 +1035,72 @@ async def get_progress(db: AsyncSession = Depends(get_db), current_user: models.
 
 @app.post("/instruction-status", response_model=List[schemas.InstructionStatusResponse])
 async def save_instruction_status(payload: schemas.InstructionStatusBulkCreate, db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
+    """Idempotent upsert for instruction status rows.
+
+    Reliability changes:
+      * Removes destructive per-(date,group) delete cycles (previous churn source).
+      * Uses PostgreSQL ON CONFLICT to update existing rows in-place.
+      * Unique index (patient_id, date, group, instruction_index) enforced at startup.
+
+    Returns the freshly persisted rows corresponding to submitted items.
+    """
     await _rotate_if_due(db, current_user)
-    # Upsert semantics: for each (date, group, instruction_index) replace previous row
-    saved: list[models.InstructionStatus] = []
-    # Track which (date, group) we have already cleared this request to avoid repeated deletes
-    cleared: set[tuple] = set()
+    if not payload.items:
+        return []
+
+    # Normalize & collapse duplicates inside the same payload (last wins)
+    collapsed: dict[tuple, schemas.InstructionStatusItem] = {}
     for item in payload.items:
-        key = (item.date, item.group)
-        if key not in cleared:
-            existing_q = select(models.InstructionStatus).where(
-                models.InstructionStatus.patient_id == current_user.id,
-                models.InstructionStatus.date == item.date,
-                models.InstructionStatus.group == item.group,
-            )
-            existing_res = await db.execute(existing_q)
-            for ex in existing_res.scalars().all():
-                await db.delete(ex)
-            cleared.add(key)
-        row = models.InstructionStatus(
-            patient_id=current_user.id,
-            date=item.date,
-            treatment=item.treatment,
-            subtype=item.subtype,
-            group=item.group,
-            instruction_index=item.instruction_index,
-            instruction_text=item.instruction_text,
-            followed=item.followed,
-        )
-        db.add(row)
-        saved.append(row)
+        key = (item.date, item.group, item.instruction_index)
+        collapsed[key] = item  # overwrite if repeated
+
+    upsert_sql = text(
+        """
+        INSERT INTO instruction_status (patient_id, date, treatment, subtype, "group", instruction_index, instruction_text, followed)
+        VALUES (:patient_id, :date, :treatment, :subtype, :group, :instruction_index, :instruction_text, :followed)
+        ON CONFLICT (patient_id, date, "group", instruction_index)
+        DO UPDATE SET
+          treatment = EXCLUDED.treatment,
+          subtype = EXCLUDED.subtype,
+          instruction_text = EXCLUDED.instruction_text,
+          followed = EXCLUDED.followed
+        RETURNING id, patient_id, date, treatment, subtype, "group", instruction_index, instruction_text, followed;
+        """
+    )
+
+    returned_rows = []
+    for (_d, _g, _idx), item in collapsed.items():
+        params = {
+            "patient_id": current_user.id,
+            "date": item.date,
+            "treatment": item.treatment or "",
+            "subtype": item.subtype,
+            "group": item.group,
+            "instruction_index": item.instruction_index,
+            "instruction_text": item.instruction_text,
+            "followed": item.followed,
+        }
+        res = await db.execute(upsert_sql, params)
+        row = res.first()
+        if row:
+            returned_rows.append(row)
     await db.commit()
-    for r in saved:
-        await db.refresh(r)
-    return saved
+
+    # Shape rows into response models
+    out = []
+    for r in returned_rows:
+        out.append({
+            "id": r.id,
+            "patient_id": r.patient_id,
+            "date": r.date,
+            "treatment": r.treatment,
+            "subtype": r.subtype,
+            "group": r.group,
+            "instruction_index": r.instruction_index,
+            "instruction_text": r.instruction_text,
+            "followed": r.followed,
+        })
+    return out
 
 @app.get("/doctor/patients/{username}/instruction-status-debug")
 async def doctor_instruction_status_debug(username: str, db: AsyncSession = Depends(get_db)):
