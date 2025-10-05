@@ -33,6 +33,10 @@ import asyncio
 
 app = FastAPI()
 
+# In-memory rate limiter buckets for instruction status endpoint (patient_id -> list[timestamps])
+# NOTE: Single-process only. Replace with shared store (Redis) for multi-worker deployments.
+_instruction_rate_limiter: dict[int, list[float]] = {}
+
 # --- In-memory instrumentation for reminder fallback dispatch (non-persistent) ---
 # Updated each time /push/dispatch-due (or scheduler invoking dispatch_due_pushes) runs.
 REMINDER_DISPATCH_LAST_RUN: Optional[datetime] = None
@@ -1045,6 +1049,40 @@ async def save_instruction_status(payload: schemas.InstructionStatusBulkCreate, 
     Returns the freshly persisted rows corresponding to submitted items.
     """
     await _rotate_if_due(db, current_user)
+
+    # Lightweight in-memory rate limiting (per patient) to suppress accidental rapid bursts
+    # Environment variables (optional):
+    #   INSTR_STATUS_RATE_WINDOW_SECONDS (default 5)
+    #   INSTR_STATUS_RATE_MAX_REQUESTS (default 12)
+    # This is a best-effort, in-process limiter. For multi-worker deployments replace with Redis.
+    try:
+        import os, time
+        window_s = int(os.getenv("INSTR_STATUS_RATE_WINDOW_SECONDS", "5"))
+        max_req = int(os.getenv("INSTR_STATUS_RATE_MAX_REQUESTS", "12"))
+        if window_s > 0 and max_req > 0:
+            now = time.time()
+            bucket = _instruction_rate_limiter.setdefault(current_user.id, [])  # type: ignore  # defined below
+            # Drop timestamps outside window
+            cutoff = now - window_s
+            i = 0
+            while i < len(bucket):
+                if bucket[i] < cutoff:
+                    i += 1
+                else:
+                    break
+            if i > 0:
+                del bucket[:i]
+            if len(bucket) >= max_req:
+                # Too many in window -> 429
+                from fastapi import Response
+                retry_after = max(1, int(cutoff + window_s - now))
+                raise HTTPException(status_code=429, detail="Too many instruction-status submissions; please retry shortly.")
+            bucket.append(now)
+    except HTTPException:
+        raise
+    except Exception:
+        # Fail open on limiter errors
+        pass
     if not payload.items:
         return []
 
