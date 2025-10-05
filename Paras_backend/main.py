@@ -478,6 +478,46 @@ async def doctor_login(form_data: OAuth2PasswordRequestForm = Depends(), db: Asy
     access_token = create_access_token(data={"sub": doctor.username})
     return {"access_token": access_token, "token_type": "bearer"}
 
+@app.post("/doctor/master-login", response_model=schemas.TokenResponse)
+async def doctor_master_login(payload: schemas.DoctorMasterLoginRequest, db: AsyncSession = Depends(get_db)):
+    """Single shared password doctor login (prototype).
+    Environment variables:
+      DOCTOR_MASTER_PASSWORD (required) - plaintext master secret.
+      DOCTOR_MASTER_USERNAME (optional, default 'masterdoctor') - subject placed in token.
+    Behavior:
+      - Verifies master password.
+      - Ensures a Doctor row (username == master username) exists; if absent, creates a placeholder doctor record.
+      - Issues JWT so auth-protected doctor endpoints function.
+    SECURITY: Do NOT use in production; replace with real doctor accounts.
+    """
+    master_pw = os.getenv("DOCTOR_MASTER_PASSWORD")
+    if not master_pw:
+        raise HTTPException(status_code=503, detail="Master login disabled (password not configured)")
+    if payload.password != master_pw:
+        raise HTTPException(status_code=401, detail="Invalid master password")
+    username = os.getenv("DOCTOR_MASTER_USERNAME", "masterdoctor")
+    # Ensure doctor row exists
+    res = await db.execute(select(models.Doctor).where(models.Doctor.username == username))
+    doc = res.scalars().first()
+    if not doc:
+        # Create minimal doctor entry with hashed master password (so /doctor-login also works if needed)
+        hashed = get_password_hash(master_pw)
+        doc = models.Doctor(
+            name="Master Doctor",
+            specialty="General",
+            username=username,
+            password=hashed,
+            email=f"{username}@example.com",
+            is_verified=True,
+        )
+        db.add(doc)
+        try:
+            await db.commit()
+        except Exception:
+            await db.rollback()
+    access_token = create_access_token(data={"sub": username})
+    return {"access_token": access_token, "token_type": "bearer"}
+
 @app.post("/doctor/register", response_model=schemas.TokenResponse)
 async def doctor_register(request: Request, doctor: schemas.DoctorCreate = Body(...), db: AsyncSession = Depends(get_db)):
     """Create a doctor account (dev/ops only).

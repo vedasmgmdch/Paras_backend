@@ -10,12 +10,8 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
 
-    class DoctorCreate(BaseModel):
-        name: str
-        specialty: str
-        username: str
-        password: str
-        email: EmailStr
+class DoctorMasterLoginRequest(BaseModel):
+    password: str
 
 class PatientBase(BaseModel):
     name: str
