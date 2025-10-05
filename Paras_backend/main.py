@@ -739,6 +739,160 @@ async def doctor_instruction_status_full(
         "daily_summary": daily_summary,
     }
 
+@app.get("/doctor/patients/{username}/instruction-status/enhanced", response_model=schemas.InstructionStatusEnhancedResponse)
+async def doctor_instruction_status_enhanced(
+    username: str,
+    days: int = 14,
+    filter_treatment: Optional[str] = None,
+    filter_subtype: Optional[str] = None,
+    include_unfollowed_placeholders: bool = True,
+    db: AsyncSession = Depends(get_db)
+):
+    """Return fully materialized per-day instruction logs for last N days.
+
+    If include_unfollowed_placeholders is true, we attempt to ensure that if on a day the patient
+    submitted some instructions for a (group, instruction_index) set earlier in the range, but did not
+    submit it for this day, we synthesize a placeholder (followed=False, synthetic=True) so doctor can
+    see consistent timeline continuity. This is a heuristic because we do not yet have a global
+    instruction catalog. It infers expected instructions from the union of all instructions observed
+    in the window.
+    """
+    from datetime import date as _date, timedelta as _td, datetime as _dt
+    days = max(1, min(days, 60))
+    res = await db.execute(select(models.Patient).where(models.Patient.username == username))
+    patient = res.scalars().first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    date_to = _date.today()
+    date_from = date_to - _td(days=days-1)
+    q = select(models.InstructionStatus).where(
+        models.InstructionStatus.patient_id == patient.id,
+        models.InstructionStatus.date >= date_from,
+        models.InstructionStatus.date <= date_to,
+    )
+    if filter_treatment:
+        q = q.where(models.InstructionStatus.treatment == filter_treatment)
+    if filter_subtype:
+        q = q.where(models.InstructionStatus.subtype == filter_subtype)
+    q = q.order_by(models.InstructionStatus.date.asc(), models.InstructionStatus.group.asc(), models.InstructionStatus.instruction_index.asc())
+    rows = (await db.execute(q)).scalars().all()
+
+    # Build base structures
+    # Observed instruction identities across window
+    observed_keys: dict[tuple, dict] = {}
+    rows_by_date: dict[str, list] = {}
+    for r in rows:
+        ds = r.date.isoformat()
+        rows_by_date.setdefault(ds, []).append(r)
+        key = (r.group, r.instruction_index, r.instruction_text)
+        if key not in observed_keys:
+            observed_keys[key] = {
+                "group": r.group,
+                "instruction_index": r.instruction_index,
+                "instruction_text": r.instruction_text,
+                "treatment": r.treatment,
+                "subtype": r.subtype,
+            }
+
+    days_out = []
+    # Iterate each day and materialize
+    for i in range(days):
+        d = date_from + _td(days=i)
+        ds = d.isoformat()
+        real_rows = rows_by_date.get(ds, [])
+        real_map = {(r.group, r.instruction_index, r.instruction_text): r for r in real_rows}
+        materialized = []
+        followed_ct = 0
+        unfollowed_ct = 0
+        if include_unfollowed_placeholders and observed_keys:
+            # Use union of observed instructions across window as baseline
+            for key, meta in observed_keys.items():
+                r = real_map.get(key)
+                if r is None:
+                    # Placeholder synthetic entry (did not appear this day)
+                    materialized.append({
+                        "id": 0,
+                        "patient_id": patient.id,
+                        "date": d,
+                        "treatment": meta["treatment"],
+                        "subtype": meta["subtype"],
+                        "group": meta["group"],
+                        "instruction_index": meta["instruction_index"],
+                        "instruction_text": meta["instruction_text"],
+                        "followed": False,
+                        "synthetic": True,
+                    })
+                    unfollowed_ct += 1
+                else:
+                    materialized.append({
+                        "id": r.id,
+                        "patient_id": r.patient_id,
+                        "date": r.date,
+                        "treatment": r.treatment,
+                        "subtype": r.subtype,
+                        "group": r.group,
+                        "instruction_index": r.instruction_index,
+                        "instruction_text": r.instruction_text,
+                        "followed": r.followed,
+                        "synthetic": False,
+                    })
+                    if r.followed:
+                        followed_ct += 1
+                    else:
+                        unfollowed_ct += 1
+        else:
+            for r in real_rows:
+                materialized.append({
+                    "id": r.id,
+                    "patient_id": r.patient_id,
+                    "date": r.date,
+                    "treatment": r.treatment,
+                    "subtype": r.subtype,
+                    "group": r.group,
+                    "instruction_index": r.instruction_index,
+                    "instruction_text": r.instruction_text,
+                    "followed": r.followed,
+                    "synthetic": False,
+                })
+                if r.followed:
+                    followed_ct += 1
+                else:
+                    unfollowed_ct += 1
+
+        total = followed_ct + unfollowed_ct
+        ratio = (followed_ct / total) if total else 0.0
+        days_out.append({
+            "date": d,
+            "instructions": materialized,
+            "followed_count": followed_ct,
+            "unfollowed_count": unfollowed_ct,
+            "total": total,
+            "followed_ratio": round(ratio,3),
+        })
+
+    patient_public = {
+        "id": patient.id,
+        "name": patient.name,
+        "dob": patient.dob,
+        "gender": patient.gender,
+        "phone": patient.phone,
+        "email": patient.email,
+        "username": patient.username,
+        "department": patient.department,
+        "doctor": patient.doctor,
+        "treatment": patient.treatment,
+        "treatment_subtype": patient.treatment_subtype,
+        "procedure_date": patient.procedure_date,
+        "procedure_time": patient.procedure_time,
+        "procedure_completed": patient.procedure_completed,
+    }
+    return {
+        "patient": patient_public,
+        "range": {"from": date_from.isoformat(), "to": date_to.isoformat(), "days": days},
+        "days": days_out,
+        "generated_at": _dt.utcnow(),
+    }
+
 # ------------------------------------------------------------------
 # Doctor read-only progress entries for a patient (TEMP: no auth)
 # SECURITY: Protect with doctor auth & assignment validation before production.

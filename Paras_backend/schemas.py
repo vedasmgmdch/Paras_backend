@@ -162,6 +162,21 @@ class InstructionStatusFullResponse(BaseModel):
     instructions: List[InstructionStatusExtended]
     daily_summary: List[DailyInstructionSummary]
 
+# --- Enhanced materialized daily instruction log ---
+class DayInstructionLog(BaseModel):
+    date: date
+    instructions: List[InstructionStatusExtended]
+    followed_count: int
+    unfollowed_count: int
+    total: int
+    followed_ratio: float
+
+class InstructionStatusEnhancedResponse(BaseModel):
+    patient: PatientPublic
+    range: dict
+    days: List[DayInstructionLog]
+    generated_at: datetime
+
 class DepartmentDoctorSelection(BaseModel):
     department: str
     doctor: str
