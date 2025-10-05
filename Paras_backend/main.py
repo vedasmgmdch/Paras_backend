@@ -478,6 +478,37 @@ async def doctor_login(form_data: OAuth2PasswordRequestForm = Depends(), db: Asy
     access_token = create_access_token(data={"sub": doctor.username})
     return {"access_token": access_token, "token_type": "bearer"}
 
+@app.post("/doctor/register", response_model=schemas.TokenResponse)
+async def doctor_register(request: Request, doctor: schemas.DoctorCreate = Body(...), db: AsyncSession = Depends(get_db)):
+    """Create a doctor account (dev/ops only).
+    Guarded by environment variable DOCTOR_SELF_REGISTER=1. Returns JWT on success.
+    """
+    if os.getenv("DOCTOR_SELF_REGISTER", "0") not in {"1","true","yes","on"}:
+        raise HTTPException(status_code=403, detail="Doctor self-registration disabled")
+    errors: dict[str,str] = {}
+    existing_u = await db.execute(select(models.Doctor).where(models.Doctor.username == doctor.username))
+    if existing_u.scalars().first():
+        errors["username"] = "Username already exists"
+    existing_e = await db.execute(select(models.Doctor).where(models.Doctor.email == doctor.email))
+    if existing_e.scalars().first():
+        errors["email"] = "Email already exists"
+    if errors:
+        raise HTTPException(status_code=400, detail=errors)
+    hashed_pw = get_password_hash(doctor.password)
+    db_doc = models.Doctor(
+        name=doctor.name,
+        specialty=doctor.specialty,
+        username=doctor.username,
+        password=hashed_pw,
+        email=doctor.email,
+        is_verified=True,
+    )
+    db.add(db_doc)
+    await db.commit()
+    await db.refresh(db_doc)
+    access_token = create_access_token(data={"sub": db_doc.username})
+    return {"access_token": access_token, "token_type": "bearer"}
+
 @app.get("/patients/me", response_model=schemas.PatientPublic)
 async def get_my_profile(current_user: models.Patient = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     await _rotate_if_due(db, current_user)
