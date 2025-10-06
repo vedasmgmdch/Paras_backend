@@ -134,6 +134,10 @@ class InstructionStatus(Base):
     instruction_index = Column(Integer, nullable=False)
     instruction_text = Column(String, nullable=False)
     followed = Column(Boolean, default=False)
+    # New: tracks if instruction was EVER followed at least once historically.
+    # This value becomes sticky (once true it never reverts to false) and is
+    # updated via upsert logic OR (existing, new.followed).
+    ever_followed = Column(Boolean, default=False, nullable=False)
     patient = relationship("Patient", back_populates="instruction_statuses")
 
 class ScheduledPush(Base):

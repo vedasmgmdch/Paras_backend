@@ -1092,19 +1092,21 @@ async def save_instruction_status(payload: schemas.InstructionStatusBulkCreate, 
         key = (item.date, item.group, item.instruction_index)
         collapsed[key] = item  # overwrite if repeated
 
-    upsert_sql = text(
-        """
-        INSERT INTO instruction_status (patient_id, date, treatment, subtype, "group", instruction_index, instruction_text, followed)
-        VALUES (:patient_id, :date, :treatment, :subtype, :group, :instruction_index, :instruction_text, :followed)
-        ON CONFLICT (patient_id, date, "group", instruction_index)
-        DO UPDATE SET
-          treatment = EXCLUDED.treatment,
-          subtype = EXCLUDED.subtype,
-          instruction_text = EXCLUDED.instruction_text,
-          followed = EXCLUDED.followed
-        RETURNING id, patient_id, date, treatment, subtype, "group", instruction_index, instruction_text, followed;
-        """
-    )
+        # Upsert with sticky ever_followed logic: once true, always true.
+        upsert_sql = text(
+                """
+                INSERT INTO instruction_status (patient_id, date, treatment, subtype, "group", instruction_index, instruction_text, followed, ever_followed)
+                VALUES (:patient_id, :date, :treatment, :subtype, :group, :instruction_index, :instruction_text, :followed, :ever_followed)
+                ON CONFLICT (patient_id, date, "group", instruction_index)
+                DO UPDATE SET
+                    treatment = EXCLUDED.treatment,
+                    subtype = EXCLUDED.subtype,
+                    instruction_text = EXCLUDED.instruction_text,
+                    followed = EXCLUDED.followed,
+                    ever_followed = (instruction_status.ever_followed OR EXCLUDED.ever_followed)
+                RETURNING id, patient_id, date, treatment, subtype, "group", instruction_index, instruction_text, followed, ever_followed;
+                """
+        )
 
     returned_rows = []
     for (_d, _g, _idx), item in collapsed.items():
@@ -1117,6 +1119,7 @@ async def save_instruction_status(payload: schemas.InstructionStatusBulkCreate, 
             "instruction_index": item.instruction_index,
             "instruction_text": item.instruction_text,
             "followed": item.followed,
+            "ever_followed": (item.followed is True),
         }
         res = await db.execute(upsert_sql, params)
         row = res.first()
@@ -1137,6 +1140,7 @@ async def save_instruction_status(payload: schemas.InstructionStatusBulkCreate, 
             "instruction_index": r.instruction_index,
             "instruction_text": r.instruction_text,
             "followed": r.followed,
+            "ever_followed": getattr(r, 'ever_followed', None),
         })
     return out
 

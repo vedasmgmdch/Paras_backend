@@ -140,6 +140,8 @@ class InstructionStatusItem(BaseModel):
     instruction_index: int
     instruction_text: str
     followed: bool
+    # Sticky flag: once an instruction is followed at least once this stays true.
+    ever_followed: Optional[bool] = None
 
 class InstructionStatusBulkCreate(BaseModel):
     items: List[InstructionStatusItem]
