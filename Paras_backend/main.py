@@ -152,6 +152,22 @@ async def startup():
             await conn.execute(text(
                 "CREATE UNIQUE INDEX IF NOT EXISTS ux_instruction_identity ON instruction_status (patient_id, date, \"group\", instruction_index);"
             ))
+            # Ensure updated_at column exists (auto-migration for older deployments)
+            try:
+                result = await conn.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name='instruction_status' AND column_name='updated_at';"))
+                col = result.first()
+                if not col:
+                    print("[Startup] Adding missing instruction_status.updated_at column and backfilling …")
+                    # Add column with default now and backfill existing rows
+                    await conn.execute(text("ALTER TABLE instruction_status ADD COLUMN updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW() NOT NULL;"))
+                    # Optional index to accelerate /instruction-status/changes queries
+                    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_instruction_status_updated_at ON instruction_status (updated_at);"))
+                    print("[Startup] instruction_status.updated_at added.")
+                else:
+                    # Still ensure index exists
+                    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_instruction_status_updated_at ON instruction_status (updated_at);"))
+            except Exception as mig_e:
+                print(f"[Startup] WARNING could not ensure updated_at column/index: {mig_e}")
         except Exception as e:
             print(f"[Startup] InstructionStatus index init warning: {e}")
     if os.getenv("SCHEDULER_ENABLED", "1") == "1":
