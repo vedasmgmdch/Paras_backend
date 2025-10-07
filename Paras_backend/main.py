@@ -1092,21 +1092,22 @@ async def save_instruction_status(payload: schemas.InstructionStatusBulkCreate, 
         key = (item.date, item.group, item.instruction_index)
         collapsed[key] = item  # overwrite if repeated
 
-        # Upsert with sticky ever_followed logic: once true, always true.
-        upsert_sql = text(
-                """
-                INSERT INTO instruction_status (patient_id, date, treatment, subtype, "group", instruction_index, instruction_text, followed, ever_followed)
-                VALUES (:patient_id, :date, :treatment, :subtype, :group, :instruction_index, :instruction_text, :followed, :ever_followed)
-                ON CONFLICT (patient_id, date, "group", instruction_index)
-                DO UPDATE SET
-                    treatment = EXCLUDED.treatment,
-                    subtype = EXCLUDED.subtype,
-                    instruction_text = EXCLUDED.instruction_text,
-                    followed = EXCLUDED.followed,
-                    ever_followed = (instruction_status.ever_followed OR EXCLUDED.ever_followed)
-                RETURNING id, patient_id, date, treatment, subtype, "group", instruction_index, instruction_text, followed, ever_followed;
-                """
-        )
+    # Upsert with sticky ever_followed logic: once true, always true.
+    upsert_sql = text(
+        """
+        INSERT INTO instruction_status (patient_id, date, treatment, subtype, "group", instruction_index, instruction_text, followed, ever_followed, updated_at)
+        VALUES (:patient_id, :date, :treatment, :subtype, :group, :instruction_index, :instruction_text, :followed, :ever_followed, NOW())
+        ON CONFLICT (patient_id, date, "group", instruction_index)
+        DO UPDATE SET
+          treatment = EXCLUDED.treatment,
+          subtype = EXCLUDED.subtype,
+          instruction_text = EXCLUDED.instruction_text,
+          followed = EXCLUDED.followed,
+          ever_followed = (instruction_status.ever_followed OR EXCLUDED.ever_followed),
+          updated_at = NOW()
+        RETURNING id, patient_id, date, treatment, subtype, "group", instruction_index, instruction_text, followed, ever_followed, updated_at;
+        """
+    )
 
     returned_rows = []
     for (_d, _g, _idx), item in collapsed.items():
@@ -1141,6 +1142,7 @@ async def save_instruction_status(payload: schemas.InstructionStatusBulkCreate, 
             "instruction_text": r.instruction_text,
             "followed": r.followed,
             "ever_followed": getattr(r, 'ever_followed', None),
+            "updated_at": getattr(r, 'updated_at', None),
         })
     return out
 
@@ -1205,6 +1207,23 @@ async def list_instruction_status(date_from: Optional[date] = None, date_to: Opt
         )
     )
     return result.scalars().all()
+
+    @app.get("/instruction-status/changes", response_model=List[schemas.InstructionStatusResponse])
+    async def list_instruction_status_changes(since: str, db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
+        """Return instruction status rows updated AFTER the provided ISO8601 timestamp (UTC)."""
+        try:
+            from datetime import datetime
+            since_dt = datetime.fromisoformat(since.replace('Z','+00:00'))
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid 'since' timestamp")
+        q = select(models.InstructionStatus).where(
+            models.InstructionStatus.patient_id == current_user.id,
+            models.InstructionStatus.updated_at > since_dt
+        ).order_by(models.InstructionStatus.updated_at.asc())
+        res = await db.execute(q)
+        rows = res.scalars().all()
+        # Shape to response models (schemas uses from_attributes)
+        return rows
 
 @app.post("/department-doctor")
 async def save_department_doctor(data: schemas.DepartmentDoctorSelection, db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):

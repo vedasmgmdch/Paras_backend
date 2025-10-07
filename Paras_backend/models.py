@@ -138,6 +138,8 @@ class InstructionStatus(Base):
     # This value becomes sticky (once true it never reverts to false) and is
     # updated via upsert logic OR (existing, new.followed).
     ever_followed = Column(Boolean, default=False, nullable=False)
+    # Updated timestamp for multi-device sync (server authoritative clock)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     patient = relationship("Patient", back_populates="instruction_statuses")
 
 class ScheduledPush(Base):
