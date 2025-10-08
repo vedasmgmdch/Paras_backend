@@ -100,6 +100,27 @@ async def reminders_health(db: AsyncSession = Depends(get_db)):
         "active_reminders": total_active,
     }
 
+@app.get("/reminders/debug-ops")
+async def reminders_debug_ops(limit: int = 50, db: AsyncSession = Depends(get_db)):
+    """Return recently attempted reminders that are in retry/token_invalid/failed states.
+    Intended for operational diagnostics.
+    """
+    problematic_status = {"retry", "token_invalid", "failed_permanent"}
+    res = await db.execute(select(models.Reminder).where(models.Reminder.last_delivery_status.in_(problematic_status)).order_by(models.Reminder.last_attempt_utc.desc()))
+    rows = res.scalars().all()
+    out = []
+    for r in rows[:limit]:
+        out.append({
+            "id": object.__getattribute__(r,'id'),
+            "patient_id": getattr(r,'patient_id'),
+            "title": getattr(r,'title'),
+            "status": getattr(r,'last_delivery_status'),
+            "attempts_today": getattr(r,'attempts_today'),
+            "next_fire_utc": getattr(r,'next_fire_utc').isoformat() if getattr(r,'next_fire_utc') else None,
+            "last_attempt_utc": getattr(r,'last_attempt_utc').isoformat() if getattr(r,'last_attempt_utc') else None,
+        })
+    return {"count": len(out), "reminders": out}
+
 @app.get("/push/diag")
 async def push_diag(request: Request):
     """Return server-side FCM configuration visibility + optional token test.
@@ -170,6 +191,40 @@ async def startup():
                 print(f"[Startup] WARNING could not ensure updated_at column/index: {mig_e}")
         except Exception as e:
             print(f"[Startup] InstructionStatus index init warning: {e}")
+        # --- Lightweight online migrations for new push/reminder columns ---
+        try:
+            # DeviceToken lifecycle columns
+            cols = await conn.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name='device_tokens';"))
+            existing_cols = {r[0] for r in cols.fetchall()}
+            alter_stmts = []
+            if 'active' not in existing_cols:
+                alter_stmts.append("ALTER TABLE device_tokens ADD COLUMN active BOOLEAN DEFAULT TRUE NOT NULL;")
+            if 'deactivated_at' not in existing_cols:
+                alter_stmts.append("ALTER TABLE device_tokens ADD COLUMN deactivated_at TIMESTAMP WITHOUT TIME ZONE NULL;")
+            if 'deactivated_reason' not in existing_cols:
+                alter_stmts.append("ALTER TABLE device_tokens ADD COLUMN deactivated_reason VARCHAR NULL;")
+            for stmt in alter_stmts:
+                try:
+                    await conn.execute(text(stmt))
+                except Exception as _e:
+                    print(f"[Startup] device_tokens migration note: {_e}")
+            # Reminder retry / instrumentation columns
+            rcols = await conn.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name='reminders';"))
+            existing_rcols = {r[0] for r in rcols.fetchall()}
+            r_alter = []
+            if 'attempts_today' not in existing_rcols:
+                r_alter.append("ALTER TABLE reminders ADD COLUMN attempts_today INTEGER DEFAULT 0 NOT NULL;")
+            if 'last_attempt_utc' not in existing_rcols:
+                r_alter.append("ALTER TABLE reminders ADD COLUMN last_attempt_utc TIMESTAMP WITHOUT TIME ZONE NULL;")
+            if 'last_delivery_status' not in existing_rcols:
+                r_alter.append("ALTER TABLE reminders ADD COLUMN last_delivery_status VARCHAR NULL;")
+            for stmt in r_alter:
+                try:
+                    await conn.execute(text(stmt))
+                except Exception as _e:
+                    print(f"[Startup] reminders migration note: {_e}")
+        except Exception as mig_all:
+            print(f"[Startup] WARNING push/reminder migration block failed: {mig_all}")
     if os.getenv("SCHEDULER_ENABLED", "1") == "1":
         print("[Startup] Scheduler enabled (SCHEDULER_ENABLED=1)")
         scheduler = AsyncIOScheduler()
@@ -1551,17 +1606,53 @@ async def _internal_dispatch_due(
         pushes = pushes[:limit]
     if dry_run:
         return {"sent": 0, "dispatched_pushes": len(pushes), "dispatched_reminders": 0, "mode": "dry_run"}
+    # Helper to classify FCM error code from response body text (minimal regex-free scan)
+    def _extract_fcm_error(body: str | None) -> str | None:
+        if not body:
+            return None
+        # Look for common error markers
+        for key in ["UNREGISTERED", "InvalidRegistration", "NotRegistered", "MismatchSenderId", "QuotaExceeded", "Internal", "Unavailable"]:
+            if key in body:
+                return key
+        return None
     for push in pushes:
-        token_res = await db.execute(select(models.DeviceToken.token).where(models.DeviceToken.patient_id == push.patient_id))
+        token_res = await db.execute(select(models.DeviceToken.token).where(models.DeviceToken.patient_id == push.patient_id).where(models.DeviceToken.active == True))
         tokens = [row[0] for row in token_res.all()]
         push_sent_tokens = 0
         for t in tokens:
-            if send_fcm_notification(t, getattr(push, "title"), getattr(push, "body")):
+            res_obj = send_fcm_notification_ex(t, getattr(push, "title"), getattr(push, "body"))  # type: ignore
+            if res_obj.get("ok"):
                 sent += 1
                 push_sent_tokens += 1
+            else:
+                err_code = _extract_fcm_error(res_obj.get("body"))
+                if err_code in {"UNREGISTERED", "NotRegistered"}:
+                    # Deactivate token
+                    tok_row = await db.execute(select(models.DeviceToken).where(models.DeviceToken.token == t))
+                    tok = tok_row.scalars().first()
+                    if tok and getattr(tok, 'active'):
+                        object.__setattr__(tok, 'active', False)
+                        object.__setattr__(tok, 'deactivated_at', datetime.utcnow())
+                        object.__setattr__(tok, 'deactivated_reason', 'UNREGISTERED')
+                        db.add(tok)
+            if os.getenv("REMINDER_STRUCTURED_LOG", "0").lower() in {"1","true","yes","on"}:
+                import json as _json
+                try:
+                    print(_json.dumps({
+                        "evt": "scheduled_push_attempt",
+                        "push_id": object.__getattribute__(push,'id'),
+                        "patient_id": getattr(push,'patient_id'),
+                        "token_tail": t[-10:] if len(t) > 10 else t,
+                        "ok": res_obj.get("ok"),
+                        "status": res_obj.get("status"),
+                        "error_code": _extract_fcm_error(res_obj.get("body")),
+                        "ts": datetime.utcnow().isoformat()+"Z"
+                    }))
+                except Exception:
+                    pass
+        # Mark push complete regardless of per-token success; logic could be adapted to retry unsent tokens if desired.
         setattr(push, "sent", True)
         setattr(push, "sent_at", datetime.utcnow())
-
         db.add(push)
         if debug:
             decisions.append({
@@ -1581,6 +1672,17 @@ async def _internal_dispatch_due(
     reminders = rem_res.scalars().all()
     dispatched_rem = 0
     server_only = os.getenv("REMINDERS_SERVER_ONLY", "0").lower() in {"1","true","yes","on"}
+    # Retry/backoff parameters
+    MAX_ATTEMPTS_PER_DAY = int(os.getenv("REMINDER_MAX_ATTEMPTS", "3"))
+    BACKOFF_SECONDS = [120, 300, 600]  # default 2m,5m,10m
+    raw_backoff = os.getenv("REMINDER_BACKOFF")
+    if raw_backoff:
+        try:
+            parsed = [int(x.strip()) for x in raw_backoff.split(',') if x.strip()]
+            if parsed:
+                BACKOFF_SECONDS = parsed
+        except Exception as _e:
+            print(f"[Dispatch] Ignoring REMINDER_BACKOFF parse error: {_e}")
     for r in reminders:
         reason = "send"
         try:
@@ -1649,20 +1751,81 @@ async def _internal_dispatch_due(
                     })
                 continue
         # Send
-        token_res = await db.execute(select(models.DeviceToken.token).where(models.DeviceToken.patient_id == getattr(r, 'patient_id')))
+        token_res = await db.execute(select(models.DeviceToken.token).where(models.DeviceToken.patient_id == getattr(r, 'patient_id')).where(models.DeviceToken.active == True))
         tokens = [row[0] for row in token_res.all()]
         sent_tokens = 0
+        any_token_invalid = False
         for t in tokens:
-            if send_fcm_notification(t, getattr(r, 'title'), getattr(r, 'body')):
+            res_obj = send_fcm_notification_ex(t, getattr(r, 'title'), getattr(r, 'body'))  # type: ignore
+            if res_obj.get("ok"):
                 sent += 1
                 sent_tokens += 1
-        if sent_tokens:
+            else:
+                err_code = _extract_fcm_error(res_obj.get("body"))
+                if err_code in {"UNREGISTERED", "NotRegistered"}:
+                    any_token_invalid = True
+                    tok_row = await db.execute(select(models.DeviceToken).where(models.DeviceToken.token == t))
+                    tok = tok_row.scalars().first()
+                    if tok and getattr(tok, 'active'):
+                        object.__setattr__(tok, 'active', False)
+                        object.__setattr__(tok, 'deactivated_at', datetime.utcnow())
+                        object.__setattr__(tok, 'deactivated_reason', 'UNREGISTERED')
+                        db.add(tok)
+            if os.getenv("REMINDER_STRUCTURED_LOG", "0").lower() in {"1","true","yes","on"}:
+                import json as _json
+                try:
+                    print(_json.dumps({
+                        "evt": "reminder_attempt",
+                        "reminder_id": object.__getattribute__(r,'id'),
+                        "patient_id": getattr(r,'patient_id'),
+                        "token_tail": t[-10:] if len(t) > 10 else t,
+                        "ok": res_obj.get("ok"),
+                        "status": res_obj.get("status"),
+                        "error_code": _extract_fcm_error(res_obj.get("body")),
+                        "attempts_today": getattr(r,'attempts_today'),
+                        "ts": datetime.utcnow().isoformat()+"Z"
+                    }))
+                except Exception:
+                    pass
+        # Update reminder retry state
+        attempts = getattr(r, 'attempts_today') or 0
+        object.__setattr__(r, 'last_attempt_utc', now2)
+        status_val = None
+        if sent_tokens > 0:
+            # Success: advance to next day, reset attempts
             dispatched_rem += 1
-        setattr(r, 'last_sent_utc', now2)
-        next_local, next_utc = _compute_next_fire(now2, getattr(r, 'hour'), getattr(r, 'minute'), getattr(r, 'timezone'))
-        setattr(r, 'next_fire_local', next_local)
-        setattr(r, 'next_fire_utc', next_utc)
-        setattr(r, 'updated_at', now2)
+            object.__setattr__(r, 'last_sent_utc', now2)
+            next_local, next_utc = _compute_next_fire(now2, getattr(r, 'hour'), getattr(r, 'minute'), getattr(r, 'timezone'))
+            object.__setattr__(r, 'next_fire_local', next_local)
+            object.__setattr__(r, 'next_fire_utc', next_utc)
+            object.__setattr__(r, 'attempts_today', 0)
+            status_val = 'delivered'
+        else:
+            # Failure path
+            if attempts + 1 >= MAX_ATTEMPTS_PER_DAY:
+                # Give up for today: schedule next day
+                next_local, next_utc = _compute_next_fire(now2, getattr(r, 'hour'), getattr(r, 'minute'), getattr(r, 'timezone'))
+                object.__setattr__(r, 'next_fire_local', next_local)
+                object.__setattr__(r, 'next_fire_utc', next_utc)
+                object.__setattr__(r, 'attempts_today', 0)
+                status_val = 'token_invalid' if any_token_invalid else 'failed_permanent'
+            else:
+                # Schedule retry using backoff
+                backoff_idx = min(attempts, len(BACKOFF_SECONDS)-1)
+                retry_delay = BACKOFF_SECONDS[backoff_idx]
+                retry_utc = now2 + timedelta(seconds=retry_delay)
+                # Keep local retry time for transparency (convert from utc)
+                try:
+                    tz_retry = pytz.timezone(getattr(r, 'timezone'))
+                except Exception:
+                    tz_retry = pytz.UTC
+                retry_local = retry_utc.replace(tzinfo=pytz.UTC).astimezone(tz_retry).replace(tzinfo=None)
+                object.__setattr__(r, 'next_fire_local', retry_local)
+                object.__setattr__(r, 'next_fire_utc', retry_utc)
+                object.__setattr__(r, 'attempts_today', attempts + 1)
+                status_val = 'token_invalid' if any_token_invalid else 'retry'
+        object.__setattr__(r, 'last_delivery_status', status_val)
+        object.__setattr__(r, 'updated_at', now2)
         db.add(r)
         if debug:
             decisions.append({
@@ -1670,6 +1833,8 @@ async def _internal_dispatch_due(
                 "id": object.__getattribute__(r,'id'),
                 "action": reason,
                 "sent_tokens": sent_tokens,
+                "attempts_today": getattr(r,'attempts_today'),
+                "status": status_val,
             })
 
     if pushes or reminders:
@@ -1723,6 +1888,11 @@ async def register_device(
     if existing:
         object.__setattr__(existing, 'patient_id', current_user.id)
         object.__setattr__(existing, 'platform', payload.platform)
+        # Reactivate if previously deactivated
+        if hasattr(existing, 'active'):
+            object.__setattr__(existing, 'active', True)
+            object.__setattr__(existing, 'deactivated_at', None)
+            object.__setattr__(existing, 'deactivated_reason', None)
         db.add(existing)
         await db.commit()
         await db.refresh(existing)

@@ -88,6 +88,10 @@ class DeviceToken(Base):
     token = Column(String, unique=True, nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    # Lifecycle flags (added for UNREGISTERED cleanup & multi-device diagnostics)
+    active = Column(Boolean, default=True, nullable=False)
+    deactivated_at = Column(DateTime, nullable=True)
+    deactivated_reason = Column(String, nullable=True)
     patient = relationship("Patient", back_populates="device_tokens")
 
 class Appointment(Base):
@@ -179,5 +183,9 @@ class Reminder(Base):
     grace_minutes = Column(Integer, default=20, nullable=False)     # suppress push until grace window passes
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    # Delivery instrumentation & retry state (new)
+    attempts_today = Column(Integer, default=0, nullable=False)
+    last_attempt_utc = Column(DateTime, nullable=True)
+    last_delivery_status = Column(String, nullable=True)  # delivered|retry|token_invalid|failed_permanent
 
     patient = relationship("Patient")
