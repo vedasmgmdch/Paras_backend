@@ -1672,6 +1672,15 @@ async def _internal_dispatch_due(
     reminders = rem_res.scalars().all()
     dispatched_rem = 0
     server_only = os.getenv("REMINDERS_SERVER_ONLY", "0").lower() in {"1","true","yes","on"}
+    decision_log_enabled = os.getenv("REMINDER_DECISION_LOG", "0").lower() in {"1","true","yes","on"}
+    # Optional global grace override (e.g. force 0 for immediate server fallback) set REMINDER_FORCE_GRACE_MINUTES=0
+    force_grace: int | None = None
+    fge = os.getenv("REMINDER_FORCE_GRACE_MINUTES")
+    if fge is not None:
+        try:
+            force_grace = int(fge.strip())
+        except Exception:
+            force_grace = None
     # Retry/backoff parameters
     MAX_ATTEMPTS_PER_DAY = int(os.getenv("REMINDER_MAX_ATTEMPTS", "3"))
     BACKOFF_SECONDS = [120, 300, 600]  # default 2m,5m,10m
@@ -1690,6 +1699,12 @@ async def _internal_dispatch_due(
         except Exception:
             tz = pytz.UTC
         now_local = now2.replace(tzinfo=pytz.UTC).astimezone(tz)
+        # Apply forced grace override if configured
+        if force_grace is not None and getattr(r, 'grace_minutes') != force_grace:
+            try:
+                object.__setattr__(r, 'grace_minutes', force_grace)
+            except Exception:
+                pass
         if server_only:
             # In server-only mode we skip ack/grace logic entirely and always push once due
             token_res = await db.execute(select(models.DeviceToken.token).where(models.DeviceToken.patient_id == getattr(r, 'patient_id')))
@@ -1748,11 +1763,57 @@ async def _internal_dispatch_due(
                         "action": reason,
                         "grace_deadline": grace_deadline.isoformat(),
                         "now_local": now_local.isoformat(),
+                        "grace_minutes": grace_minutes,
                     })
+                if decision_log_enabled:
+                    try:
+                        print({
+                            "evt": "reminder_decision",
+                            "reminder_id": object.__getattribute__(r,'id'),
+                            "action": reason,
+                            "grace_minutes": grace_minutes,
+                            "grace_deadline": grace_deadline.isoformat(),
+                            "now_local": now_local.isoformat(),
+                            "ts": datetime.utcnow().isoformat()+"Z"
+                        })
+                    except Exception:
+                        pass
                 continue
         # Send
         token_res = await db.execute(select(models.DeviceToken.token).where(models.DeviceToken.patient_id == getattr(r, 'patient_id')).where(models.DeviceToken.active == True))
         tokens = [row[0] for row in token_res.all()]
+        tokens_count = len(tokens)
+        if tokens_count == 0:
+            # No device tokens: treat as terminal for today; move to next day to avoid tight retries.
+            reason = "no_tokens"
+            next_local, next_utc = _compute_next_fire(now2, getattr(r, 'hour'), getattr(r, 'minute'), getattr(r, 'timezone'))
+            object.__setattr__(r, 'next_fire_local', next_local)
+            object.__setattr__(r, 'next_fire_utc', next_utc)
+            object.__setattr__(r, 'attempts_today', 0)
+            object.__setattr__(r, 'last_delivery_status', 'no_tokens')
+            object.__setattr__(r, 'updated_at', now2)
+            db.add(r)
+            if debug:
+                decisions.append({
+                    "type": "reminder",
+                    "id": object.__getattribute__(r,'id'),
+                    "action": reason,
+                    "status": 'no_tokens',
+                    "attempts_today": 0,
+                })
+            if decision_log_enabled:
+                try:
+                    print({
+                        "evt": "reminder_decision",
+                        "reminder_id": object.__getattribute__(r,'id'),
+                        "action": reason,
+                        "status": 'no_tokens',
+                        "tokens": 0,
+                        "ts": datetime.utcnow().isoformat()+"Z"
+                    })
+                except Exception:
+                    pass
+            continue
         sent_tokens = 0
         any_token_invalid = False
         for t in tokens:
@@ -1835,7 +1896,24 @@ async def _internal_dispatch_due(
                 "sent_tokens": sent_tokens,
                 "attempts_today": getattr(r,'attempts_today'),
                 "status": status_val,
+                "tokens": tokens_count,
+                "grace_minutes": grace_minutes,
             })
+        if decision_log_enabled:
+            try:
+                print({
+                    "evt": "reminder_decision",
+                    "reminder_id": object.__getattribute__(r,'id'),
+                    "action": reason,
+                    "status": status_val,
+                    "tokens": tokens_count,
+                    "sent_tokens": sent_tokens,
+                    "attempts_today": getattr(r,'attempts_today'),
+                    "grace_minutes": grace_minutes,
+                    "ts": datetime.utcnow().isoformat()+"Z"
+                })
+            except Exception:
+                pass
 
     if pushes or reminders:
         await db.commit()
