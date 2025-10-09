@@ -1287,22 +1287,35 @@ async def list_instruction_status(date_from: Optional[date] = None, date_to: Opt
     )
     return result.scalars().all()
 
-    @app.get("/instruction-status/changes", response_model=List[schemas.InstructionStatusResponse])
-    async def list_instruction_status_changes(since: str, db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
-        """Return instruction status rows updated AFTER the provided ISO8601 timestamp (UTC)."""
-        try:
-            from datetime import datetime
-            since_dt = datetime.fromisoformat(since.replace('Z','+00:00'))
-        except Exception:
-            raise HTTPException(status_code=400, detail="Invalid 'since' timestamp")
-        q = select(models.InstructionStatus).where(
+@app.get("/instruction-status/changes", response_model=List[schemas.InstructionStatusResponse])
+async def list_instruction_status_changes(
+    since: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: models.Patient = Depends(get_current_user),
+):
+    """Return instruction status rows updated AFTER the provided ISO8601 timestamp (UTC).
+    Example since: "2025-08-01T00:00:00Z" or "2025-08-01T00:00:00+00:00"
+    """
+    try:
+        from datetime import datetime
+
+        # Accept both Z and explicit offset forms
+        since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid 'since' timestamp")
+
+    q = (
+        select(models.InstructionStatus)
+        .where(
             models.InstructionStatus.patient_id == current_user.id,
-            models.InstructionStatus.updated_at > since_dt
-        ).order_by(models.InstructionStatus.updated_at.asc())
-        res = await db.execute(q)
-        rows = res.scalars().all()
-        # Shape to response models (schemas uses from_attributes)
-        return rows
+            models.InstructionStatus.updated_at > since_dt,
+        )
+        .order_by(models.InstructionStatus.updated_at.asc())
+    )
+    res = await db.execute(q)
+    rows = res.scalars().all()
+    # Response models will be built from attributes (schemas.from_attributes)
+    return rows
 
 @app.post("/department-doctor")
 async def save_department_doctor(data: schemas.DepartmentDoctorSelection, db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
