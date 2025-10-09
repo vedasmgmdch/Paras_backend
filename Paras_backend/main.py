@@ -252,7 +252,15 @@ async def startup():
                         await agen.aclose()  # type: ignore
                     except Exception:
                         pass
-        scheduler.add_job(_run_dispatch, IntervalTrigger(seconds=60), id="dispatch_due", replace_existing=True)
+        # Make dispatch interval configurable to tune delivery latency (default 60s)
+        try:
+            interval_sec = int(os.getenv("DISPATCH_INTERVAL_SEC", "60"))
+        except Exception:
+            interval_sec = 60
+        if interval_sec < 5:
+            interval_sec = 5  # clamp to safe minimum
+        print(f"[Startup] Dispatch interval set to {interval_sec}s (DISPATCH_INTERVAL_SEC)")
+        scheduler.add_job(_run_dispatch, IntervalTrigger(seconds=interval_sec), id="dispatch_due", replace_existing=True)
         scheduler.start()
     else:
         print("[Startup] Scheduler disabled via SCHEDULER_ENABLED env var")
