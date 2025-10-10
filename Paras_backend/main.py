@@ -2482,6 +2482,31 @@ async def ack_reminder(
     await db.commit()
     return ReminderAckResponse(acknowledged=True, reminder_id=payload.reminder_id, local_date=local_today)
 
+@app.post("/reminders/reschedule-all")
+async def reschedule_all_reminders(
+    db: AsyncSession = Depends(get_db),
+    current_user: models.Patient = Depends(get_current_user),
+):
+    """Recompute next_fire_local/utc for all of the current user's reminders from now.
+    Useful if timezones changed or after bulk edits. Returns count updated.
+    """
+    now_utc = datetime.utcnow()
+    res = await db.execute(
+        select(models.Reminder).where(models.Reminder.patient_id == current_user.id)
+    )
+    rows = res.scalars().all()
+    updated = 0
+    for r in rows:
+        nl, nu = _compute_next_local_utc(now_utc, getattr(r, 'hour'), getattr(r, 'minute'), getattr(r, 'timezone'))
+        object.__setattr__(r, 'next_fire_local', nl)
+        object.__setattr__(r, 'next_fire_utc', nu)
+        object.__setattr__(r, 'updated_at', now_utc)
+        db.add(r)
+        updated += 1
+    if updated:
+        await db.commit()
+    return {"updated": updated}
+
 @app.get("/reminders/debug")
 async def reminders_debug(
     db: AsyncSession = Depends(get_db),
