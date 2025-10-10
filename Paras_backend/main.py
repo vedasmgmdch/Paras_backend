@@ -1297,10 +1297,15 @@ async def list_instruction_status_changes(
     Example since: "2025-08-01T00:00:00Z" or "2025-08-01T00:00:00+00:00"
     """
     try:
-        from datetime import datetime
-
+        from datetime import datetime, timezone as _dt_tz
         # Accept both Z and explicit offset forms
-        since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(since.replace("Z", "+00:00"))
+        # Convert to naive UTC to match TIMESTAMP WITHOUT TIME ZONE columns
+        if parsed.tzinfo is not None:
+            since_dt = parsed.astimezone(_dt_tz.utc).replace(tzinfo=None)
+        else:
+            # Treat naive input as UTC already
+            since_dt = parsed
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid 'since' timestamp")
 
