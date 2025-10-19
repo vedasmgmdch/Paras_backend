@@ -1374,15 +1374,42 @@ async def mark_episode_complete(payload: schemas.MarkCompleteRequest, db: AsyncS
     ep = await _get_or_create_open_episode(db, object.__getattribute__(current_user, 'id'))
     if getattr(ep, "locked", False):
         raise HTTPException(status_code=423, detail="Episode is locked and cannot be modified.")
+    # Mark current episode as completed and lock it permanently
     object.__setattr__(ep, 'procedure_completed', bool(payload.procedure_completed))
     if payload.procedure_date is not None:
         object.__setattr__(ep, 'procedure_date', payload.procedure_date)
     if payload.procedure_time is not None:
         object.__setattr__(ep, 'procedure_time', payload.procedure_time)
+    # If no date/time provided and none set yet, default to server 'now'
+    if getattr(ep, 'procedure_date', None) is None and payload.procedure_date is None:
+        object.__setattr__(ep, 'procedure_date', date.today())
+    if getattr(ep, 'procedure_time', None) is None and payload.procedure_time is None:
+        object.__setattr__(ep, 'procedure_time', datetime.utcnow().time())
+    object.__setattr__(ep, 'locked', True)
     db.add(ep)
     await db.commit()
     await db.refresh(ep)
-    await _mirror_episode_to_patient(db, current_user, ep)
+
+    # Immediately create a new open episode for the patient to start a fresh treatment
+    new_ep = models.TreatmentEpisode(
+        patient_id=object.__getattribute__(current_user, 'id'),
+        department=None,
+        doctor=None,
+        treatment=None,
+        subtype=None,
+        procedure_completed=False,
+        locked=False,
+        procedure_date=None,
+        procedure_time=None,
+    )
+    db.add(new_ep)
+    await db.commit()
+    await db.refresh(new_ep)
+
+    # Mirror the new open episode state to the Patient row (so edits apply to the new episode)
+    await _mirror_episode_to_patient(db, current_user, new_ep)
+
+    # Return the locked episode as confirmation of completion
     return schemas.EpisodeResponse.model_validate(ep, from_attributes=True)
 
 @app.post("/episodes/rotate-if-due", response_model=schemas.RotateIfDueResponse)
