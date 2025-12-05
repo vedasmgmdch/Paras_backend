@@ -127,6 +127,18 @@ class Progress(Base):
     timestamp = Column(DateTime, default=datetime.utcnow)
     patient = relationship("Patient", back_populates="progress_entries")
 
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, index=True)
+    sender_role = Column(String, nullable=False)  # 'patient' or 'doctor'
+    sender_username = Column(String, nullable=True)
+    message = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    patient = relationship("Patient")
+
 class InstructionStatus(Base):
     __tablename__ = "instruction_status"
     id = Column(Integer, primary_key=True, index=True)

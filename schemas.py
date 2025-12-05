@@ -132,6 +132,24 @@ class ProgressEntry(BaseModel):
     timestamp: datetime
     model_config = ConfigDict(from_attributes=True)
 
+
+class ChatMessage(BaseModel):
+    id: int
+    patient_id: int
+    sender_role: str
+    sender_username: Optional[str] = None
+    message: str
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ChatMessageCreate(BaseModel):
+    message: str
+
+
+class DoctorChatMessageCreate(BaseModel):
+    message: str
+
 class InstructionStatusItem(BaseModel):
     date: date
     treatment: str

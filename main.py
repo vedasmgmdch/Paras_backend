@@ -1160,6 +1160,33 @@ async def get_progress(db: AsyncSession = Depends(get_db), current_user: models.
     result = await db.execute(select(models.Progress).where(models.Progress.patient_id == current_user.id).order_by(models.Progress.timestamp.desc()))
     return result.scalars().all()
 
+
+# --------------------------
+# Chat: patient side
+# --------------------------
+@app.get("/chat/thread", response_model=List[schemas.ChatMessage])
+async def get_chat_thread(db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
+    res = await db.execute(
+        select(models.ChatMessage)
+        .where(models.ChatMessage.patient_id == current_user.id)
+        .order_by(models.ChatMessage.created_at.asc())
+    )
+    return res.scalars().all()
+
+
+@app.post("/chat/thread", response_model=schemas.ChatMessage)
+async def send_chat_message(payload: schemas.ChatMessageCreate, db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
+    msg = models.ChatMessage(
+        patient_id=current_user.id,
+        sender_role="patient",
+        sender_username=current_user.username,
+        message=payload.message,
+    )
+    db.add(msg)
+    await db.commit()
+    await db.refresh(msg)
+    return msg
+
 @app.post("/instruction-status", response_model=List[schemas.InstructionStatusResponse])
 async def save_instruction_status(payload: schemas.InstructionStatusBulkCreate, db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
     """Idempotent upsert for instruction status rows.
@@ -1314,6 +1341,38 @@ async def doctor_patient_info(username: str, db: AsyncSession = Depends(get_db),
     "procedure_date": patient.procedure_date.isoformat() if getattr(patient, 'procedure_date', None) is not None else None,
         "procedure_completed": patient.procedure_completed,
     }
+
+
+@app.get("/doctor/patients/{username}/chat", response_model=List[schemas.ChatMessage])
+async def doctor_get_chat_thread(username: str, db: AsyncSession = Depends(get_db), current_doctor: models.Doctor = Depends(get_current_doctor)):
+    res = await db.execute(select(models.Patient).where(models.Patient.username == username))
+    patient = res.scalars().first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    result = await db.execute(
+        select(models.ChatMessage)
+        .where(models.ChatMessage.patient_id == patient.id)
+        .order_by(models.ChatMessage.created_at.asc())
+    )
+    return result.scalars().all()
+
+
+@app.post("/doctor/patients/{username}/chat", response_model=schemas.ChatMessage)
+async def doctor_send_chat_message(username: str, payload: schemas.DoctorChatMessageCreate, db: AsyncSession = Depends(get_db), current_doctor: models.Doctor = Depends(get_current_doctor)):
+    res = await db.execute(select(models.Patient).where(models.Patient.username == username))
+    patient = res.scalars().first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    msg = models.ChatMessage(
+        patient_id=patient.id,
+        sender_role="doctor",
+        sender_username=current_doctor.username,
+        message=payload.message,
+    )
+    db.add(msg)
+    await db.commit()
+    await db.refresh(msg)
+    return msg
 
 @app.get("/instruction-status", response_model=List[schemas.InstructionStatusResponse])
 async def list_instruction_status(date_from: Optional[date] = None, date_to: Optional[date] = None, db: AsyncSession = Depends(get_db), current_user: models.Patient = Depends(get_current_user)):
