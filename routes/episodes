@@ -1,0 +1,7 @@
+from fastapi import APIRouter
+
+# This router previously duplicated episode-completion logic by flipping Patient.procedure_completed directly.
+# That caused inconsistencies with the canonical episode flow in main.py.
+# It has been intentionally left minimal; episode endpoints are provided in main.py.
+
+router = APIRouter(prefix="/episodes", tags=["episodes"])

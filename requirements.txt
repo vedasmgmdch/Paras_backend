@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+sqlalchemy[asyncio]
+asyncpg
+passlib[bcrypt]
+python-dotenv
+python-jose[cryptography]
+email-validator
+python-multipart
+bcrypt
+passlib>=1.7.4
+bcrypt>=3.2.0,<4.1.0
+requests>=2.25.1
+google-auth>=2.35.0
+pytz>=2024.1
+APScheduler>=3.10.4
