@@ -12,6 +12,20 @@ import 'chat_screen.dart';
 // - Patient Progress Entries (feedback entries submitted by patient)
 // Differences: no ability to submit feedback or modify logs; purely observational.
 
+class _ProgressStatus {
+  final String label;
+  final String sublabel;
+  final double score;
+  final Color color;
+
+  const _ProgressStatus({
+    required this.label,
+    required this.sublabel,
+    required this.score,
+    required this.color,
+  });
+}
+
 class DoctorPatientFullProgressScreen extends StatefulWidget {
   final String username;
   const DoctorPatientFullProgressScreen({super.key, required this.username});
@@ -41,6 +55,154 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
   int _totalRecoveryDays = 14; // same constant used on patient screen
   int? _progressPercent; // computed from dayOfRecovery / totalRecoveryDays
 
+  _ProgressStatus _computeProgressStatus() {
+    final procDateStr = (_patientInfo?['procedure_date'] ?? '').toString();
+    if (procDateStr.isEmpty) {
+      return const _ProgressStatus(
+        label: 'No data yet',
+        sublabel: 'Set procedure date to compute progress status',
+        score: 0,
+        color: Colors.blueGrey,
+      );
+    }
+
+    DateTime from;
+    try {
+      final d = DateTime.parse(procDateStr);
+      from = DateTime(d.year, d.month, d.day);
+    } catch (_) {
+      return const _ProgressStatus(
+        label: 'No data yet',
+        sublabel: 'Set procedure date to compute progress status',
+        score: 0,
+        color: Colors.blueGrey,
+      );
+    }
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    final filtered = _instructionStatus.where((raw) {
+      final dateStr = (raw['date'] ?? '').toString();
+      if (dateStr.isEmpty) return false;
+      DateTime d;
+      try {
+        d = DateTime.parse(dateStr);
+      } catch (_) {
+        return false;
+      }
+      final dateOnly = DateTime(d.year, d.month, d.day);
+      if (dateOnly.isBefore(from) || dateOnly.isAfter(today)) return false;
+      return _isAllowedForPfdFixed(raw);
+    }).toList();
+
+    final latest = _getLatestInstructionLogs(filtered);
+    if (latest.isEmpty) {
+      return const _ProgressStatus(
+        label: 'No data yet',
+        sublabel: 'Follow instructions to build progress status',
+        score: 0,
+        color: Colors.blueGrey,
+      );
+    }
+
+    int total = 0;
+    int followed = 0;
+    for (final raw in latest) {
+      total++;
+      final isFollowed = raw['followed'] == true || raw['followed']?.toString() == 'true';
+      if (isFollowed) followed++;
+    }
+
+    if (total == 0) {
+      return const _ProgressStatus(
+        label: 'No data yet',
+        sublabel: 'Follow instructions to build progress status',
+        score: 0,
+        color: Colors.blueGrey,
+      );
+    }
+
+    final ratio = (followed / total).clamp(0.0, 1.0);
+    final pct = (ratio * 100).round();
+    if (ratio >= 0.80) {
+      return _ProgressStatus(
+        label: 'Good',
+        sublabel: 'Since procedure • $pct% instructions followed',
+        score: ratio,
+        color: const Color(0xFF22B573),
+      );
+    }
+    if (ratio >= 0.50) {
+      return _ProgressStatus(
+        label: 'Alright',
+        sublabel: 'Since procedure • $pct% instructions followed',
+        score: ratio,
+        color: const Color(0xFF2196F3),
+      );
+    }
+    return _ProgressStatus(
+      label: 'Needs attention',
+      sublabel: 'Since procedure • $pct% instructions followed',
+      score: ratio,
+      color: Colors.orange,
+    );
+  }
+
+  Widget _buildProgressStatusBar() {
+    final status = _computeProgressStatus();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFF),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.blueGrey.shade100),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Progress Status',
+                  style: TextStyle(fontWeight: FontWeight.w600, color: Colors.black87),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: status.color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  status.label,
+                  style: TextStyle(fontWeight: FontWeight.bold, color: status.color),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: status.score.clamp(0.0, 1.0),
+              minHeight: 10,
+              backgroundColor: Colors.blueGrey.shade50,
+              color: status.color,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            status.sublabel,
+            style: const TextStyle(color: Colors.black54, fontSize: 13),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -48,6 +210,7 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
   }
 
   Future<void> _loadAll() async {
+    if (!mounted) return;
     setState(() {
       _loading = true;
       _debugStatusMessage = null;
@@ -55,6 +218,7 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
     try {
       // Legacy behavior: skip auth requirement, attempt patient info; if not available just continue.
       final info = await ApiService.doctorGetPatientInfo(widget.username); // may be null if backend now requires auth
+      if (!mounted) return;
       _patientInfo = info; // can be null -> will show procedure date missing message
       final treatment = info?['treatment']?.toString();
       final subtype = info?['subtype']?.toString();
@@ -64,7 +228,8 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
         try {
           final pd = DateTime.parse(info!['procedure_date']);
           final diff = DateTime.now().difference(DateTime(pd.year, pd.month, pd.day)).inDays + 1;
-          dynamicDays = diff.clamp(1, 60); // cap to 60 for safety
+          // Doctor instruction status should cover only the first 14 days from procedure start.
+          dynamicDays = diff.clamp(1, 14);
         } catch (_) {}
       }
       Map<String, dynamic>? full = await ApiService.doctorGetPatientInstructionStatusFull(
@@ -73,6 +238,7 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
         treatment: treatment,
         subtype: subtype,
       );
+      if (!mounted) return;
       List<Map<String, dynamic>> status = [];
       if (full != null && full['instructions'] is List) {
         final instr = (full['instructions'] as List).cast<Map<String, dynamic>>();
@@ -101,6 +267,7 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
       } else {
         // Fallback to legacy basic endpoint
         final rawStatus = await ApiService.doctorGetPatientInstructionStatus(widget.username);
+        if (!mounted) return;
         debugPrint('[DoctorProgress] legacy status rows=${rawStatus.length}');
         status = rawStatus.map((r) {
           String rawDate = (r['date'] ?? '').toString();
@@ -125,12 +292,15 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
         _debugStatusMessage = 'No instruction-status rows returned.';
       }
       _progressEntries = await ApiService.doctorGetPatientProgressEntries(widget.username);
+      if (!mounted) return;
       _computeRecoveryStats();
+      if (!mounted) return;
       setState(() {
         _loading = false;
         _lastRefreshed = DateTime.now();
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _loading = false;
         _debugStatusMessage = 'Error loading data: $e';
@@ -175,15 +345,18 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
     return int.tryParse(v?.toString() ?? '');
   }
 
+  String _stableLogKey(Map<String, dynamic> log) {
+    final date = (log['date'] ?? '').toString();
+    final type = _normType((log['type'] ?? '').toString());
+    final instruction = (log['instruction'] ?? log['note'] ?? '').toString();
+    final n = _normText(instruction);
+    return '$date|$type|$n';
+  }
+
   List<Map<String, dynamic>> _getLatestInstructionLogs(List<Map<String, dynamic>> logs) {
     final latest = <String, Map<String, dynamic>>{};
     for (final log in logs) {
-      final date = log['date']?.toString() ?? '';
-      final type = _normType((log['type'] ?? '').toString());
-      final instruction = (log['instruction'] ?? log['note'] ?? '').toString();
-      final idx = _asInt(log['instruction_index'] ?? log['instructionIndex']);
-      final idxStr = (idx == null) ? '' : idx.toString();
-      final key = idxStr.isNotEmpty ? '$date|$type|#${idxStr}' : '$date|$type|$instruction';
+      final key = _stableLogKey(log);
       latest[key] = log;
     }
     return latest.values.toList();
@@ -287,7 +460,8 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
           final base = DateTime.parse(pd);
           final today = DateTime.now();
           final totalDays = today.difference(DateTime(base.year, base.month, base.day)).inDays + 1;
-          allDates = List.generate(totalDays, (i) {
+          final cappedDays = totalDays.clamp(1, 14);
+          allDates = List.generate(cappedDays, (i) {
             final dt = DateTime(base.year, base.month, base.day).add(Duration(days: i));
             return _formatYMD(dt);
           });
@@ -376,6 +550,7 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
                           missingProcedureDate: missingProcedureDate,
                         ),
                         _progressEntriesSection(),
+                        _buildProgressStatusBar(),
                         SizedBox(
                           width: double.infinity,
                           child: ElevatedButton.icon(
@@ -754,14 +929,7 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
 
   Widget _progressEntriesSection() {
     if (_progressEntries.isEmpty) {
-      return Container(
-        padding: const EdgeInsets.symmetric(vertical: 36.0),
-        child: const Text(
-          'No progress entries yet.',
-          style: TextStyle(color: Colors.black54, fontSize: 16),
-          textAlign: TextAlign.center,
-        ),
-      );
+      return const SizedBox.shrink();
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

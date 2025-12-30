@@ -61,11 +61,13 @@ class _RemindersScreenState extends State<RemindersScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     final list = await ReminderApi.list();
+    if (!mounted) return;
     list.sort((a, b) => (a.hour * 60 + a.minute).compareTo(b.hour * 60 + b.minute));
     setState(() {
       _reminders = list;
       _loading = false;
     });
+    if (!mounted) return;
     await ReminderApi.scheduleLocally(list); // keep local schedules aligned
   }
 

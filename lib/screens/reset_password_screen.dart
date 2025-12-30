@@ -23,6 +23,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     _formKey.currentState!.save();
 
+    if (!mounted) return;
     setState(() {
       _loading = true;
       _error = '';
@@ -34,6 +35,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
       _newPassword,
     );
 
+    if (!mounted) return;
     setState(() {
       _loading = false;
     });
@@ -45,6 +47,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
         (route) => false,
       );
     } else {
+      if (!mounted) return;
       setState(() {
         _error = result ?? "Failed to reset password. Please try again.";
       });

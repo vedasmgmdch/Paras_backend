@@ -21,6 +21,7 @@ class _SetNewPasswordScreenState extends State<SetNewPasswordScreen> {
   Future<void> _setPassword() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
+    if (!mounted) return;
     setState(() {
       _loading = true;
       _error = '';
@@ -33,6 +34,7 @@ class _SetNewPasswordScreenState extends State<SetNewPasswordScreen> {
       newPassword,
     );
 
+    if (!mounted) return;
     setState(() {
       _loading = false;
     });
@@ -44,6 +46,7 @@ class _SetNewPasswordScreenState extends State<SetNewPasswordScreen> {
         (route) => false,
       );
     } else {
+      if (!mounted) return;
       setState(() {
         _error = result ?? "Failed to reset password. Please try again.";
       });

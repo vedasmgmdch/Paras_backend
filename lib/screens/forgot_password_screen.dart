@@ -19,12 +19,15 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     _formKey.currentState!.save();
 
+    if (!mounted) return;
     setState(() {
       _loading = true;
       _error = '';
     });
 
     final result = await ApiService.requestReset(_emailOrPhone);
+
+    if (!mounted) return;
 
     setState(() {
       _loading = false;
@@ -38,6 +41,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         ),
       );
     } else {
+      if (!mounted) return;
       setState(() {
         _error = result is String ? result : "Failed to send OTP. Please try again.";
       });

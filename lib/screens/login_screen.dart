@@ -54,6 +54,7 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     _formKey.currentState!.save();
 
+    if (!mounted) return;
     setState(() {
       _loading = true;
       _error = '';
@@ -61,6 +62,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
     final appState = Provider.of<AppState>(context, listen: false);
     final result = await ApiService.login(_username, _password);
+
+    if (!mounted) return;
 
     if (result != null) {
       setState(() {
@@ -71,6 +74,7 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     String? token = await ApiService.getSavedToken();
+    if (!mounted) return;
     if (token == null || token.isEmpty) {
       setState(() {
         _error = 'Login failed: token not found';
@@ -86,7 +90,10 @@ class _LoginScreenState extends State<LoginScreen> {
     await PushService.registerNow();
     await PushService.flushPendingIfAny();
 
+    if (!mounted) return;
+
     final userDetails = await ApiService.getUserDetails();
+    if (!mounted) return;
     if (userDetails != null) {
       try {
         appState.setUserDetails(
@@ -138,6 +145,7 @@ class _LoginScreenState extends State<LoginScreen> {
             appState.procedureTime != null &&
             appState.procedureCompleted == false) {
           Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomeScreen()));
+          return;
         } else if (appState.department != null &&
             appState.doctor != null &&
             (appState.treatment == null || appState.procedureDate == null || appState.procedureTime == null)) {
@@ -145,21 +153,28 @@ class _LoginScreenState extends State<LoginScreen> {
             context,
             MaterialPageRoute(builder: (_) => TreatmentScreenMain(userName: appState.username ?? 'User')),
           );
+          return;
         } else {
           Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const CategoryScreen()));
+          return;
         }
       } catch (e) {
+        if (!mounted) return;
         setState(() {
           _error = 'Failed to load user details: $e';
           _loading = false;
         });
+        return;
       }
     } else {
+      if (!mounted) return;
       setState(() {
         _error = 'Failed to load user details';
         _loading = false;
       });
+      return;
     }
+    if (!mounted) return;
     setState(() {
       _loading = false;
     });

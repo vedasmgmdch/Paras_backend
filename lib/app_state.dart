@@ -247,6 +247,7 @@ class AppState extends ChangeNotifier {
   // Instruction logs (for ProgressScreen)
   final List<Map<String, dynamic>> _instructionLogs = [];
   DateTime? _lastInstructionSyncUtc;
+  Future<void>? _pullInstructionStatusInFlight;
 
   int? _asInt(dynamic v) {
     if (v == null) return null;
@@ -567,21 +568,49 @@ class AppState extends ChangeNotifier {
 
   DateTime? get lastInstructionSyncUtc => _lastInstructionSyncUtc;
 
-  Future<void> pullInstructionStatusChanges() async {
+  Future<void> pullInstructionStatusChanges() {
+    final existing = _pullInstructionStatusInFlight;
+    if (existing != null) return existing;
+    final fut = _pullInstructionStatusChangesInternal();
+    _pullInstructionStatusInFlight = fut;
+    return fut.whenComplete(() {
+      _pullInstructionStatusInFlight = null;
+    });
+  }
+
+  Future<void> _pullInstructionStatusChangesInternal() async {
     try {
       if (token == null) return; // not logged in
-      // If we've never synced before, fetch a generous history window so patient portal shows past days too.
+
       final initialSince = DateTime.now().toUtc().subtract(const Duration(days: 60));
       final since = (_lastInstructionSyncUtc ?? initialSince).toIso8601String();
-      List<Map<String, dynamic>>? changes = await ApiService.fetchInstructionStatusChanges(sinceIso: since);
-      // Fallback: if incremental changes failed (null) or the backend hasn't registered the endpoint yet, pull a date-range list (60 days)
+
+      Future<List<Map<String, dynamic>>?> retryChanges() async {
+        for (int attempt = 0; attempt < 3; attempt++) {
+          final res = await ApiService.fetchInstructionStatusChanges(sinceIso: since);
+          if (res != null) return res;
+          await Future.delayed(Duration(milliseconds: 500 * (attempt + 1)));
+        }
+        return null;
+      }
+
+      Future<List<Map<String, dynamic>>?> retryRange(String dateFrom, String dateTo) async {
+        for (int attempt = 0; attempt < 2; attempt++) {
+          final res = await ApiService.listInstructionStatus(dateFrom: dateFrom, dateTo: dateTo);
+          if (res != null) return res;
+          await Future.delayed(Duration(milliseconds: 700 * (attempt + 1)));
+        }
+        return null;
+      }
+
+      List<Map<String, dynamic>>? changes = await retryChanges();
+
       if (changes == null) {
         final from = DateTime.now().subtract(const Duration(days: 60));
         final dateFrom = _ymd.format(from);
         final dateTo = _ymd.format(DateTime.now());
-        final range = await ApiService.listInstructionStatus(dateFrom: dateFrom, dateTo: dateTo);
+        final range = await retryRange(dateFrom, dateTo);
         if (range != null) {
-          // Normalize into the same shape as changes
           changes = range
               .map(
                 (row) => {
@@ -604,7 +633,9 @@ class AppState extends ChangeNotifier {
               .toList();
         }
       }
+
       if (changes == null || changes.isEmpty) return;
+
       bool changed = false;
       DateTime maxTs = _lastInstructionSyncUtc ?? DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
 

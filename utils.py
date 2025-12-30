@@ -41,9 +41,74 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import requests
 
+
+def _send_brevo_email(to_email: str, subject: str, body: str) -> bool:
+    """Send email via Brevo (Sendinblue) SMTP API v3.
+
+    Requires:
+      - EMAIL_MODE=brevo
+      - BREVO_API_KEY
+      - EMAIL_FROM (must be a verified sender email in Brevo)
+      - optional EMAIL_FROM_NAME
+    """
+    api_key = os.getenv("BREVO_API_KEY")
+    email_from = os.getenv("EMAIL_FROM")
+    from_name = os.getenv("EMAIL_FROM_NAME")
+    if not api_key or not email_from:
+        raise EnvironmentError("Missing BREVO_API_KEY and/or EMAIL_FROM")
+
+    url = os.getenv("BREVO_BASE_URL", "https://api.brevo.com") + "/v3/smtp/email"
+    headers = {
+        "accept": "application/json",
+        "api-key": api_key,
+        "content-type": "application/json",
+    }
+    payload = {
+        "sender": {"email": email_from, **({"name": from_name} if from_name else {})},
+        "to": [{"email": to_email}],
+        "subject": subject,
+        "textContent": body,
+    }
+    resp = requests.post(url, json=payload, headers=headers, timeout=20)
+    if 200 <= resp.status_code < 300:
+        return True
+    print(f"Brevo: Failed to send email ({resp.status_code}): {resp.text}")
+    return False
+
+
+def _send_sendgrid_email(to_email: str, subject: str, body: str) -> bool:
+    """Send email via SendGrid v3 Mail Send.
+
+    Requires:
+      - EMAIL_MODE=sendgrid
+      - SENDGRID_API_KEY
+      - EMAIL_FROM (a Single Sender verified email, or a verified domain sender)
+      - optional EMAIL_FROM_NAME
+    """
+    api_key = os.getenv("SENDGRID_API_KEY")
+    email_from = os.getenv("EMAIL_FROM")
+    from_name = os.getenv("EMAIL_FROM_NAME")
+    if not api_key or not email_from:
+        raise EnvironmentError("Missing SENDGRID_API_KEY and/or EMAIL_FROM")
+
+    url = os.getenv("SENDGRID_BASE_URL", "https://api.sendgrid.com") + "/v3/mail/send"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "personalizations": [{"to": [{"email": to_email}]}],
+        "from": {"email": email_from, **({"name": from_name} if from_name else {})},
+        "subject": subject,
+        "content": [{"type": "text/plain", "value": body}],
+    }
+    resp = requests.post(url, json=payload, headers=headers, timeout=20)
+    if resp.status_code in (200, 202):
+        return True
+    print(f"SendGrid: Failed to send email ({resp.status_code}): {resp.text}")
+    return False
+
 def send_registration_email(to_email, user_name):
-    EMAIL_MODE = os.getenv("EMAIL_MODE", "smtp")
-    print(f"[DEBUG] EMAIL_MODE: {EMAIL_MODE}")
     subject = "Welcome to MGM Hospital App!"
     body = (
         f"Hello {user_name},\n\n"
@@ -51,50 +116,20 @@ def send_registration_email(to_email, user_name):
         "Thank you!"
     )
 
-    EMAIL_HOST = os.getenv("EMAIL_HOST")
-    EMAIL_PORT_RAW = os.getenv("EMAIL_PORT")
-    EMAIL_USER = os.getenv("EMAIL_USER")
-    EMAIL_PASS = os.getenv("EMAIL_PASS")
-    EMAIL_FROM = os.getenv("EMAIL_FROM")
-
-    if not EMAIL_HOST or not EMAIL_PORT_RAW or not EMAIL_USER or not EMAIL_PASS or not EMAIL_FROM:
-        raise EnvironmentError("Missing one or more required email environment variables: EMAIL_HOST, EMAIL_PORT, EMAIL_USER, EMAIL_PASS, EMAIL_FROM")
+    ok_user = False
     try:
-        EMAIL_PORT = int(EMAIL_PORT_RAW)
-    except Exception:
-        raise ValueError("EMAIL_PORT environment variable must be an integer.")
-
-    SIR_EMAIL = os.getenv("SIR_EMAIL")
-    # Send to user
-    msg = MIMEMultipart()
-    msg["From"] = str(EMAIL_FROM)
-    msg["To"] = to_email
-    msg["Subject"] = subject
-    msg.attach(MIMEText(body, "plain"))
-
-    try:
-        with smtplib.SMTP_SSL(EMAIL_HOST, EMAIL_PORT) as server:
-            server.login(str(EMAIL_USER), str(EMAIL_PASS))
-            server.sendmail(str(EMAIL_FROM), to_email, msg.as_string())
-        print(f"Registration email sent to {to_email}")
+        ok_user = bool(send_email(to_email, subject, body))
     except Exception as e:
-        print(f"Could not send email to user: {e}")
+        print(f"Could not send registration email to user: {e}")
 
-    # Always send to sir as a separate email
-    if SIR_EMAIL:
-        msg_sir = MIMEMultipart()
-        msg_sir["From"] = str(EMAIL_FROM)
-        msg_sir["To"] = SIR_EMAIL
-        msg_sir["Subject"] = subject
-        msg_sir.attach(MIMEText(body, "plain"))
+    sir_email = os.getenv("SIR_EMAIL")
+    if sir_email:
         try:
-            with smtplib.SMTP_SSL(EMAIL_HOST, EMAIL_PORT) as server:
-                server.login(str(EMAIL_USER), str(EMAIL_PASS))
-                server.sendmail(str(EMAIL_FROM), SIR_EMAIL, msg_sir.as_string())
-            print(f"Registration email sent to sir: {SIR_EMAIL}")
+            send_email(sir_email, subject, body)
         except Exception as e:
-            print(f"Could not send email to sir: {e}")
-    return True
+            print(f"Could not send registration email to sir: {e}")
+
+    return ok_user
 
 
 def send_email(to_email, subject, body):
@@ -124,12 +159,18 @@ def send_email(to_email, subject, body):
         else:
             print(f"Could not send email via Mailtrap API: {response.text}")
             return False
+    elif EMAIL_MODE == "mailgun":
+        return bool(send_mailgun_email(to_email, subject, body))
+    elif EMAIL_MODE == "brevo":
+        return _send_brevo_email(to_email, subject, body)
+    elif EMAIL_MODE == "sendgrid":
+        return _send_sendgrid_email(to_email, subject, body)
     else:
         smtp_server = os.getenv("EMAIL_HOST")
         smtp_port = int(os.getenv("EMAIL_PORT", 587))
         smtp_user = os.getenv("EMAIL_USER")
         smtp_password = os.getenv("EMAIL_PASS")
-        EMAIL_FROM = os.getenv("EMAIL_FROM")
+        email_from = os.getenv("EMAIL_FROM")
 
         if not smtp_server:
             raise EnvironmentError("EMAIL_HOST environment variable must be set.")
@@ -138,13 +179,15 @@ def send_email(to_email, subject, body):
 
         msg = MIMEText(body)
         msg["Subject"] = subject
-        msg["From"] = smtp_user
+        msg["From"] = email_from or smtp_user
         msg["To"] = to_email
 
         with smtplib.SMTP(smtp_server, smtp_port) as server:
             server.starttls()
             server.login(smtp_user, smtp_password)
             server.sendmail(smtp_user, [to_email], msg.as_string())
+
+        return True
 
 
         

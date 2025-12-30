@@ -64,8 +64,8 @@ async def request_signup_otp(data: RequestResetSchema, db: AsyncSession = Depend
     otp_store[target] = otp
     try:
         if data.email:
-            from utils import send_mailgun_email
-            send_mailgun_email(data.email, "Your Signup OTP", f"Your signup OTP code is {otp}")
+            from utils import send_email
+            send_email(data.email, "Your Signup OTP", f"Your signup OTP code is {otp}")
         else:
             print(f"Send SMS to {data.phone}: Signup OTP code is {otp}")
     except Exception as e:
@@ -150,8 +150,8 @@ async def request_reset(data: RequestResetSchema, db: AsyncSession = Depends(get
     # --- Send OTP via email or SMS here ---
     try:
         if data.email:
-            from utils import send_mailgun_email
-            send_mailgun_email(data.email, "Your OTP", f"Your OTP code is {otp}")
+            from utils import send_email
+            send_email(data.email, "Your OTP", f"Your OTP code is {otp}")
         else:
             print(f"Send SMS to {data.phone}: OTP code is {otp}")
     except Exception as e:

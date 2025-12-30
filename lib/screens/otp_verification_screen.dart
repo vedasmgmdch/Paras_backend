@@ -16,7 +16,10 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   @override
   void initState() {
     super.initState();
-    _otpController.addListener(() => setState(() {}));
+    _otpController.addListener(() {
+      if (!mounted) return;
+      setState(() {});
+    });
     _startResendTimer();
   }
   String get _otp => _otpController.text;
@@ -51,6 +54,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
       _resendMessage = '';
     });
     final result = await ApiService.requestReset(widget.emailOrPhone);
+    if (!mounted) return;
     setState(() {
       _resending = false;
       if (result == true) {
@@ -73,6 +77,8 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
 
     final result = await ApiService.verifyOtp(widget.emailOrPhone, _otp);
     print('OTP verify result: ' + result.toString());
+
+    if (!mounted) return;
 
     setState(() {
       _loading = false;

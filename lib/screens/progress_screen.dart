@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import 'package:provider/provider.dart';
 import '../app_state.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -57,7 +58,7 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
     try {
       await Provider.of<AppState>(context, listen: false).loadInstructionLogs(username: username);
       // Immediately pull server-side instruction status changes to populate past days too
-      await Provider.of<AppState>(context, listen: false).pullInstructionStatusChanges();
+      unawaited(Provider.of<AppState>(context, listen: false).pullInstructionStatusChanges());
       final logs = Provider.of<AppState>(context, listen: false).instructionLogs;
       debugPrint('[Progress] local+persisted instruction logs loaded count=${logs.length}');
     } catch (e) {
@@ -199,11 +200,11 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
     final latestLogs = _getLatestInstructionLogs(filteredLogs);
 
     final nowLocal = appState.effectiveLocalNow();
+    // Instructions log date dropdown must be limited to the first 14 days from procedure date.
+    // Range: procedureDate .. min(today, procedureDate + 13 days)
     final int days =
-        (nowLocal.difference(DateTime(procedureDate.year, procedureDate.month, procedureDate.day)).inDays + 1).clamp(
-          1,
-          10000,
-        );
+        (nowLocal.difference(DateTime(procedureDate.year, procedureDate.month, procedureDate.day)).inDays + 1)
+            .clamp(1, 14);
     final List<String> allDates = List.generate(days, (i) {
       final d = procedureDate.add(Duration(days: i));
       return "${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}";
