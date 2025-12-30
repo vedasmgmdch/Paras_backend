@@ -13,14 +13,15 @@ class BracesInstructionsScreen extends StatefulWidget {
   State<BracesInstructionsScreen> createState() => _BracesInstructionsScreenState();
 }
 
-class _BracesInstructionsScreenState extends State<BracesInstructionsScreen> with InstructionSnapshotHelper<BracesInstructionsScreen> {
+class _BracesInstructionsScreenState extends State<BracesInstructionsScreen>
+    with InstructionSnapshotHelper<BracesInstructionsScreen> {
   void _saveAllLogsForDay() {
     // Always use the selected date (widget.date) for log saving
     final procedureDate = widget.date != null
         ? DateTime(widget.date!.year, widget.date!.month, widget.date!.day)
         : DateTime.now();
     final logDate = procedureDate;
-  final logDateStr = AppState.formatYMD(logDate);
+    final logDateStr = AppState.formatYMD(logDate);
     final appState = Provider.of<AppState>(context, listen: false);
     for (int i = 0; i < bracesDos.length; i++) {
       appState.addInstructionLog(
@@ -28,6 +29,7 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen> wit
         date: logDateStr,
         type: 'general',
         followed: _dosChecked.length > i ? _dosChecked[i] : false,
+        instructionIndex: i,
         username: appState.username,
         treatment: appState.treatment,
         subtype: appState.treatmentSubtype,
@@ -39,12 +41,14 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen> wit
         date: logDateStr,
         type: 'specific',
         followed: _specificChecked.length > i ? _specificChecked[i] : false,
+        instructionIndex: i,
         username: appState.username,
         treatment: appState.treatment,
         subtype: appState.treatmentSubtype,
       );
     }
   }
+
   String selectedLang = 'en'; // 'en' for English, 'mr' for Marathi
 
   static const List<Map<String, String>> bracesDos = [
@@ -52,25 +56,18 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen> wit
       "en": "Brush your teeth and rinse your mouth carefully after every meal.",
       "mr": "प्रत्येक जेवणानंतर दात ब्रश करा आणि तोंड नीट धुवा.",
     },
-    {
-      "en": "Floss daily (if possible).",
-      "mr": "दररोज फ्लॉस करा (शक्य असल्यास).",
-    },
-    {
-      "en": "Attend all your orthodontic appointments.",
-      "mr": "तुमच्या सर्व ऑर्थोडॉन्टिक भेटींना उपस्थित राहा.",
-    },
+    {"en": "Floss daily (if possible).", "mr": "दररोज फ्लॉस करा (शक्य असल्यास)."},
+    {"en": "Attend all your orthodontic appointments.", "mr": "तुमच्या सर्व ऑर्थोडॉन्टिक भेटींना उपस्थित राहा."},
   ];
 
   static const List<Map<String, String>> bracesDonts = [
     {
-      "en": "Don’t eat foods that can damage or loosen your braces, particularly chewy, hard, or sticky foods (e.g., ice, popcorn, candies, toffee, etc.).",
-      "mr": "ब्रेसेसला हानी पोहोचवू शकणारे किंवा ब्रेसेस सैल करू शकणारे पदार्थ खाऊ नका, विशेषतः चिवट, कडक किंवा चिकट पदार्थ (उदा. बर्फ, पॉपकॉर्न, कँडी, टॉफी इ.).",
+      "en":
+          "Don’t eat foods that can damage or loosen your braces, particularly chewy, hard, or sticky foods (e.g., ice, popcorn, candies, toffee, etc.).",
+      "mr":
+          "ब्रेसेसला हानी पोहोचवू शकणारे किंवा ब्रेसेस सैल करू शकणारे पदार्थ खाऊ नका, विशेषतः चिवट, कडक किंवा चिकट पदार्थ (उदा. बर्फ, पॉपकॉर्न, कँडी, टॉफी इ.).",
     },
-    {
-      "en": "Don’t bite your nails or chew on pencils.",
-      "mr": "नखं चघळू नका किंवा पेन्सिलवर चावू नका.",
-    },
+    {"en": "Don’t bite your nails or chew on pencils.", "mr": "नखं चघळू नका किंवा पेन्सिलवर चावू नका."},
   ];
 
   // --- Specific Instructions for Braces ---
@@ -87,10 +84,7 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen> wit
       "en": "In case of mouth sores, rinse with warm salt water.",
       "mr": "तोंडात जखमा झाल्यास, कोमट मिठाच्या पाण्याने गुळण्या करा.",
     },
-    {
-      "en": "Avoid chewing gum during orthodontic treatment.",
-      "mr": "ऑर्थोडॉन्टिक उपचारादरम्यान च्युइंगम टाळा.",
-    },
+    {"en": "Avoid chewing gum during orthodontic treatment.", "mr": "ऑर्थोडॉन्टिक उपचारादरम्यान च्युइंगम टाळा."},
   ];
 
   static const int totalDays = 15;
@@ -106,16 +100,16 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen> wit
   void initState() {
     super.initState();
 
-  final selectedDate = widget.date != null
-    ? DateTime(widget.date!.year, widget.date!.month, widget.date!.day)
-    : DateTime.now();
-  final appState = Provider.of<AppState>(context, listen: false);
-  int day = appState.daysSinceProcedure(selectedDate);
-  if (day < 1) day = 1;
-  if (day > totalDays) day = totalDays;
-  currentDay = day;
+    final selectedDate = widget.date != null
+        ? DateTime(widget.date!.year, widget.date!.month, widget.date!.day)
+        : DateTime.now();
+    final appState = Provider.of<AppState>(context, listen: false);
+    int day = appState.daysSinceProcedure(selectedDate);
+    if (day < 1) day = 1;
+    if (day > totalDays) day = totalDays;
+    currentDay = day;
 
-  _dosChecked = List<bool>.from(appState.getChecklistForKey(_generalChecklistKey(selectedDate)));
+    _dosChecked = List<bool>.from(appState.getChecklistForKey(_generalChecklistKey(selectedDate)));
     if (_dosChecked.length != bracesDos.length) {
       _dosChecked = List.filled(bracesDos.length, false);
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -123,7 +117,7 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen> wit
       });
     }
 
-  _specificChecked = List<bool>.from(appState.getChecklistForKey(_specificChecklistKey(selectedDate)));
+    _specificChecked = List<bool>.from(appState.getChecklistForKey(_specificChecklistKey(selectedDate)));
     if (_specificChecked.length != bracesSpecificInstructions.length) {
       _specificChecked = List.filled(bracesSpecificInstructions.length, false);
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -131,34 +125,66 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen> wit
       });
     }
 
-  // Defer snapshot for consistency
-  scheduleInitialSnapshot(_saveAllLogsForDay);
+    // After first frame: pull server ticks, hydrate UI, then snapshot.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await appState.pullInstructionStatusChanges();
+      if (!mounted) return;
+
+      final hydratedGeneral = appState.buildFollowedChecklistForDay(
+        day: selectedDate,
+        type: 'general',
+        length: bracesDos.length,
+        instructionTextForIndex: (i) => bracesDos[i][selectedLang] ?? '',
+        username: appState.username,
+        treatment: appState.treatment,
+        subtype: appState.treatmentSubtype,
+      );
+      final hydratedSpecific = appState.buildFollowedChecklistForDay(
+        day: selectedDate,
+        type: 'specific',
+        length: bracesSpecificInstructions.length,
+        instructionTextForIndex: (i) => bracesSpecificInstructions[i][selectedLang] ?? '',
+        username: appState.username,
+        treatment: appState.treatment,
+        subtype: appState.treatmentSubtype,
+      );
+
+      setState(() {
+        _dosChecked = hydratedGeneral;
+        _specificChecked = hydratedSpecific;
+      });
+      appState.setChecklistForKey(_generalChecklistKey(selectedDate), _dosChecked);
+      appState.setChecklistForKey(_specificChecklistKey(selectedDate), _specificChecked);
+
+      _saveAllLogsForDay();
+    });
   }
 
   void _updateDos(int idx, bool? value) {
     setState(() {
       _dosChecked[idx] = value ?? false;
     });
-  final selectedDate = widget.date != null
-    ? DateTime(widget.date!.year, widget.date!.month, widget.date!.day)
-    : DateTime.now();
-  Provider.of<AppState>(context, listen: false)
-    .setChecklistForKey(_generalChecklistKey(selectedDate), _dosChecked);
+    final selectedDate = widget.date != null
+        ? DateTime(widget.date!.year, widget.date!.month, widget.date!.day)
+        : DateTime.now();
+    Provider.of<AppState>(context, listen: false).setChecklistForKey(_generalChecklistKey(selectedDate), _dosChecked);
 
-  _saveAllLogsForDay();
+    _saveAllLogsForDay();
   }
 
   void _updateSpecificChecklist(int idx, bool value) {
     setState(() {
       _specificChecked[idx] = value;
     });
-  final selectedDate = widget.date != null
-    ? DateTime(widget.date!.year, widget.date!.month, widget.date!.day)
-    : DateTime.now();
-  Provider.of<AppState>(context, listen: false)
-    .setChecklistForKey(_specificChecklistKey(selectedDate), _specificChecked);
+    final selectedDate = widget.date != null
+        ? DateTime(widget.date!.year, widget.date!.month, widget.date!.day)
+        : DateTime.now();
+    Provider.of<AppState>(
+      context,
+      listen: false,
+    ).setChecklistForKey(_specificChecklistKey(selectedDate), _specificChecked);
 
-  _saveAllLogsForDay();
+    _saveAllLogsForDay();
   }
 
   @override
@@ -177,15 +203,9 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen> wit
                   tween: Tween<double>(begin: 0, end: 1),
                   duration: const Duration(milliseconds: 800),
                   curve: Curves.easeOutBack,
-                  builder: (context, value, child) => Transform.scale(
-                    scale: value,
-                    child: child,
-                  ),
+                  builder: (context, value, child) => Transform.scale(scale: value, child: child),
                   child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.green[50],
-                      shape: BoxShape.circle,
-                    ),
+                    decoration: BoxDecoration(color: Colors.green[50], shape: BoxShape.circle),
                     padding: const EdgeInsets.all(22),
                     child: const Icon(Icons.emoji_events_rounded, color: Color(0xFF2ECC71), size: 64),
                   ),
@@ -201,9 +221,7 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen> wit
                     child: Column(
                       children: [
                         Text(
-                          selectedLang == 'en'
-                              ? "Recovery Complete!"
-                              : "पुनरुत्थान पूर्ण!",
+                          selectedLang == 'en' ? "Recovery Complete!" : "पुनरुत्थान पूर्ण!",
                           style: const TextStyle(
                             fontSize: 24,
                             fontWeight: FontWeight.bold,
@@ -216,10 +234,7 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen> wit
                           selectedLang == 'en'
                               ? "Congratulations! Your procedure recovery is complete. You can now select a new treatment."
                               : "अभिनंदन! तुमची उपचार प्रक्रिया पूर्ण झाली आहे. तुम्ही आता नवीन उपचार निवडू शकता.",
-                          style: const TextStyle(
-                            fontSize: 16,
-                            color: Color(0xFF6B7280),
-                          ),
+                          style: const TextStyle(fontSize: 16, color: Color(0xFF6B7280)),
                           textAlign: TextAlign.center,
                         ),
                       ],
@@ -236,17 +251,11 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen> wit
                       backgroundColor: const Color(0xFF0052CC),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 18),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                       elevation: 3,
-                      textStyle: const TextStyle(
-                        fontSize: 18, fontWeight: FontWeight.w600, letterSpacing: 0.2,
-                      ),
+                      textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, letterSpacing: 0.2),
                     ),
-                    label: Text(selectedLang == 'en'
-                        ? "Select Different Treatment"
-                        : "नवीन उपचार निवडा"),
+                    label: Text(selectedLang == 'en' ? "Select Different Treatment" : "नवीन उपचार निवडा"),
                     onPressed: () async {
                       await completeThenSelectNewTreatment(context, replaceStack: true);
                     },
@@ -261,44 +270,36 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen> wit
       final appState = Provider.of<AppState>(context);
       final treatment = appState.treatment;
 
-      String title = selectedLang == 'en'
-          ? "General Instructions"
-          : "सामान्य सूचना";
+      String title = selectedLang == 'en' ? "General Instructions" : "सामान्य सूचना";
       if (treatment != null) {
-        title = selectedLang == 'en'
-            ? "Instructions (${treatment})"
-            : "सूचना (${treatment})";
+        title = selectedLang == 'en' ? "Instructions (${treatment})" : "सूचना (${treatment})";
       }
 
       return Scaffold(
         backgroundColor: Colors.white,
         appBar: showSpecific
             ? AppBar(
-          backgroundColor: Colors.white,
-          elevation: 1,
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back, color: Colors.blue),
-            onPressed: () {
-              setState(() => showSpecific = false);
-            },
-          ),
-          title: Text(
-            selectedLang == 'en'
-                ? "Specific Instructions - Day $currentDay"
-                : "विशिष्ट सूचना - दिवस $currentDay",
-            style: const TextStyle(
-                color: Colors.blue, fontWeight: FontWeight.bold),
-          ),
-          centerTitle: true,
-        )
+                backgroundColor: Colors.white,
+                elevation: 1,
+                leading: IconButton(
+                  icon: const Icon(Icons.arrow_back, color: Colors.blue),
+                  onPressed: () {
+                    setState(() => showSpecific = false);
+                  },
+                ),
+                title: Text(
+                  selectedLang == 'en' ? "Specific Instructions - Day $currentDay" : "विशिष्ट सूचना - दिवस $currentDay",
+                  style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold),
+                ),
+                centerTitle: true,
+              )
             : null,
         body: SingleChildScrollView(
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 440),
               child: Padding(
-                padding: const EdgeInsets.symmetric(
-                    vertical: 40.0, horizontal: 8.0),
+                padding: const EdgeInsets.symmetric(vertical: 40.0, horizontal: 8.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -322,28 +323,24 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen> wit
                     if (!showSpecific) ...[
                       Text(
                         "$title (Day $currentDay)",
-                        style: const TextStyle(
-                            fontSize: 22, fontWeight: FontWeight.bold),
+                        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 20),
                       // Do's Section with Checklist
                       Container(
                         decoration: BoxDecoration(
                           color: Colors.white,
-                          border: Border.all(color: Colors.green.shade200,
-                              width: 2),
+                          border: Border.all(color: Colors.green.shade200, width: 2),
                           borderRadius: BorderRadius.circular(10),
                         ),
                         margin: const EdgeInsets.only(bottom: 20),
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                              vertical: 8.0, horizontal: 16.0),
+                          padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 10, vertical: 2),
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
                                 decoration: BoxDecoration(
                                   color: Colors.green[700],
                                   borderRadius: BorderRadius.circular(6),
@@ -362,7 +359,7 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen> wit
                               const SizedBox(height: 8),
                               ...List.generate(
                                 bracesDos.length,
-                                    (i) => Padding(
+                                (i) => Padding(
                                   padding: const EdgeInsets.only(left: 4),
                                   child: CheckboxListTile(
                                     value: _dosChecked[i],
@@ -379,9 +376,7 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen> wit
                                       ),
                                     ),
                                     activeColor: Colors.green,
-                                    checkboxShape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(5),
-                                    ),
+                                    checkboxShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
                                   ),
                                 ),
                               ),
@@ -393,28 +388,23 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen> wit
                       Container(
                         decoration: BoxDecoration(
                           color: const Color(0xFFFFF2F2),
-                          border: Border.all(color: Colors.red.shade200,
-                              width: 2),
+                          border: Border.all(color: Colors.red.shade200, width: 2),
                           borderRadius: BorderRadius.circular(10),
                         ),
                         margin: const EdgeInsets.only(bottom: 20),
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                              vertical: 8.0, horizontal: 16.0),
+                          padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 10, vertical: 2),
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
                                 decoration: BoxDecoration(
                                   color: Colors.red[700],
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: Text(
-                                  selectedLang == 'en'
-                                      ? "Don'ts"
-                                      : "टाळा",
+                                  selectedLang == 'en' ? "Don'ts" : "टाळा",
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontWeight: FontWeight.bold,
@@ -425,15 +415,12 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen> wit
                               const SizedBox(height: 8),
                               ...List.generate(
                                 bracesDonts.length,
-                                    (i) => Padding(
-                                  padding: const EdgeInsets.only(
-                                      left: 4, bottom: 4),
+                                (i) => Padding(
+                                  padding: const EdgeInsets.only(left: 4, bottom: 4),
                                   child: Row(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      const Icon(
-                                          Icons.close, color: Colors.red,
-                                          size: 20),
+                                      const Icon(Icons.close, color: Colors.red, size: 20),
                                       const SizedBox(width: 8),
                                       Expanded(
                                         child: Text(
@@ -461,17 +448,12 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen> wit
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.amber[700],
                             foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                             padding: const EdgeInsets.symmetric(vertical: 14),
                           ),
                           label: Text(
-                            selectedLang == 'en'
-                                ? "View Specific Instructions"
-                                : "विशिष्ट सूचना पहा",
-                            style: const TextStyle(
-                                fontSize: 16, fontWeight: FontWeight.bold),
+                            selectedLang == 'en' ? "View Specific Instructions" : "विशिष्ट सूचना पहा",
+                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                           ),
                           onPressed: () {
                             setState(() {
@@ -487,23 +469,17 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen> wit
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.blue[700],
                             foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                             padding: const EdgeInsets.symmetric(vertical: 15),
                           ),
                           child: Text(
-                            selectedLang == 'en'
-                                ? "Continue to Dashboard"
-                                : "डॅशबोर्डवर जा",
-                            style: const TextStyle(
-                                fontSize: 17, fontWeight: FontWeight.bold),
+                            selectedLang == 'en' ? "Continue to Dashboard" : "डॅशबोर्डवर जा",
+                            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
                           ),
                           onPressed: () {
                             Navigator.of(context).pushAndRemoveUntil(
-                              MaterialPageRoute(
-                                  builder: (_) => const HomeScreen()),
-                                  (route) => false,
+                              MaterialPageRoute(builder: (_) => const HomeScreen()),
+                              (route) => false,
                             );
                           },
                         ),
@@ -513,13 +489,12 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen> wit
                         selectedLang == 'en'
                             ? "Specific Instructions (Day $currentDay)"
                             : "विशिष्ट सूचना (दिवस $currentDay)",
-                        style: const TextStyle(
-                            fontSize: 20, fontWeight: FontWeight.bold),
+                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 12),
                       ...List.generate(
                         bracesSpecificInstructions.length,
-                            (i) => Padding(
+                        (i) => Padding(
                           padding: const EdgeInsets.symmetric(vertical: 2.0),
                           child: CheckboxListTile(
                             contentPadding: const EdgeInsets.only(left: 10, right: 0),
@@ -534,9 +509,7 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen> wit
                               _updateSpecificChecklist(i, value ?? false);
                             },
                             activeColor: Colors.green,
-                            checkboxShape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(5),
-                            ),
+                            checkboxShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
                           ),
                         ),
                       ),
@@ -547,23 +520,17 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen> wit
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.blue[700],
                             foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                             padding: const EdgeInsets.symmetric(vertical: 15),
                           ),
                           child: Text(
-                            selectedLang == 'en'
-                                ? "Go to Dashboard"
-                                : "डॅशबोर्डवर जा",
-                            style: const TextStyle(
-                                fontSize: 17, fontWeight: FontWeight.bold),
+                            selectedLang == 'en' ? "Go to Dashboard" : "डॅशबोर्डवर जा",
+                            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
                           ),
                           onPressed: () {
                             Navigator.of(context).pushAndRemoveUntil(
-                              MaterialPageRoute(
-                                  builder: (_) => const HomeScreen()),
-                                  (route) => false,
+                              MaterialPageRoute(builder: (_) => const HomeScreen()),
+                              (route) => false,
                             );
                           },
                         ),

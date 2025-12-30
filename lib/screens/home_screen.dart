@@ -346,10 +346,92 @@ class TreatmentOptionsSheet extends StatelessWidget {
       }
     }
 
+    Future<bool> _confirmTreatmentReplacement({
+      required BuildContext ctx,
+      required String oldTreatment,
+      required String oldSubtype,
+      required String newTreatment,
+      required String newSubtype,
+    }) async {
+      if (oldTreatment.isEmpty) return true;
+      if (oldTreatment == newTreatment && oldSubtype == newSubtype) return true;
+
+      final res = await showDialog<bool>(
+        context: ctx,
+        barrierDismissible: false,
+        builder: (dctx) {
+          return AlertDialog(
+            title: const Text('Change treatment?'),
+            content: Text(
+              'You selected a different treatment.\n\n'
+              'Changing treatment will reset your ONGOING recovery progress (not completed history) and replace your current ongoing treatment on the server. '
+              'Completed treatments in Treatment History will remain.\n\n'
+              'Current: ${oldTreatment.isNotEmpty ? oldTreatment : '-'}${oldSubtype.isNotEmpty ? ' ($oldSubtype)' : ''}\n'
+              'New: $newTreatment${newSubtype.isNotEmpty ? ' ($newSubtype)' : ''}',
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.of(dctx).pop(false), child: const Text('Cancel')),
+              ElevatedButton(onPressed: () => Navigator.of(dctx).pop(true), child: const Text('Change')),
+            ],
+          );
+        },
+      );
+      return res == true;
+    }
+
+    Future<void> _promptDateTimeAndReplaceTreatment(AppState appState, {required String treatment, String? subtype}) async {
+      // Ask for procedure date and time, then call server replace endpoint.
+      final today = DateTime.now();
+      final pickedDate = await _pickDate(context, today);
+      if (pickedDate == null) return;
+      final pickedTime = await _pickTime(context, TimeOfDay.now());
+      if (pickedTime == null) return;
+
+      final ok = await ApiService.replaceTreatmentEpisode(
+        treatment: treatment,
+        subtype: subtype,
+        procedureDate: pickedDate,
+        procedureTime: pickedTime,
+      );
+      if (!ok) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to change treatment on server. Please try again.')),
+        );
+        return;
+      }
+
+      // Reset local caches so UI starts clean.
+      await appState.resetLocalStateForTreatmentReplacement(username: appState.username);
+
+      // Update local state to match server.
+      appState.setTreatment(treatment, subtype: subtype, procedureDate: pickedDate);
+      appState.setProcedureDateTime(pickedDate, pickedTime);
+      appState.procedureCompleted = false;
+    }
+
     Future<void> selectTreatment({required String treatment, String? subtype}) async {
       final appState = Provider.of<AppState>(context, listen: false);
-      appState.setTreatment(treatment, subtype: subtype);
-      await _promptDateTimeAndSave(appState);
+      final oldTreatment = (appState.treatment ?? '').toString();
+      final oldSubtype = (appState.treatmentSubtype ?? '').toString();
+      final newSubtype = (subtype ?? '').toString();
+
+      final confirmed = await _confirmTreatmentReplacement(
+        ctx: context,
+        oldTreatment: oldTreatment,
+        oldSubtype: oldSubtype,
+        newTreatment: treatment,
+        newSubtype: newSubtype,
+      );
+      if (!confirmed) return;
+
+      if (oldTreatment.isNotEmpty && (oldTreatment != treatment || oldSubtype != newSubtype)) {
+        await _promptDateTimeAndReplaceTreatment(appState, treatment: treatment, subtype: subtype);
+      } else {
+        // First-time selection or no change: keep the existing save behavior.
+        appState.setTreatment(treatment, subtype: subtype);
+        await _promptDateTimeAndSave(appState);
+      }
       await openInstructionsFor(appState);
     }
 

@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 import '../app_state.dart';
 import 'category_screen.dart';
+import 'home_screen.dart';
+import 'treatment_screen.dart';
 import '../services/reminder_service.dart';
 import '../services/push_service.dart';
 
@@ -28,6 +31,17 @@ class _LoginScreenState extends State<LoginScreen> {
   String _forgotError = '';
   bool _forgotLoading = false;
   bool _showOtpStep = false;
+
+  TimeOfDay? _parseTimeOfDay(dynamic timeStr) {
+    if (timeStr == null) return null;
+    final str = timeStr is String ? timeStr : timeStr.toString();
+    final parts = str.split(':');
+    if (parts.length < 2) return null;
+    final h = int.tryParse(parts[0]);
+    final m = int.tryParse(parts[1]);
+    if (h == null || m == null) return null;
+    return TimeOfDay(hour: h, minute: m);
+  }
 
   Future<void> _persistLoginToken(String username, String token) async {
     final prefs = await SharedPreferences.getInstance();
@@ -68,9 +82,9 @@ class _LoginScreenState extends State<LoginScreen> {
     // Persist and sync token immediately so the rest of the app sees it
     await _persistLoginToken(_username, token);
     await appState.setToken(token);
-  // Ensure this account owns the device token on the backend
-  await PushService.registerNow();
-  await PushService.flushPendingIfAny();
+    // Ensure this account owns the device token on the backend
+    await PushService.registerNow();
+    await PushService.flushPendingIfAny();
 
     final userDetails = await ApiService.getUserDetails();
     if (userDetails != null) {
@@ -84,6 +98,26 @@ class _LoginScreenState extends State<LoginScreen> {
           phone: userDetails['phone'] ?? '',
           email: userDetails['email'] ?? '',
         );
+
+        // Hydrate selection info so this device matches the account.
+        appState.setDepartment(userDetails['department']?.toString());
+        appState.setDoctor(userDetails['doctor']?.toString());
+        appState.setTreatment(
+          userDetails['treatment']?.toString(),
+          subtype: userDetails['treatment_subtype']?.toString(),
+        );
+        final procDate = userDetails['procedure_date']?.toString();
+        if (procDate != null && procDate.isNotEmpty) {
+          appState.procedureDate = DateTime.tryParse(procDate);
+        }
+        final procTime = userDetails['procedure_time'];
+        final parsedTime = _parseTimeOfDay(procTime);
+        if (parsedTime != null) appState.procedureTime = parsedTime;
+        appState.procedureCompleted = userDetails['procedure_completed'] == true;
+
+        // Pull server-side instruction ticks (non-blocking).
+        // Instruction screens will reflect these once loaded.
+        unawaited(appState.pullInstructionStatusChanges());
         // Initial reminders sync (non-blocking navigation if it fails)
         try {
           final cached = await ReminderService.loadCache();
@@ -96,10 +130,24 @@ class _LoginScreenState extends State<LoginScreen> {
         } catch (e) {
           debugPrint('Initial reminder sync failed: $e');
         }
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const CategoryScreen()),
-        );
+        // Route based on what’s already stored for this account.
+        if (appState.department != null &&
+            appState.doctor != null &&
+            appState.treatment != null &&
+            appState.procedureDate != null &&
+            appState.procedureTime != null &&
+            appState.procedureCompleted == false) {
+          Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomeScreen()));
+        } else if (appState.department != null &&
+            appState.doctor != null &&
+            (appState.treatment == null || appState.procedureDate == null || appState.procedureTime == null)) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => TreatmentScreenMain(userName: appState.username ?? 'User')),
+          );
+        } else {
+          Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const CategoryScreen()));
+        }
       } catch (e) {
         setState(() {
           _error = 'Failed to load user details: $e';
@@ -136,8 +184,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 _forgotLoading = true;
                 _forgotError = '';
               });
-              final result =
-              await ApiService.requestReset(_forgotField.trim());
+              final result = await ApiService.requestReset(_forgotField.trim());
               setState(() {
                 _forgotLoading = false;
                 if (result == true) {
@@ -153,19 +200,15 @@ class _LoginScreenState extends State<LoginScreen> {
                 _forgotLoading = true;
                 _forgotError = '';
               });
-              final result = await ApiService.resetPassword(
-                _forgotField.trim(),
-                _otp.trim(),
-                _newPassword.trim(),
-              );
+              final result = await ApiService.resetPassword(_forgotField.trim(), _otp.trim(), _newPassword.trim());
               setState(() {
                 _forgotLoading = false;
               });
               if (result == true) {
                 Navigator.of(context).pop();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Password reset successful! Please login.")),
-                );
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text("Password reset successful! Please login.")));
               } else {
                 setState(() {
                   _forgotError = result ?? "OTP verification failed. Try again.";
@@ -174,85 +217,64 @@ class _LoginScreenState extends State<LoginScreen> {
             }
 
             return AlertDialog(
-              title: Text(_showOtpStep
-                  ? "Enter OTP & New Password"
-                  : "Forgot Password"),
+              title: Text(_showOtpStep ? "Enter OTP & New Password" : "Forgot Password"),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   if (_showOtpStep) ...[
                     TextFormField(
                       enabled: !_forgotLoading,
-                      decoration: const InputDecoration(
-                        labelText: "OTP",
-                        border: OutlineInputBorder(),
-                      ),
+                      decoration: const InputDecoration(labelText: "OTP", border: OutlineInputBorder()),
                       onChanged: (v) => _otp = v,
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
                       enabled: !_forgotLoading,
-                      decoration: const InputDecoration(
-                        labelText: "New Password",
-                        border: OutlineInputBorder(),
-                      ),
+                      decoration: const InputDecoration(labelText: "New Password", border: OutlineInputBorder()),
                       obscureText: true,
                       onChanged: (v) => _newPassword = v,
                     ),
                   ] else ...[
                     TextFormField(
                       enabled: !_forgotLoading,
-                      decoration: const InputDecoration(
-                        labelText: "Email or Phone",
-                        border: OutlineInputBorder(),
-                      ),
+                      decoration: const InputDecoration(labelText: "Email or Phone", border: OutlineInputBorder()),
                       onChanged: (v) => _forgotField = v,
                     ),
                   ],
                   if (_forgotError.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 8.0),
-                      child: Text(
-                        _forgotError,
-                        style: const TextStyle(color: Colors.red),
-                      ),
+                      child: Text(_forgotError, style: const TextStyle(color: Colors.red)),
                     ),
                 ],
               ),
               actions: <Widget>[
                 if (!_forgotLoading)
-                  TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: const Text("Cancel"),
-                  ),
+                  TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text("Cancel")),
                 TextButton(
                   onPressed: _forgotLoading
                       ? null
                       : () {
-                    if (_showOtpStep) {
-                      if (_otp.isEmpty || _newPassword.isEmpty) {
-                        setState(() {
-                          _forgotError = "Enter OTP and new password.";
-                        });
-                      } else {
-                        verifyOtpAndReset();
-                      }
-                    } else {
-                      if (_forgotField.trim().isEmpty) {
-                        setState(() {
-                          _forgotError = "Enter your email or phone.";
-                        });
-                      } else {
-                        requestOtp();
-                      }
-                    }
-                  },
+                          if (_showOtpStep) {
+                            if (_otp.isEmpty || _newPassword.isEmpty) {
+                              setState(() {
+                                _forgotError = "Enter OTP and new password.";
+                              });
+                            } else {
+                              verifyOtpAndReset();
+                            }
+                          } else {
+                            if (_forgotField.trim().isEmpty) {
+                              setState(() {
+                                _forgotError = "Enter your email or phone.";
+                              });
+                            } else {
+                              requestOtp();
+                            }
+                          }
+                        },
                   child: _forgotLoading
-                      ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                       : Text(_showOtpStep ? "Reset Password" : "Send OTP"),
                 ),
               ],
@@ -284,19 +306,13 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 40),
                   TextFormField(
-                    decoration: const InputDecoration(
-                      labelText: "Username",
-                      border: OutlineInputBorder(),
-                    ),
+                    decoration: const InputDecoration(labelText: "Username", border: OutlineInputBorder()),
                     validator: (v) => v == null || v.trim().isEmpty ? "Enter username" : null,
                     onSaved: (v) => _username = (v ?? '').trim(),
                   ),
                   const SizedBox(height: 16),
                   TextFormField(
-                    decoration: const InputDecoration(
-                      labelText: "Password",
-                      border: OutlineInputBorder(),
-                    ),
+                    decoration: const InputDecoration(labelText: "Password", border: OutlineInputBorder()),
                     obscureText: true,
                     validator: (v) => v == null || v.isEmpty ? "Enter password" : null,
                     onSaved: (v) => _password = (v ?? ''),
@@ -314,10 +330,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               ? const SizedBox(
                                   width: 16,
                                   height: 16,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.white,
-                                  ),
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                                 )
                               : const Text("Login"),
                         ),
@@ -326,10 +339,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           onPressed: _showForgotPasswordDialog,
                           child: const Text(
                             "Forgot Password?",
-                            style: TextStyle(
-                              color: Color(0xFF6C63FF),
-                              fontWeight: FontWeight.w500,
-                            ),
+                            style: TextStyle(color: Color(0xFF6C63FF), fontWeight: FontWeight.w500),
                           ),
                         ),
                       ],
@@ -340,19 +350,13 @@ class _LoginScreenState extends State<LoginScreen> {
                     onTap: () {},
                     child: const Text(
                       "Don't have an account? Sign up",
-                      style: TextStyle(
-                        color: Color(0xFF6C63FF),
-                        decoration: TextDecoration.underline,
-                      ),
+                      style: TextStyle(color: Color(0xFF6C63FF), decoration: TextDecoration.underline),
                     ),
                   ),
                   if (_error.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 16),
-                      child: Text(
-                        _error,
-                        style: const TextStyle(color: Colors.red),
-                      ),
+                      child: Text(_error, style: const TextStyle(color: Colors.red)),
                     ),
                 ],
               ),

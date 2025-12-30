@@ -60,20 +60,23 @@ class _DoctorPatientProgressScreenState extends State<DoctorPatientProgressScree
                         const SizedBox(height: 16),
                         ElevatedButton.icon(
                           onPressed: () {
+                            final patient = (_data?['patient'] as Map<String, dynamic>?) ?? const {};
+                            final displayName = (patient['name'] ?? '').toString();
                             Navigator.of(context).push(
                               MaterialPageRoute(
                                 builder: (_) => ChatScreen(
                                   patientUsername: widget.username,
                                   asDoctor: true,
+                                  patientDisplayName: displayName,
                                 ),
                               ),
                             );
                           },
                           icon: const Icon(Icons.chat_bubble_outline),
-                          label: const Text('Open Chat with Patient'),
+                          label: const Text('Chat with Patient'),
                           style: ElevatedButton.styleFrom(
                             padding: const EdgeInsets.symmetric(vertical: 14),
-                            backgroundColor: Colors.blueAccent,
+                            backgroundColor: Colors.deepPurple,
                             foregroundColor: Colors.white,
                           ),
                         ),

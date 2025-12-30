@@ -1,12 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../services/api_service.dart';
 
 class ChatScreen extends StatefulWidget {
   final String patientUsername;
   final bool asDoctor;
   final String? doctorName;
+  final String? patientDisplayName;
 
-  const ChatScreen({super.key, required this.patientUsername, this.asDoctor = false, this.doctorName});
+  const ChatScreen({
+    super.key,
+    required this.patientUsername,
+    this.asDoctor = false,
+    this.doctorName,
+    this.patientDisplayName,
+  });
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -80,13 +88,17 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final title = widget.asDoctor
-        ? 'Chat • ${widget.patientUsername}'
-        : 'Chat with Doctor';
+    final doctorLabel = (widget.doctorName != null && widget.doctorName!.trim().isNotEmpty)
+        ? widget.doctorName!.trim()
+        : 'Doctor';
+    final patientLabel = (widget.patientDisplayName != null && widget.patientDisplayName!.trim().isNotEmpty)
+      ? widget.patientDisplayName!.trim()
+      : widget.patientUsername;
+    final title = widget.asDoctor ? 'Chat • $patientLabel' : 'Chat with $doctorLabel';
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(title),
+        title: Text(title, overflow: TextOverflow.ellipsis),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -106,11 +118,30 @@ class _ChatScreenState extends State<ChatScreen> {
                         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
                         itemCount: _messages.length,
                         itemBuilder: (context, index) {
-                          final msg = _messages[index] as Map<String, dynamic>;
+                          final msg = (_messages[index] as Map).cast<String, dynamic>();
                           final role = (msg['sender_role'] ?? '').toString();
                           final isMe = widget.asDoctor ? role == 'doctor' : role == 'patient';
                           final text = (msg['message'] ?? '').toString();
-                          final time = (msg['created_at'] ?? '').toString();
+
+                          final senderUsername = (msg['sender_username'] ?? '').toString().trim();
+                          final String senderLabel;
+                          if (widget.asDoctor) {
+                            // Doctor view: show patient display name (preferred) for patient messages.
+                            senderLabel = role == 'doctor'
+                                ? 'Doctor'
+                                : (patientLabel.isNotEmpty
+                                    ? patientLabel
+                                    : (senderUsername.isNotEmpty ? senderUsername : widget.patientUsername));
+                          } else {
+                            senderLabel = role == 'doctor'
+                                ? (widget.doctorName != null && widget.doctorName!.trim().isNotEmpty
+                                    ? widget.doctorName!.trim()
+                                    : (senderUsername.isNotEmpty ? senderUsername : 'Doctor'))
+                                : (senderUsername.isNotEmpty ? senderUsername : widget.patientUsername);
+                          }
+
+                          final createdAt = _formatTimestamp(msg['created_at']);
+
                           return Align(
                             alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
                             child: Container(
@@ -133,12 +164,21 @@ class _ChatScreenState extends State<ChatScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
+                                    senderLabel,
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
                                     text,
                                     style: const TextStyle(color: Colors.white, fontSize: 15),
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    time,
+                                    createdAt,
                                     style: const TextStyle(color: Colors.white70, fontSize: 11),
                                   ),
                                 ],
@@ -184,5 +224,48 @@ class _ChatScreenState extends State<ChatScreen> {
         ],
       ),
     );
+  }
+
+  String _formatTimestamp(dynamic value) {
+    if (value == null) return '';
+    final raw = value.toString().trim();
+    if (raw.isEmpty) return '';
+
+    final parsedLocal = _parseBackendTimestampToLocal(raw);
+    if (parsedLocal == null) return raw;
+    return DateFormat('yyyy-MM-dd • h:mm a').format(parsedLocal);
+  }
+
+  DateTime? _parseBackendTimestampToLocal(String raw) {
+    // Backend sometimes returns:
+    // - UTC with Z: 2025-12-05T14:08:26.038580Z
+    // - With offset: 2025-12-05T14:08:26+00:00
+    // - Naive (no timezone): 2025-12-05T14:08:26.038580
+    // For naive timestamps we assume UTC (server time) and convert to local.
+    var s = raw;
+    if (s.contains(' ') && !s.contains('T')) {
+      s = s.replaceFirst(' ', 'T');
+    }
+
+    final dt = DateTime.tryParse(s);
+    if (dt == null) return null;
+
+    final hasExplicitTz = RegExp(r'(Z|[+-]\d\d:\d\d)$').hasMatch(s);
+    if (hasExplicitTz) {
+      return dt.toLocal();
+    }
+
+    // Treat as UTC even if Dart parsed it as local.
+    final assumedUtc = DateTime.utc(
+      dt.year,
+      dt.month,
+      dt.day,
+      dt.hour,
+      dt.minute,
+      dt.second,
+      dt.millisecond,
+      dt.microsecond,
+    );
+    return assumedUtc.toLocal();
   }
 }

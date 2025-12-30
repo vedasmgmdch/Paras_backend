@@ -3,8 +3,143 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../app_state.dart';
 
+class _AccountCondition {
+  final String label;
+  final String sublabel;
+  final double score;
+  final Color color;
+
+  const _AccountCondition({
+    required this.label,
+    required this.sublabel,
+    required this.score,
+    required this.color,
+  });
+}
+
 class CalendarScreen extends StatelessWidget {
   const CalendarScreen({super.key});
+
+  _AccountCondition _computeAccountCondition(AppState appState) {
+    final user = appState.username ?? '';
+    final treatment = appState.treatment ?? '';
+    final subtype = appState.treatmentSubtype ?? '';
+
+    final procedureDate = appState.procedureDate ?? appState.effectiveLocalNow();
+    final now = appState.effectiveLocalNow();
+    final today = DateTime(now.year, now.month, now.day);
+    final from = DateTime(procedureDate.year, procedureDate.month, procedureDate.day);
+
+    int total = 0;
+    int followed = 0;
+
+    for (final raw in appState.instructionLogs) {
+      if ((raw['username'] ?? '').toString() != user) continue;
+      if ((raw['treatment'] ?? '').toString() != treatment) continue;
+      if ((raw['subtype'] ?? '').toString() != subtype) continue;
+      final dateStr = (raw['date'] ?? '').toString();
+      if (dateStr.isEmpty) continue;
+      DateTime d;
+      try {
+        d = DateTime.parse(dateStr);
+      } catch (_) {
+        continue;
+      }
+      final dateOnly = DateTime(d.year, d.month, d.day);
+      if (dateOnly.isBefore(from) || dateOnly.isAfter(today)) continue;
+
+      total++;
+      final isFollowed = raw['followed'] == true || raw['followed']?.toString() == 'true';
+      if (isFollowed) followed++;
+    }
+
+    if (total == 0) {
+      return _AccountCondition(
+        label: 'No data yet',
+        sublabel: 'Follow instructions to build your progress',
+        score: 0,
+        color: Colors.blueGrey,
+      );
+    }
+
+    final ratio = (followed / total).clamp(0.0, 1.0);
+    if (ratio >= 0.80) {
+      return _AccountCondition(
+        label: 'Good',
+        sublabel: 'Since procedure • ${(ratio * 100).round()}% instructions followed',
+        score: ratio,
+        color: const Color(0xFF22B573),
+      );
+    }
+    if (ratio >= 0.50) {
+      return _AccountCondition(
+        label: 'Alright',
+        sublabel: 'Since procedure • ${(ratio * 100).round()}% instructions followed',
+        score: ratio,
+        color: const Color(0xFF2196F3),
+      );
+    }
+    return _AccountCondition(
+      label: 'Needs attention',
+      sublabel: 'Since procedure • ${(ratio * 100).round()}% instructions followed',
+      score: ratio,
+      color: Colors.orange,
+    );
+  }
+
+  Widget _buildAccountProgressBar(AppState appState) {
+    final condition = _computeAccountCondition(appState);
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFF),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.blueGrey.shade100),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Account progress',
+                  style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.black87),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: condition.color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  condition.label,
+                  style: TextStyle(fontWeight: FontWeight.bold, color: condition.color),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: condition.score.clamp(0.0, 1.0),
+              minHeight: 10,
+              backgroundColor: Colors.blueGrey.shade50,
+              color: condition.color,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            condition.sublabel,
+            style: const TextStyle(color: Colors.black54, fontSize: 13),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -204,11 +339,7 @@ class CalendarScreen extends StatelessWidget {
                               ],
                             ),
                           ),
-                          const SizedBox(height: 8),
-                          const Text(
-                            "No progress entries yet. Add your first entry from the Progress tab.",
-                            style: TextStyle(color: Colors.black54, fontSize: 15),
-                          ),
+                          _buildAccountProgressBar(appState),
                         ],
                       ),
                     ),

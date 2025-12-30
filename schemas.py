@@ -212,6 +212,13 @@ class TreatmentInfoCreate(BaseModel):
     procedure_date: date
     procedure_time: time
 
+
+class ReplaceTreatmentRequest(BaseModel):
+    treatment: str
+    subtype: Optional[str] = None
+    procedure_date: date
+    procedure_time: time
+
 class TreatmentInfoResponse(BaseModel):
     id: int
     patient_id: int

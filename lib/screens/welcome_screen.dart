@@ -1,38 +1,33 @@
 import 'dart:convert';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../app_state.dart';
 import 'category_screen.dart';
 import 'forgot_password_screen.dart';
 import 'home_screen.dart';
+import 'treatment_screen.dart';
 import '../services/api_service.dart';
 import 'signup_otp_verification_screen.dart';
 import '../services/push_service.dart';
 
 class WelcomeScreen extends StatefulWidget {
   final Future<String?> Function(
-      BuildContext context,
-      String username,
-      String password,
-      String phone,
-      String email,
-      String name,
-      String dob,
-      String gender,
-      VoidCallback switchToLogin,
-      )? onSignUp;
+    BuildContext context,
+    String username,
+    String password,
+    String phone,
+    String email,
+    String name,
+    String dob,
+    String gender,
+    VoidCallback switchToLogin,
+  )?
+  onSignUp;
 
-  final Future<String?> Function(
-      BuildContext context,
-      String username,
-      String password,
-      )? onLogin;
+  final Future<String?> Function(BuildContext context, String username, String password)? onLogin;
 
-  const WelcomeScreen({
-    super.key,
-    this.onSignUp,
-    this.onLogin,
-  });
+  const WelcomeScreen({super.key, this.onSignUp, this.onLogin});
 
   @override
   State<WelcomeScreen> createState() => _WelcomeScreenState();
@@ -99,23 +94,16 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   void _showErrorDialog(String title, String message) {
     showDialog(
       context: context,
-      builder: (context) =>
-          AlertDialog(
-            title: Text(title),
-            content: Text(message),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('OK'),
-              ),
-            ],
-          ),
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('OK'))],
+      ),
     );
   }
 
   bool _isValidDate(String? y, String? m, String? d) {
-    if (y == null || m == null || d == null || y.isEmpty || m.isEmpty ||
-        d.isEmpty) return false;
+    if (y == null || m == null || d == null || y.isEmpty || m.isEmpty || d.isEmpty) return false;
     final year = int.tryParse(y);
     final month = int.tryParse(m);
     final day = int.tryParse(d);
@@ -129,9 +117,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   }
 
   // Default login implementation if onLogin is not provided
-  Future<String?> _defaultLogin(BuildContext context,
-      String username,
-      String password,) async {
+  Future<String?> _defaultLogin(BuildContext context, String username, String password) async {
     final error = await ApiService.login(username, password);
 
     if (error != null) {
@@ -167,30 +153,29 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       );
       appState.setDepartment(userDetails['department']);
       appState.setDoctor(userDetails['doctor']);
-      appState.setTreatment(
-        userDetails['treatment'],
-        subtype: userDetails['treatment_subtype'],
-      );
+      appState.setTreatment(userDetails['treatment'], subtype: userDetails['treatment_subtype']);
       appState.procedureDate = userDetails['procedure_date'] != null
           ? DateTime.parse(userDetails['procedure_date'])
           : null;
       appState.procedureTime = userDetails['procedure_time'] != null
           ? _parseTimeOfDay(userDetails['procedure_time'])
           : null;
-      appState.procedureCompleted =
-          userDetails['procedure_completed'] == true;
+      appState.procedureCompleted = userDetails['procedure_completed'] == true;
 
-      // Check if user has already selected a category
+      // Pull server-side instruction ticks (non-blocking) so a new device matches the account.
+      unawaited(appState.pullInstructionStatusChanges());
+
       if (appState.hasSelectedCategory) {
+        Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => HomeScreen()), (route) => false);
+      } else if (appState.department != null &&
+          appState.doctor != null &&
+          (appState.treatment == null || appState.procedureDate == null || appState.procedureTime == null)) {
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => HomeScreen()),
-              (route) => false,
+          MaterialPageRoute(builder: (_) => TreatmentScreenMain(userName: appState.username ?? 'User')),
+          (route) => false,
         );
       } else {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => CategoryScreen()),
-              (route) => false,
-        );
+        Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => CategoryScreen()), (route) => false);
       }
       return null;
     }
@@ -219,12 +204,10 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       setState(() => _dobError = "Please enter a valid date of birth.");
       return "Invalid DOB";
     }
-    _signupDob =
-        "${year.padLeft(4, '0')}-${month.padLeft(2, '0')}-${day.padLeft(2, '0')}";
+    _signupDob = "${year.padLeft(4, '0')}-${month.padLeft(2, '0')}-${day.padLeft(2, '0')}";
 
     if (!_agreedToHipaa) {
-      _showErrorDialog("Agreement Required",
-          "You must agree to the HIPAA disclaimer before signing up.");
+      _showErrorDialog("Agreement Required", "You must agree to the HIPAA disclaimer before signing up.");
       return "Agreement Required";
     }
     if (_signUpFormKey.currentState?.validate() ?? false) {
@@ -260,11 +243,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
             if (mounted) {
               Navigator.pushReplacement(
                 context,
-                MaterialPageRoute(
-                  builder: (_) => SignupOtpVerificationScreen(
-                    email: otpEmail,
-                  ),
-                ),
+                MaterialPageRoute(builder: (_) => SignupOtpVerificationScreen(email: otpEmail)),
               );
             }
             // Reset form state
@@ -327,17 +306,13 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
           _showErrorDialog(
             "Sign Up Failed",
             (errorJson != null && errorJson['detail'] is Map)
-                ? (errorJson['detail'] as Map)
-                .values
-                .whereType<String>()
-                .join('\n')
+                ? (errorJson['detail'] as Map).values.whereType<String>().join('\n')
                 : error,
           );
           return error;
         }
       } catch (e) {
-        _showErrorDialog(
-            "Error", "An unexpected error occurred. Please try again.");
+        _showErrorDialog("Error", "An unexpected error occurred. Please try again.");
         return "Unknown Error";
       } finally {
         setState(() => _isLoading = false);
@@ -346,21 +321,15 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     return null;
   }
 
-
-
   Future<String?> _handleLogin() async {
     if (_loginFormKey.currentState?.validate() ?? false) {
       _loginFormKey.currentState!.save();
-    // Normalize inputs
-    _loginUsername = _loginUsername.trim();
+      // Normalize inputs
+      _loginUsername = _loginUsername.trim();
       setState(() => _isLoading = true);
       try {
         final loginFunction = widget.onLogin ?? _defaultLogin;
-        final error = await loginFunction(
-          context,
-      _loginUsername.trim(),
-          _loginPassword,
-        );
+        final error = await loginFunction(context, _loginUsername.trim(), _loginPassword);
         if (error == null) {
           _loginFormKey.currentState?.reset();
           setState(() {
@@ -373,8 +342,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
           return error;
         }
       } catch (e) {
-        _showErrorDialog(
-            "Error", "An unexpected error occurred. Please try again.");
+        _showErrorDialog("Error", "An unexpected error occurred. Please try again.");
         return "Unknown Error";
       } finally {
         setState(() => _isLoading = false);
@@ -387,10 +355,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          "Date of Birth",
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-        ),
+        const Text("Date of Birth", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
         const SizedBox(height: 8),
         Container(
           decoration: BoxDecoration(
@@ -413,8 +378,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                   maxLength: 2,
                   style: const TextStyle(fontSize: 16),
                   onChanged: (_) => setState(() {}),
-                  buildCounter: (_,
-                      {required currentLength, maxLength, required isFocused}) => null,
+                  buildCounter: (_, {required currentLength, maxLength, required isFocused}) => null,
                 ),
               ),
               Container(width: 1, height: 32, color: Colors.grey.shade400),
@@ -431,8 +395,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                   maxLength: 2,
                   style: const TextStyle(fontSize: 16),
                   onChanged: (_) => setState(() {}),
-                  buildCounter: (_,
-                      {required currentLength, maxLength, required isFocused}) => null,
+                  buildCounter: (_, {required currentLength, maxLength, required isFocused}) => null,
                 ),
               ),
               Container(width: 1, height: 32, color: Colors.grey.shade400),
@@ -449,8 +412,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                   maxLength: 4,
                   style: const TextStyle(fontSize: 16),
                   onChanged: (_) => setState(() {}),
-                  buildCounter: (_,
-                      {required currentLength, maxLength, required isFocused}) => null,
+                  buildCounter: (_, {required currentLength, maxLength, required isFocused}) => null,
                 ),
               ),
             ],
@@ -459,8 +421,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         if (_dobError != null)
           Padding(
             padding: const EdgeInsets.only(top: 4, left: 4),
-            child: Text(_dobError!,
-                style: const TextStyle(color: Colors.red, fontSize: 12)),
+            child: Text(_dobError!, style: const TextStyle(color: Colors.red, fontSize: 12)),
           ),
         const SizedBox(height: 16),
       ],
@@ -525,21 +486,14 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                 ),
                 const SizedBox(height: 24),
                 _isLoading
-                    ? const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 32.0),
-                  child: CircularProgressIndicator(),
-                )
+                    ? const Padding(padding: EdgeInsets.symmetric(vertical: 32.0), child: CircularProgressIndicator())
                     : _showSignUp
                     ? _buildSignUpForm()
                     : _buildLoginForm(context),
                 const SizedBox(height: 12),
                 TextButton(
                   onPressed: _toggleForm,
-                  child: Text(
-                    _showSignUp
-                        ? "Already have an account? Login"
-                        : "Don't have an account? Sign up",
-                  ),
+                  child: Text(_showSignUp ? "Already have an account? Login" : "Don't have an account? Sign up"),
                 ),
               ],
             ),
@@ -557,10 +511,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         children: [
           TextFormField(
             controller: _signupNameController,
-            decoration: const InputDecoration(
-              labelText: "Full Name",
-              border: OutlineInputBorder(),
-            ),
+            decoration: const InputDecoration(labelText: "Full Name", border: OutlineInputBorder()),
             validator: (v) => v == null || v.trim().isEmpty ? "Enter full name" : null,
             onSaved: (_) {},
           ),
@@ -568,10 +519,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
           _buildDobConnectedFields(),
           DropdownButtonFormField<String>(
             initialValue: _signupGender,
-            decoration: const InputDecoration(
-              labelText: "Gender",
-              border: OutlineInputBorder(),
-            ),
+            decoration: const InputDecoration(labelText: "Gender", border: OutlineInputBorder()),
             items: const [
               DropdownMenuItem(value: "Male", child: Text("Male")),
               DropdownMenuItem(value: "Female", child: Text("Female")),
@@ -595,10 +543,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
           const SizedBox(height: 16),
           TextFormField(
             controller: _signupPasswordController,
-            decoration: const InputDecoration(
-              labelText: "Password",
-              border: OutlineInputBorder(),
-            ),
+            decoration: const InputDecoration(labelText: "Password", border: OutlineInputBorder()),
             obscureText: true,
             validator: (v) {
               if (v == null || v.isEmpty) return "Enter password";
@@ -657,42 +602,32 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
               onTap: () {
                 showDialog(
                   context: context,
-                  builder: (context) =>
-                      AlertDialog(
-                        title: const Text('HIPAA Disclaimer'),
-                        content: SingleChildScrollView(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: const [
-                              Text(
-                                "Your privacy is important to us. We comply with the Health Insurance Portability and Accountability Act (HIPAA), which requires us to maintain the privacy and security of your health information.",
-                              ),
-                              SizedBox(height: 12),
-                              Text(
-                                "• All health information you provide is encrypted and securely stored.",
-                              ),
-                              SizedBox(height: 8),
-                              Text(
-                                "• We will not share your personal health information with anyone except as required by law or as necessary for your care.",
-                              ),
-                              SizedBox(height: 8),
-                              Text(
-                                "• You have the right to access, amend, and receive an accounting of disclosures of your health information.",
-                              ),
-                              SizedBox(height: 8),
-                              Text(
-                                "• For more details, please review our Privacy Policy.",
-                              ),
-                            ],
+                  builder: (context) => AlertDialog(
+                    title: const Text('HIPAA Disclaimer'),
+                    content: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          Text(
+                            "Your privacy is important to us. We comply with the Health Insurance Portability and Accountability Act (HIPAA), which requires us to maintain the privacy and security of your health information.",
                           ),
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.of(context).pop(),
-                            child: const Text('Close'),
+                          SizedBox(height: 12),
+                          Text("• All health information you provide is encrypted and securely stored."),
+                          SizedBox(height: 8),
+                          Text(
+                            "• We will not share your personal health information with anyone except as required by law or as necessary for your care.",
                           ),
+                          SizedBox(height: 8),
+                          Text(
+                            "• You have the right to access, amend, and receive an accounting of disclosures of your health information.",
+                          ),
+                          SizedBox(height: 8),
+                          Text("• For more details, please review our Privacy Policy."),
                         ],
                       ),
+                    ),
+                    actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close'))],
+                  ),
                 );
               },
               child: Row(
@@ -723,10 +658,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 20),
-          ElevatedButton(
-            onPressed: _isLoading ? null : () => _handleSignUp(),
-            child: const Text("Sign Up"),
-          ),
+          ElevatedButton(onPressed: _isLoading ? null : () => _handleSignUp(), child: const Text("Sign Up")),
         ],
       ),
     );
@@ -739,19 +671,13 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           TextFormField(
-            decoration: const InputDecoration(
-              labelText: "Username",
-              border: OutlineInputBorder(),
-            ),
+            decoration: const InputDecoration(labelText: "Username", border: OutlineInputBorder()),
             validator: (v) => v == null || v.trim().isEmpty ? "Enter username" : null,
             onSaved: (v) => _loginUsername = (v ?? '').trim(),
           ),
           const SizedBox(height: 16),
           TextFormField(
-            decoration: const InputDecoration(
-              labelText: "Password",
-              border: OutlineInputBorder(),
-            ),
+            decoration: const InputDecoration(labelText: "Password", border: OutlineInputBorder()),
             obscureText: true,
             validator: (v) => v == null || v.isEmpty ? "Enter password" : null,
             onSaved: (v) => _loginPassword = v ?? '',
@@ -764,19 +690,11 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
               alignment: Alignment.centerRight,
               child: TextButton(
                 onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const ForgotPasswordScreen(),
-                    ),
-                  );
+                  Navigator.push(context, MaterialPageRoute(builder: (context) => const ForgotPasswordScreen()));
                 },
                 child: const Text(
                   "Forgot Password?",
-                  style: TextStyle(
-                    color: Color(0xFF6C63FF),
-                    fontWeight: FontWeight.w500,
-                  ),
+                  style: TextStyle(color: Color(0xFF6C63FF), fontWeight: FontWeight.w500),
                 ),
               ),
             ),
@@ -784,10 +702,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
           const SizedBox(height: 8),
           // Centered Login Button (below)
           Center(
-            child: ElevatedButton(
-              onPressed: _isLoading ? null : () => _handleLogin(),
-              child: const Text("Login"),
-            ),
+            child: ElevatedButton(onPressed: _isLoading ? null : () => _handleLogin(), child: const Text("Login")),
           ),
         ],
       ),
@@ -798,12 +713,19 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
 // Place these at the top or bottom of your Dart file, outside of any other class!
 
 class InvalidCredentialsException implements Exception {}
+
 class SignUpUsernameTakenException implements Exception {}
+
 class SignUpPhoneTakenException implements Exception {}
+
 class SignUpEmailTakenException implements Exception {}
+
 class SignUpWeakPasswordException implements Exception {}
+
 class SignUpInvalidEmailException implements Exception {}
+
 class SignUpMissingFieldsException implements Exception {}
+
 class SignUpInvalidInputException implements Exception {
   final String message;
   SignUpInvalidInputException([this.message = ""]);
@@ -813,6 +735,3 @@ class SignUpGenericServerException implements Exception {
   final String message;
   SignUpGenericServerException([this.message = ""]);
 }
-
-
-

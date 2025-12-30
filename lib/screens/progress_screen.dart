@@ -1,9 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
 import '../app_state.dart';
-import '../services/api_service.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../main.dart'; // Import for global routeObserver
 import 'chat_screen.dart';
@@ -16,16 +13,12 @@ class ProgressScreen extends StatefulWidget {
 }
 
 class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
-  bool _loading = false;
   String _selectedDateForInstructionsLog = "";
 
-  String get _username =>
-      Provider.of<AppState>(context, listen: false).username ?? "default";
-  String? get _treatment =>
-      Provider.of<AppState>(context, listen: false).treatment;
-  String? get _subtype =>
-      Provider.of<AppState>(context, listen: false).treatmentSubtype;
-
+  String get _username => Provider.of<AppState>(context, listen: false).username ?? "default";
+  String? get _doctorName => Provider.of<AppState>(context, listen: false).doctor;
+  String? get _treatment => Provider.of<AppState>(context, listen: false).treatment;
+  String? get _subtype => Provider.of<AppState>(context, listen: false).treatmentSubtype;
 
   @override
   void initState() {
@@ -54,161 +47,90 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
 
   @override
   void didPopNext() {
-    // Called when coming back to this screen
-    final username = _username.isNotEmpty ? _username : 'default';
-    _initializeProgress(username);
+    // Intentionally do nothing.
+    // Re-initializing here causes janky back animation and an unexpected full refresh
+    // when returning from Chat. The user can manually refresh if needed.
   }
 
   Future<void> _initializeProgress(String username) async {
     debugPrint('[Progress] init start for user=$username');
     try {
-      await _loadLocalProgress();
-      await Provider.of<AppState>(context, listen: false)
-          .loadInstructionLogs(username: username);
+      await Provider.of<AppState>(context, listen: false).loadInstructionLogs(username: username);
       // Immediately pull server-side instruction status changes to populate past days too
-      await Provider.of<AppState>(context, listen: false)
-          .pullInstructionStatusChanges();
+      await Provider.of<AppState>(context, listen: false).pullInstructionStatusChanges();
       final logs = Provider.of<AppState>(context, listen: false).instructionLogs;
       debugPrint('[Progress] local+persisted instruction logs loaded count=${logs.length}');
-      await fetchProgressEntries();
     } catch (e) {
       debugPrint('[Progress][error] initialization failed: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Progress init failed: $e')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Progress init failed: $e')));
       }
     }
     debugPrint('[Progress] init end');
   }
 
-  Future<void> _loadLocalProgress() async {
-    final prefs = await SharedPreferences.getInstance();
-    final appState = Provider.of<AppState>(context, listen: false);
-
-    final saved = prefs.getString('progress_feedback_${_username}');
-    if (saved != null) {
-      try {
-        final List<dynamic> list = jsonDecode(saved);
-        appState.clearProgressFeedback();
-        for (final item in list) {
-          appState.addProgressFeedback(
-            item['title']?.toString() ?? '',
-            item['note']?.toString() ?? '',
-            date: item['date']?.toString(),
-          );
-        }
-        setState(() {});
-      } catch (_) {}
-    }
-  }
-
-  Future<void> _saveLocalProgress() async {
-    final prefs = await SharedPreferences.getInstance();
-    final appState = Provider.of<AppState>(context, listen: false);
-    await prefs.setString('progress_feedback_${_username}',
-        jsonEncode(appState.progressFeedback));
-  }
-
-  Future<void> fetchProgressEntries() async {
-    if (mounted) {
-      setState(() { _loading = true; });
-    }
-    // Watchdog: if for any reason we never clear _loading in 12s, force stop.
-    final startedAt = DateTime.now();
-    Future.delayed(const Duration(seconds: 12), () {
-      if (!mounted) return;
-      if (_loading) {
-        setState(() { _loading = false; });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Progress load timeout (12s). Showing cached data.')),
-        );
-        debugPrint('[Progress][watchdog] forced loading=false after 12s elapsed=${DateTime.now().difference(startedAt).inMilliseconds}ms');
-      }
-    });
-
-    final appState = Provider.of<AppState>(context, listen: false);
-    List<dynamic>? response;
-    try {
-      debugPrint('[Progress] fetching progress entries ...');
-      response = await ApiService.getProgressEntries().timeout(const Duration(seconds: 10));
-      debugPrint('[Progress] fetch result entries=${response?.length ?? 0}');
-    } catch (e) {
-      debugPrint('[Progress][error] fetchProgressEntries failed: $e');
-      response = null; // proceed with empty
-    }
-
-    appState.clearProgressFeedback();
-
-    if (response != null) {
-      for (var entry in response) {
-        final message = entry["message"]?.toString() ?? "";
-        final timestamp = entry["timestamp"]?.toString().split("T")[0] ?? "";
-        appState.addProgressFeedback("Entry", message, date: timestamp);
-      }
-    }
-
-    await _saveLocalProgress();
-    if (mounted) {
-      setState(() { _loading = false; });
-    }
-  }
-
-  Future<void> submitFeedback(String message) async {
-    setState(() {
-      _loading = true;
-    });
-
-    bool success = false;
-    try {
-      success = await ApiService.submitProgress(message);
-    } catch (e) {
-      success = false;
-    }
-
-    if (success) {
-      final appState = Provider.of<AppState>(context, listen: false);
-      appState.addProgressFeedback(
-          "Entry",
-          message,
-          date: DateTime.now().toIso8601String().split("T")[0]);
-      await _saveLocalProgress();
-      await fetchProgressEntries();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text("Feedback submitted successfully"),
-              backgroundColor: Colors.green),
-        );
-      }
-    } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text("Failed to submit feedback"),
-              backgroundColor: Colors.red),
-        );
-      }
-    }
-    setState(() {
-      _loading = false;
-    });
-  }
-
   List<dynamic> _filterInstructionLogs(
-      List<dynamic> logs, {
-        required String username,
-        String? treatment,
-        String? subtype,
-      }) {
+    List<dynamic> logs, {
+    required String username,
+    String? treatment,
+    String? subtype,
+  }) {
+    String norm(String s) => s
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .replaceAll('–', '-')
+        .replaceAll('—', '-');
+
+    final bool isPfdFixed = (treatment == 'Prosthesis Fitted' && subtype == 'Fixed Dentures');
+    final Set<String> allowedPfdGeneral = {
+      norm('Whenever local anesthesia is used, avoid chewing on your teeth until the numbness has worn off.'),
+      norm('Proper brushing, flossing, and regular cleanings are necessary to maintain the restoration.'),
+      norm('Pay special attention to your gumline.'),
+      norm('Avoid very hot or hard foods.'),
+      // Marathi variants
+      norm('स्थानिक भूल दिल्यानंतर, सुन्नपणा जाईपर्यंत दातांवर चावणे टाळा.'),
+      norm('पुनर्स्थापना टिकवण्यासाठी योग्य ब्रशिंग, फ्लॉसिंग आणि नियमित स्वच्छता आवश्यक आहे.'),
+      norm('तुमच्या हिरड्यांच्या सीमेकडे विशेष लक्ष द्या.'),
+      norm('अतिशय गरम किंवा कडक अन्न टाळा.'),
+    };
+    final Set<String> allowedPfdSpecific = {
+      norm('If your bite feels high or uncomfortable, contact your dentist for an adjustment.'),
+      norm('If the restoration feels loose or comes off, keep it safe and contact your dentist. Do not try to glue it yourself.'),
+      norm('Clean carefully around the restoration and gumline; use floss/interdental aids as advised by your dentist.'),
+      norm('If you notice persistent pain, swelling, or bleeding, contact your dentist.'),
+      // Marathi variants
+      norm('चावताना दात उंच वाटत असतील किंवा अस्वस्थ वाटत असेल, समायोजनासाठी दंतवैद्याशी संपर्क साधा.'),
+      norm('पुनर्स्थापना सैल वाटली किंवा निघाली तर ती सुरक्षित ठेवा आणि दंतवैद्याशी संपर्क साधा. स्वतः चिकटवण्याचा प्रयत्न करू नका.'),
+      norm('पुनर्स्थापना व हिरड्यांच्या सीमेजवळ नीट स्वच्छता ठेवा; दंतवैद्याने सांगितल्याप्रमाणे फ्लॉस/इंटरडेंटल साधने वापरा.'),
+      norm('दुखणे, सूज किंवा रक्तस्राव सतत राहिल्यास दंतवैद्याशी संपर्क साधा.'),
+    };
+
     return logs.where((log) {
       if ((log['username'] ?? log['user'] ?? "default") != username) return false;
+      final logTreatment = (log['treatment'] ?? '').toString();
       if (treatment != null && treatment.isNotEmpty) {
-        if ((log['treatment'] ?? "") != treatment) return false;
+        // Accuracy > compatibility: don't treat empty treatment as wildcard,
+        // otherwise instructions from other treatments leak into the current treatment's log.
+        if (logTreatment != treatment) return false;
       }
+      final logSubtype = (log['subtype'] ?? '').toString();
       if (subtype != null && subtype.isNotEmpty) {
-        if ((log['subtype'] ?? "") != subtype) return false;
+        // Accuracy > compatibility: require exact subtype match to avoid cross-subtype mixing.
+        if (logSubtype != subtype) return false;
       }
+
+      if (isPfdFixed) {
+        final t = (log['type'] ?? '').toString().trim().toLowerCase();
+        final instruction = (log['instruction'] ?? log['note'] ?? '').toString();
+        final n = norm(instruction);
+        if (t == 'general') {
+          if (!allowedPfdGeneral.contains(n)) return false;
+        } else if (t == 'specific') {
+          if (!allowedPfdSpecific.contains(n)) return false;
+        }
+      }
+
       return true;
     }).toList();
   }
@@ -217,9 +139,11 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
     final Map<String, Map<String, dynamic>> latestLogs = {};
     for (var log in instructionLogs) {
       final date = log['date']?.toString() ?? '';
-      final type = log['type']?.toString() ?? '';
+      final type = (log['type']?.toString() ?? '').trim().toLowerCase();
       final instruction = log['instruction']?.toString() ?? log['note']?.toString() ?? '';
-      final key = '$date|$type|$instruction';
+      final idx = log['instruction_index'];
+      final idxStr = (idx == null) ? '' : idx.toString();
+      final key = idxStr.isNotEmpty ? '$date|$type|#${idxStr}' : '$date|$type|$instruction';
       latestLogs[key] = log;
     }
     return latestLogs.values.toList();
@@ -232,8 +156,7 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
     int notFollowedSpecific = 0;
     for (var log in _getLatestInstructionLogs(instructionLogs)) {
       final type = log['type']?.toString().toLowerCase() ?? '';
-      final followed =
-          log['followed'] == true || log['followed']?.toString() == 'true';
+      final followed = log['followed'] == true || log['followed']?.toString() == 'true';
       if (type == 'general') {
         if (followed) {
           generalFollowed++;
@@ -276,25 +199,25 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
     final latestLogs = _getLatestInstructionLogs(filteredLogs);
 
     final nowLocal = appState.effectiveLocalNow();
-    final int days = (nowLocal
-            .difference(DateTime(procedureDate.year, procedureDate.month, procedureDate.day))
-            .inDays + 1)
-        .clamp(1, 10000);
+    final int days =
+        (nowLocal.difference(DateTime(procedureDate.year, procedureDate.month, procedureDate.day)).inDays + 1).clamp(
+          1,
+          10000,
+        );
     final List<String> allDates = List.generate(days, (i) {
       final d = procedureDate.add(Duration(days: i));
       return "${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}";
     });
 
     if (_selectedDateForInstructionsLog.isEmpty && allDates.isNotEmpty) {
-      final todayStr = "${nowLocal.year.toString().padLeft(4, '0')}-${nowLocal.month.toString().padLeft(2, '0')}-${nowLocal.day.toString().padLeft(2, '0')}";
-      _selectedDateForInstructionsLog = allDates.contains(todayStr)
-          ? todayStr
-          : allDates.last;
+      final todayStr =
+          "${nowLocal.year.toString().padLeft(4, '0')}-${nowLocal.month.toString().padLeft(2, '0')}-${nowLocal.day.toString().padLeft(2, '0')}";
+      _selectedDateForInstructionsLog = allDates.contains(todayStr) ? todayStr : allDates.last;
     }
 
-  final logsForSelectedDate = latestLogs
-    .where((log) => log['date']?.toString() == _selectedDateForInstructionsLog)
-    .toList();
+    final logsForSelectedDate = latestLogs
+        .where((log) => log['date']?.toString() == _selectedDateForInstructionsLog)
+        .toList();
 
     return Container(
       width: double.infinity,
@@ -317,11 +240,7 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
                     fit: FlexFit.tight,
                     child: Text(
                       "Instructions Log",
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                        color: Colors.blueGrey,
-                      ),
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blueGrey),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -334,15 +253,13 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
                       try {
                         await appState.pullInstructionStatusChanges();
                         if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Instruction history refreshed')),
-                          );
+                          ScaffoldMessenger.of(
+                            context,
+                          ).showSnackBar(const SnackBar(content: Text('Instruction history refreshed')));
                         }
                       } catch (e) {
                         if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Refresh failed: $e')),
-                          );
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Refresh failed: $e')));
                         }
                       }
                       if (mounted) setState(() {});
@@ -351,22 +268,22 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
                   if (allDates.length > 1) ...[
                     const SizedBox(width: 8),
                     ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxWidth: constraints.maxWidth * 0.5,
-                        minWidth: 10,
-                      ),
+                      constraints: BoxConstraints(maxWidth: constraints.maxWidth * 0.5, minWidth: 10),
                       child: DropdownButton<String>(
                         value: _selectedDateForInstructionsLog,
                         isDense: true,
                         isExpanded: true,
                         items: allDates
-                            .map((d) => DropdownMenuItem(
-                            value: d,
-                            child: Text(
-                              _formatDisplayDate(d),
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 16),
-                            )))
+                            .map(
+                              (d) => DropdownMenuItem(
+                                value: d,
+                                child: Text(
+                                  _formatDisplayDate(d),
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 16),
+                                ),
+                              ),
+                            )
                             .toList(),
                         onChanged: (val) {
                           setState(() {
@@ -387,10 +304,7 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.yellow[50],
-                borderRadius: BorderRadius.circular(8),
-              ),
+              decoration: BoxDecoration(color: Colors.yellow[50], borderRadius: BorderRadius.circular(8)),
               child: const Text(
                 "No instructions recorded for this day.",
                 style: TextStyle(color: Colors.black54, fontSize: 15),
@@ -405,8 +319,8 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
               final Color? baseColor = type == 'general'
                   ? Colors.green[100]
                   : type == 'specific'
-                      ? Colors.red[100]
-                      : Colors.blue[100];
+                  ? Colors.red[100]
+                  : Colors.blue[100];
               final bg = followed ? baseColor : Colors.grey[200];
               return Container(
                 margin: const EdgeInsets.only(bottom: 8),
@@ -415,28 +329,25 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
                     Expanded(
                       child: Text(
                         instruction,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w500,
-                          fontSize: 15,
-                          color: Colors.black87,
-                        ),
+                        style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 15, color: Colors.black87),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: bg,
-                        borderRadius: BorderRadius.circular(8),
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: Icon(
+                        followed ? Icons.check_circle : Icons.radio_button_unchecked,
+                        size: 18,
+                        color: followed ? Colors.green : Colors.black38,
                       ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(8)),
                       child: Text(
                         _formatDisplayDate(date),
-                        style: const TextStyle(
-                            color: Colors.black54,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 13),
+                        style: const TextStyle(color: Colors.black54, fontWeight: FontWeight.w600, fontSize: 13),
                       ),
                     ),
                   ],
@@ -483,8 +394,9 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
       return const Padding(
         padding: EdgeInsets.only(bottom: 16.0),
         child: Text(
-            "No instruction logs available for selected treatment/subtype.",
-            style: TextStyle(color: Colors.black54)),
+          "No instruction logs available for selected treatment/subtype.",
+          style: TextStyle(color: Colors.black54),
+        ),
       );
     }
     return Padding(
@@ -493,8 +405,7 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
         children: [
           const Text(
             "Instructions Followed",
-            style: TextStyle(
-                fontWeight: FontWeight.bold, fontSize: 18, color: Colors.blueGrey),
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.blueGrey),
           ),
           const SizedBox(height: 10),
           SizedBox(
@@ -507,20 +418,14 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
                     color: Colors.green,
                     title: generalCount > 0 ? 'General\n$generalCount' : '',
                     radius: 55,
-                    titleStyle: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14),
+                    titleStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
                   ),
                   PieChartSectionData(
                     value: specificCount.toDouble(),
                     color: Colors.red,
                     title: specificCount > 0 ? 'Specific\n$specificCount' : '',
                     radius: 55,
-                    titleStyle: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14),
+                    titleStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
                   ),
                   PieChartSectionData(
                     value: (notFollowedGeneralCount + notFollowedSpecificCount).toDouble(),
@@ -529,10 +434,7 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
                         ? 'Not\n${notFollowedGeneralCount + notFollowedSpecificCount}'
                         : '',
                     radius: 55,
-                    titleStyle: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14),
+                    titleStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
                   ),
                 ],
                 sectionsSpace: 2,
@@ -557,11 +459,7 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
               Flexible(
                 child: Text(
                   "$generalCount General, $specificCount Specific, ${notFollowedGeneralCount + notFollowedSpecificCount} Not followed",
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 16,
-                    color: Colors.black87,
-                  ),
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: Colors.black87),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -586,277 +484,189 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
   @override
   Widget build(BuildContext context) {
     final appState = Provider.of<AppState>(context);
-  final procedureDate = appState.procedureDate ?? appState.effectiveLocalNow();
-  final nowLocal = appState.effectiveLocalNow();
-  final int daysSinceProcedure = (nowLocal
-      .difference(DateTime(procedureDate.year, procedureDate.month, procedureDate.day))
-      .inDays + 1)
-    .clamp(1, 10000);
+    final procedureDate = appState.procedureDate ?? appState.effectiveLocalNow();
+    final nowLocal = appState.effectiveLocalNow();
+    final int daysSinceProcedure =
+        (nowLocal.difference(DateTime(procedureDate.year, procedureDate.month, procedureDate.day)).inDays + 1).clamp(
+          1,
+          10000,
+        );
 
     final int totalRecoveryDays = 14;
-  final int dayOfRecovery = daysSinceProcedure.clamp(1, totalRecoveryDays);
-    final int progressPercent =
-    ((dayOfRecovery / totalRecoveryDays) * 100).clamp(0, 100).toInt();
-
-    final entries = appState.progressFeedback;
+    final int dayOfRecovery = daysSinceProcedure.clamp(1, totalRecoveryDays);
+    final int progressPercent = ((dayOfRecovery / totalRecoveryDays) * 100).clamp(0, 100).toInt();
 
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
-        child: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : SingleChildScrollView(
-                child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 440),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                  vertical: 20.0, horizontal: 8.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 18),
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF2196F3),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            const Expanded(
-                              child: Text(
-                                'Recovery Dashboard',
-                                style: TextStyle(
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
+        child: SingleChildScrollView(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 440),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 20.0, horizontal: 8.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 18),
+                            padding: const EdgeInsets.all(20),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF2196F3),
+                              borderRadius: BorderRadius.circular(20),
                             ),
-                            const Icon(Icons.favorite_border,
-                                color: Colors.white),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Day $dayOfRecovery of recovery',
-                          style: const TextStyle(
-                              fontSize: 16, color: Colors.white),
-                        ),
-                        const SizedBox(height: 12),
-                        LinearProgressIndicator(
-                          value:
-                          (dayOfRecovery / totalRecoveryDays).clamp(0, 1),
-                          backgroundColor: Colors.white24,
-                          color: Colors.white,
-                          minHeight: 5,
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          'Recovery Progress: $progressPercent%',
-                          style: const TextStyle(
-                              color: Colors.white, fontSize: 14),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 20),
-                    padding: const EdgeInsets.all(22),
-                    width: double.infinity,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF2196F3),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: const [
-                        Text(
-                          'Recovery Progress',
-                          style: TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white),
-                        ),
-                        SizedBox(height: 6),
-                        Text(
-                          "Monitor your recovery day by day",
-                          style:
-                          TextStyle(fontSize: 15, color: Colors.white),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Card(
-                    margin: const EdgeInsets.only(bottom: 28),
-                    elevation: 2,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16)),
-                    child: Padding(
-                      padding: const EdgeInsets.all(18.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Padding(
-                            padding: EdgeInsets.only(bottom: 10.0),
-                            child: Text(
-                              'Summary',
-                              style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 20),
-                            ),
-                          ),
-                          _buildSummaryRow(
-                              'Days since procedure',
-                              '$daysSinceProcedure',
-                              'days',
-                              const Color(0xFFE8F0FE),
-                              const Color(0xFF2196F3)),
-                          const SizedBox(height: 10),
-                          _buildSummaryRow(
-                              'Expected healing',
-                              '7-14',
-                              'days',
-                              const Color(0xFFF2FBF3),
-                              const Color(0xFF22B573)),
-                        ],
-                      ),
-                    ),
-                  ),
-                  _buildPieChart(appState.instructionLogs),
-                  _buildInstructionsFollowedBox(appState.instructionLogs),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Padding(
-                      padding:
-                      const EdgeInsets.only(bottom: 8.0, left: 4.0),
-                      child: Text(
-                        "Your Progress Entries",
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
-                            color: Colors.blueGrey[900]),
-                      ),
-                    ),
-                  ),
-                  if (entries.isEmpty)
-                    Container(
-                      padding:
-                      const EdgeInsets.symmetric(vertical: 36.0),
-                      child: const Text(
-                        "No progress entries yet.\nAdd your first entry below!",
-                        style:
-                        TextStyle(color: Colors.black54, fontSize: 16),
-                        textAlign: TextAlign.center,
-                      ),
-                    )
-                  else
-                    ...entries.map((entry) => Container(
-                      width: double.infinity,
-                      margin: const EdgeInsets.symmetric(vertical: 8),
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFF),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Colors.blueGrey[100]!),
-                      ),
-                      child: Row(
-                        children: [
-                          Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(entry["title"] ?? "",
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 15)),
-                                const SizedBox(height: 4),
-                                Text(entry["note"] ?? "",
-                                    style: const TextStyle(
-                                        color: Colors.black87, fontSize: 15)),
+                                Row(
+                                  children: [
+                                    const Expanded(
+                                      child: Text(
+                                        'Recovery Dashboard',
+                                        style: TextStyle(
+                                          fontSize: 22,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                    const Icon(Icons.favorite_border, color: Colors.white),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Day $dayOfRecovery of recovery',
+                                  style: const TextStyle(fontSize: 16, color: Colors.white),
+                                ),
+                                const SizedBox(height: 12),
+                                LinearProgressIndicator(
+                                  value: (dayOfRecovery / totalRecoveryDays).clamp(0, 1),
+                                  backgroundColor: Colors.white24,
+                                  color: Colors.white,
+                                  minHeight: 5,
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Recovery Progress: $progressPercent%',
+                                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                                ),
                               ],
                             ),
                           ),
-                          Text(entry["date"] ?? "",
-                              style: const TextStyle(
-                                  color: Colors.black54,
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 13)),
-                        ],
-                      ),
-                    )),
-                  const SizedBox(height: 24),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.deepPurple,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8)),
-                        padding:
-                        const EdgeInsets.symmetric(vertical: 15),
-                      ),
-                      icon: const Icon(Icons.chat_bubble_outline),
-                      label: const Text(
-                        "Chat with Doctor",
-                        style: TextStyle(
-                            fontSize: 17, fontWeight: FontWeight.bold),
-                      ),
-                      onPressed: _loading
-                          ? null
-                          : () {
-                              Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => ChatScreen(
-                                    patientUsername: _username,
-                                    asDoctor: false,
-                                  ),
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 20),
+                            padding: const EdgeInsets.all(22),
+                            width: double.infinity,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF2196F3),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: const [
+                                Text(
+                                  'Recovery Progress',
+                                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
                                 ),
-                              );
-                            },
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                ],
+                                SizedBox(height: 6),
+                                Text(
+                                  "Monitor your recovery day by day",
+                                  style: TextStyle(fontSize: 15, color: Colors.white),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Card(
+                            margin: const EdgeInsets.only(bottom: 28),
+                            elevation: 2,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            child: Padding(
+                              padding: const EdgeInsets.all(18.0),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Padding(
+                                    padding: EdgeInsets.only(bottom: 10.0),
+                                    child: Text('Summary', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
+                                  ),
+                                  _buildSummaryRow(
+                                    'Days since procedure',
+                                    '$daysSinceProcedure',
+                                    'days',
+                                    const Color(0xFFE8F0FE),
+                                    const Color(0xFF2196F3),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  _buildSummaryRow(
+                                    'Expected healing',
+                                    '7-14',
+                                    'days',
+                                    const Color(0xFFF2FBF3),
+                                    const Color(0xFF22B573),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          _buildPieChart(appState.instructionLogs),
+                          _buildInstructionsFollowedBox(appState.instructionLogs),
+                          const SizedBox(height: 24),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.deepPurple,
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                padding: const EdgeInsets.symmetric(vertical: 15),
+                              ),
+                              icon: const Icon(Icons.chat_bubble_outline),
+                              label: const Text(
+                                "Chat with Doctor",
+                                style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                              ),
+                              onPressed: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => ChatScreen(
+                                      patientUsername: _username,
+                                      asDoctor: false,
+                                      doctorName: _doctorName,
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                  ],
+                ),
               ),
             ),
           ),
-                ),
-              ),
+        ),
       ),
     );
   }
 
-  Widget _buildSummaryRow(String label, String value, String unit, Color bgColor,
-      Color textColor) {
+  Widget _buildSummaryRow(String label, String value, String unit, Color bgColor, Color textColor) {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(10),
-      ),
+      decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(10)),
       child: Row(
         children: [
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label,
-                    style: const TextStyle(
-                        color: Colors.black87, fontWeight: FontWeight.w500)),
+                Text(
+                  label,
+                  style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.w500),
+                ),
                 const SizedBox(height: 4),
                 Text(
                   value,
-                  style: TextStyle(
-                    color: textColor,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 26,
-                  ),
+                  style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 26),
                 ),
               ],
             ),
@@ -867,40 +677,4 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
     );
   }
 
-  void _showFeedbackDialog() {
-    final feedbackController = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text("Patient's Feedback"),
-          content: TextField(
-            controller: feedbackController,
-            minLines: 3,
-            maxLines: 8,
-            decoration: const InputDecoration(
-              hintText: "Enter patient's feedback on your progress...",
-              border: OutlineInputBorder(),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text("Cancel"),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                final message = feedbackController.text.trim();
-                if (message.isNotEmpty) {
-                  Navigator.of(context).pop();
-                  submitFeedback(message);
-                }
-              },
-              child: const Text("Submit"),
-            ),
-          ],
-        );
-      },
-    );
-  }
 }

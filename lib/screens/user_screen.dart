@@ -1,75 +1,130 @@
 import 'package:flutter/material.dart';
-// Reverted simple user screen without adaptive/universal wrappers.
 
-/// Entry selection screen: lets the user choose Doctor or Patient flows.
-/// Doctor: navigates to DoctorLoginScreen (to be implemented).
-/// Patient: navigates to existing Welcome/login/signup flow (AppEntryGate).
-class UserScreen extends StatefulWidget {
+class UserScreen extends StatelessWidget {
   const UserScreen({super.key});
 
-  @override
-  State<UserScreen> createState() => _UserScreenState();
-}
-
-class _UserScreenState extends State<UserScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      appBar: AppBar(
-        title: const Text('Select Portal'),
-        centerTitle: true,
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              'Welcome',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 30, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Choose how you want to continue',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey[700], fontSize: 15),
-            ),
-            const SizedBox(height: 36),
-            _PortalCard(
-              icon: Icons.medical_services_outlined,
-              title: 'Doctor Portal',
-              description: 'View assigned patients and monitor recovery progress.',
-              buttonLabel: "Enter Doctor Login",
-              color: Colors.blue,
-              onTap: () => Navigator.of(context).pushNamed('/doctor-login'),
-            ),
-            const SizedBox(height: 28),
-            _PortalCard(
-              icon: Icons.favorite_outline,
-              title: 'Patient Portal',
-              description: 'Track treatments, instructions, reminders, and more.',
-              buttonLabel: "Continue as Patient",
-              color: Colors.teal,
-              onTap: () => Navigator.of(context).pushReplacementNamed('/patient'),
-            ),
-            const SizedBox(height: 40),
-            Column(
-              children: const [
-                Text(
-                  'ToothCareGuide',
-                  style: TextStyle(fontWeight: FontWeight.w600, letterSpacing: 0.6, color: Colors.black54),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Select Portal',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.w600,
                 ),
-                SizedBox(height: 6),
-                Text(
-                  'Better smiles. Better care.',
-                  style: TextStyle(fontSize: 12, color: Colors.black38),
+              ),
+              const SizedBox(height: 18),
+              const _TopLogosRow(),
+              const SizedBox(height: 28),
+              const Text(
+                'Welcome',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 30,
+                  fontWeight: FontWeight.bold,
                 ),
-              ],
-            )
-          ],
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Choose how you want to continue',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.black54,
+                  fontSize: 15,
+                ),
+              ),
+              const SizedBox(height: 36),
+              _PortalCard(
+                icon: Icons.medical_services_outlined,
+                title: 'Doctor Portal',
+                description: 'View assigned patients and monitor recovery progress.',
+                buttonLabel: 'Enter Doctor Login',
+                color: Colors.blue,
+                onTap: () => Navigator.of(context).pushNamed('/doctor-login'),
+              ),
+              const SizedBox(height: 28),
+              _PortalCard(
+                icon: Icons.favorite_outline,
+                title: 'Patient Portal',
+                description: 'Track treatments, instructions, reminders, and more.',
+                buttonLabel: 'Continue as Patient',
+                color: Colors.teal,
+                onTap: () => Navigator.of(context).pushReplacementNamed('/patient'),
+              ),
+              const SizedBox(height: 40),
+              const Column(
+                children: [
+                  Text(
+                    'ToothCareGuide',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.6,
+                      color: Colors.black54,
+                    ),
+                  ),
+                  SizedBox(height: 6),
+                  Text(
+                    'Better smiles. Better care.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.black38,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
+      ),
+    );
+  }
+}
+
+class _TopLogosRow extends StatelessWidget {
+  const _TopLogosRow();
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: const [
+        _TopLogo(assetPath: 'assets/LOGO2.jpg'),
+        _TopLogo(assetPath: 'assets/LOGO1.jpg'),
+      ],
+    );
+  }
+}
+
+class _TopLogo extends StatelessWidget {
+  final String assetPath;
+  const _TopLogo({required this.assetPath});
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Image.asset(
+        assetPath,
+        width: 58,
+        height: 58,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) {
+          return Container(
+            width: 58,
+            height: 58,
+            color: Colors.black12,
+            alignment: Alignment.center,
+            child: const Icon(Icons.image_not_supported_outlined, color: Colors.black45),
+          );
+        },
       ),
     );
   }
@@ -107,7 +162,7 @@ class _PortalCard extends StatelessWidget {
                 Container(
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: color.withValues(alpha: 0.1),
+                    color: color.withValues(alpha: 0.12),
                   ),
                   padding: const EdgeInsets.all(14),
                   child: Icon(icon, color: color, size: 30),

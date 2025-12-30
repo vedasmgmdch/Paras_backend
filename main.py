@@ -14,7 +14,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, text
+from sqlalchemy import select, text, delete
 
 import schemas
 from database import engine
@@ -1521,6 +1521,92 @@ async def rotate_if_due_endpoint(db: AsyncSession = Depends(get_db), current_use
     if new_id is None:
         return schemas.RotateIfDueResponse(rotated=False, new_episode_id=None)
     return schemas.RotateIfDueResponse(rotated=True, new_episode_id=new_id)
+
+
+@app.post("/episodes/replace-treatment", response_model=schemas.PatientPublic)
+async def replace_treatment_episode(
+    payload: schemas.ReplaceTreatmentRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: models.Patient = Depends(get_current_user),
+):
+    """Replace the current (open) treatment episode.
+
+    Intended for the "Treatment Options" menu when a patient accidentally selected the wrong treatment.
+
+    Behavior:
+      - Deletes progress entries since the previous procedure date (if available).
+      - Deletes instruction_status rows for the previous treatment/subtype since the previous procedure date.
+      - Deletes any open episode(s) (locked=False) and creates a fresh open episode with the new treatment.
+      - Mirrors the new open episode onto the Patient row.
+    """
+    await _rotate_if_due(db, current_user)
+
+    # Snapshot the CURRENT OPEN episode (ongoing treatment). Completed (locked) episodes must remain in history.
+    ep = await _get_or_create_open_episode(db, object.__getattribute__(current_user, 'id'))
+    if getattr(ep, "locked", False):
+        raise HTTPException(status_code=423, detail="Episode is locked and cannot be modified.")
+
+    old_treatment = getattr(ep, 'treatment', None)
+    old_subtype = getattr(ep, 'subtype', None)
+    old_proc_date = getattr(ep, 'procedure_date', None)
+
+    # Reset ongoing episode data only.
+    # Progress table doesn't have episode id, so we cut from the ongoing episode start date.
+    effective_cutoff_date = old_proc_date or payload.procedure_date
+    if effective_cutoff_date is not None:
+        cutoff_dt = datetime.combine(effective_cutoff_date, datetime.min.time())
+        await db.execute(
+            delete(models.Progress).where(
+                models.Progress.patient_id == current_user.id,
+                models.Progress.timestamp >= cutoff_dt,
+            )
+        )
+
+    # Clear instruction statuses for the ongoing episode identity only.
+    # This preserves completed history for other episodes/treatments.
+    if old_treatment:
+        stmt = delete(models.InstructionStatus).where(
+            models.InstructionStatus.patient_id == current_user.id,
+            models.InstructionStatus.treatment == old_treatment,
+        )
+        if old_subtype is None:
+            stmt = stmt.where(models.InstructionStatus.subtype.is_(None))
+        else:
+            stmt = stmt.where(models.InstructionStatus.subtype == old_subtype)
+        if effective_cutoff_date is not None:
+            stmt = stmt.where(models.InstructionStatus.date >= effective_cutoff_date)
+        await db.execute(stmt)
+
+    # Delete any open episodes and create a fresh one.
+    await db.execute(
+        delete(models.TreatmentEpisode).where(
+            models.TreatmentEpisode.patient_id == current_user.id,
+            models.TreatmentEpisode.locked == False,
+        )
+    )
+
+    new_ep = models.TreatmentEpisode(
+        patient_id=current_user.id,
+        department=getattr(current_user, 'department', None),
+        doctor=getattr(current_user, 'doctor', None),
+        treatment=payload.treatment,
+        subtype=payload.subtype,
+        procedure_date=payload.procedure_date,
+        procedure_time=payload.procedure_time,
+        procedure_completed=False,
+        locked=False,
+    )
+    db.add(new_ep)
+    await db.commit()
+    await db.refresh(new_ep)
+
+    await _mirror_episode_to_patient(db, current_user, new_ep)
+    # Ensure patient is marked not completed.
+    object.__setattr__(current_user, 'procedure_completed', False)
+    db.add(current_user)
+    await db.commit()
+    await db.refresh(current_user)
+    return current_user
 
 # ---------------------------
 # Push notifications endpoints
