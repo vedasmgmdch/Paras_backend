@@ -84,6 +84,11 @@ async def healthz():
         db_ok = False
     return {"ok": True, "db": db_ok}
 
+@app.head("/healthz")
+async def healthz_head():
+    # Some uptime monitors use HEAD. Mirror GET semantics.
+    return await healthz()
+
 @app.get("/diag/echo")
 async def diag_echo():
     """Minimal fast diagnostic endpoint to verify service reachability and latency.
@@ -2181,28 +2186,115 @@ async def _internal_dispatch_due(
             except Exception:
                 pass
         if server_only:
-            # In server-only mode we skip ack/grace logic entirely and always push once due
-            token_res = await db.execute(select(models.DeviceToken.token).where(models.DeviceToken.patient_id == getattr(r, 'patient_id')))
+            # Server-only mode: ignore ack/grace decisions, but still honor delivery success/failure.
+            # Critically: do NOT advance to next day if nothing was delivered.
+            reason = "server_only_send"
+            token_res = await db.execute(
+                select(models.DeviceToken.token)
+                .where(models.DeviceToken.patient_id == getattr(r, 'patient_id'))
+                .where(models.DeviceToken.active == True)
+            )
             tokens = [row[0] for row in token_res.all()]
+            tokens_count = len(tokens)
+            if tokens_count == 0:
+                # No active token to deliver to.
+                next_local, next_utc = _compute_next_fire(now2, getattr(r, 'hour'), getattr(r, 'minute'), getattr(r, 'timezone'))
+                object.__setattr__(r, 'next_fire_local', next_local)
+                object.__setattr__(r, 'next_fire_utc', next_utc)
+                object.__setattr__(r, 'attempts_today', 0)
+                object.__setattr__(r, 'last_delivery_status', 'no_tokens')
+                object.__setattr__(r, 'updated_at', now2)
+                db.add(r)
+                if debug:
+                    decisions.append({
+                        "type": "reminder",
+                        "id": object.__getattribute__(r,'id'),
+                        "action": reason,
+                        "status": 'no_tokens',
+                        "tokens": 0,
+                    })
+                continue
+
             sent_tokens = 0
+            any_token_invalid = False
             for t in tokens:
-                if send_fcm_notification(t, getattr(r, 'title'), getattr(r, 'body')):
+                res_obj = send_fcm_notification_ex(t, getattr(r, 'title'), getattr(r, 'body'))  # type: ignore
+                if res_obj.get("ok"):
                     sent += 1
                     sent_tokens += 1
-            if sent_tokens:
+                else:
+                    err_code = _extract_fcm_error(res_obj.get("body"))
+                    if err_code in {"UNREGISTERED", "NotRegistered"}:
+                        any_token_invalid = True
+                        tok_row = await db.execute(select(models.DeviceToken).where(models.DeviceToken.token == t))
+                        tok = tok_row.scalars().first()
+                        if tok and getattr(tok, 'active'):
+                            object.__setattr__(tok, 'active', False)
+                            object.__setattr__(tok, 'deactivated_at', datetime.utcnow())
+                            object.__setattr__(tok, 'deactivated_reason', 'UNREGISTERED')
+                            db.add(tok)
+
+                if os.getenv("REMINDER_STRUCTURED_LOG", "0").lower() in {"1","true","yes","on"}:
+                    import json as _json
+                    try:
+                        print(_json.dumps({
+                            "evt": "reminder_attempt",
+                            "reminder_id": object.__getattribute__(r,'id'),
+                            "patient_id": getattr(r,'patient_id'),
+                            "mode": "server_only",
+                            "token_tail": t[-10:] if len(t) > 10 else t,
+                            "ok": res_obj.get("ok"),
+                            "status": res_obj.get("status"),
+                            "error_code": _extract_fcm_error(res_obj.get("body")),
+                            "attempts_today": getattr(r,'attempts_today'),
+                            "ts": datetime.utcnow().isoformat()+"Z"
+                        }))
+                    except Exception:
+                        pass
+
+            attempts = getattr(r, 'attempts_today') or 0
+            object.__setattr__(r, 'last_attempt_utc', now2)
+            if sent_tokens > 0:
                 dispatched_rem += 1
-            setattr(r, 'last_sent_utc', now2)
-            next_local, next_utc = _compute_next_fire(now2, getattr(r, 'hour'), getattr(r, 'minute'), getattr(r, 'timezone'))
-            setattr(r, 'next_fire_local', next_local)
-            setattr(r, 'next_fire_utc', next_utc)
-            setattr(r, 'updated_at', now2)
+                object.__setattr__(r, 'last_sent_utc', now2)
+                next_local, next_utc = _compute_next_fire(now2, getattr(r, 'hour'), getattr(r, 'minute'), getattr(r, 'timezone'))
+                object.__setattr__(r, 'next_fire_local', next_local)
+                object.__setattr__(r, 'next_fire_utc', next_utc)
+                object.__setattr__(r, 'attempts_today', 0)
+                object.__setattr__(r, 'last_delivery_status', 'delivered')
+            else:
+                # Retry with backoff (same as non-server-only), so failed pushes don't get dropped.
+                if attempts + 1 >= MAX_ATTEMPTS_PER_DAY:
+                    next_local, next_utc = _compute_next_fire(now2, getattr(r, 'hour'), getattr(r, 'minute'), getattr(r, 'timezone'))
+                    object.__setattr__(r, 'next_fire_local', next_local)
+                    object.__setattr__(r, 'next_fire_utc', next_utc)
+                    object.__setattr__(r, 'attempts_today', 0)
+                    object.__setattr__(r, 'last_delivery_status', 'token_invalid' if any_token_invalid else 'failed_permanent')
+                else:
+                    backoff_idx = min(attempts, len(BACKOFF_SECONDS)-1)
+                    retry_delay = BACKOFF_SECONDS[backoff_idx]
+                    retry_utc = now2 + timedelta(seconds=retry_delay)
+                    try:
+                        tz_retry = pytz.timezone(getattr(r, 'timezone'))
+                    except Exception:
+                        tz_retry = pytz.UTC
+                    retry_local = retry_utc.replace(tzinfo=pytz.UTC).astimezone(tz_retry).replace(tzinfo=None)
+                    object.__setattr__(r, 'next_fire_local', retry_local)
+                    object.__setattr__(r, 'next_fire_utc', retry_utc)
+                    object.__setattr__(r, 'attempts_today', attempts + 1)
+                    object.__setattr__(r, 'last_delivery_status', 'token_invalid' if any_token_invalid else 'retry')
+
+            object.__setattr__(r, 'updated_at', now2)
             db.add(r)
             if debug:
                 decisions.append({
                     "type": "reminder",
                     "id": object.__getattribute__(r,'id'),
-                    "action": "server_only_send",
+                    "action": reason,
+                    "tokens": tokens_count,
                     "sent_tokens": sent_tokens,
+                    "attempts_today": getattr(r,'attempts_today'),
+                    "status": getattr(r,'last_delivery_status'),
                 })
             continue
         # Skip if acknowledged today
