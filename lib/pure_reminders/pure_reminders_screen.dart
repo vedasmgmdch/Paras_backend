@@ -146,29 +146,6 @@ class _PureRemindersScreenState extends State<PureRemindersScreen> {
                                   await _reload();
                                 },
                               ),
-                              IconButton(
-                                icon: const Icon(Icons.info_outline),
-                                tooltip: 'Schedule debug',
-                                onPressed: () async {
-                                  // Quick immediate hedge for this reminder (fire in 8s + backup show in 11s)
-                                  final hedgeId = r.id + 720000000;
-                                  await NotificationService.scheduleInSeconds(
-                                    id: hedgeId,
-                                    seconds: 8,
-                                    title: 'Hedge: ' + r.title,
-                                    body: 'Debug hedge for ' + r.title,
-                                  );
-                                  Future.delayed(const Duration(seconds: 11), () async {
-                                    await NotificationService.showNow(
-                                      id: hedgeId,
-                                      title: 'Hedge Fallback',
-                                      body: r.title,
-                                    );
-                                  });
-                                  if (!mounted) return;
-                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Hedge scheduled (8s + fallback 11s)')));
-                                },
-                              ),
                               IconButton(icon: const Icon(Icons.edit), onPressed: () => _addOrEdit(existing: r)),
                               IconButton(
                                 icon: const Icon(Icons.delete_outline),
@@ -187,86 +164,8 @@ class _PureRemindersScreenState extends State<PureRemindersScreen> {
           Padding(
             padding: const EdgeInsets.fromLTRB(12,0,12,12),
             child: Wrap(spacing:8, runSpacing:8, children: [
-              ElevatedButton.icon(
-                onPressed: () async {
-                  final id = DateTime.now().millisecondsSinceEpoch & 0x7fffffff;
-                  await NotificationService.scheduleInSeconds(id: id, seconds: 10, title: '10s Test', body: 'Pure test');
-                  // Hedge fallback show in case device suppresses scheduled one
-                  Future.delayed(const Duration(seconds: 13), () async {
-                    await NotificationService.showNow(id: id, title: '10s Test Fallback', body: 'Displayed via hedge');
-                  });
-                },
-                icon: const Icon(Icons.flash_on),
-                label: const Text('10s Test'),
-              ),
-              ElevatedButton.icon(
-                onPressed: () async {
-                  // Temporarily force preferAlarmClock true for this run
-                  await NotificationService.setPreferAlarmClock(true);
-                  final id = DateTime.now().millisecondsSinceEpoch & 0x7fffffff;
-                  await NotificationService.scheduleInSeconds(id: id, seconds: 10, title: '10s AlarmClock Test', body: 'AlarmClock first ordering');
-                  Future.delayed(const Duration(seconds: 13), () async {
-                    await NotificationService.showNow(id: id, title: '10s AlarmClock Fallback', body: 'Fallback (hedge)');
-                  });
-                },
-                icon: const Icon(Icons.alarm_on),
-                label: const Text('10s AlarmClock'),
-              ),
               ElevatedButton.icon(onPressed: () async { await PureReminderScheduler.instance.forceRescheduleAll(); }, icon: const Icon(Icons.schedule), label: const Text('Resched All')),
               ElevatedButton.icon(onPressed: () async { await _addOrEdit(); }, icon: const Icon(Icons.add_alarm), label: const Text('Add Quickly')),
-              ElevatedButton.icon(
-                onPressed: () async {
-                  // Purge test/self-test/hedge / 10s AlarmClock notifications
-                  final pending = await NotificationService.pending();
-                  int removed = 0;
-                  for (final p in pending) {
-                    final title = (p.title ?? '').toLowerCase();
-                    final body = (p.body ?? '').toLowerCase();
-                    final id = p.id;
-                    final isDailyBase = _list.any((r)=> r.id == id);
-                    final isDailyFallback = _list.any((r)=> r.id + 750000000 == id);
-                    if (isDailyBase || isDailyFallback) continue; // preserve
-                    final isTest = title.contains('10s test') || body.contains('10s test') || title.contains('self-test') || body.contains('self-test') || title.contains('alarmclock test') || body.contains('alarmclock');
-                    final inHedgeSpace = _list.any((r)=> r.id + 720000000 == id);
-                    final inCatchUpSpace = _list.any((r)=> r.id + 700000000 == id);
-                    if (isTest || inHedgeSpace || inCatchUpSpace) {
-                      await NotificationService.cancel(id);
-                      removed++;
-                    }
-                  }
-                  if (!mounted) return; await _reload();
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Purged $removed test notifications')));
-                },
-                icon: const Icon(Icons.cleaning_services),
-                label: const Text('Purge Tests'),
-              ),
-              ElevatedButton.icon(
-                onPressed: () async {
-                  final pending = await NotificationService.pending();
-                  if (!mounted) return;
-                  showDialog(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      title: const Text('Pending Notifications'),
-                      content: SizedBox(
-                        width: double.maxFinite,
-                        child: SingleChildScrollView(
-                          child: Text(pending.isEmpty
-                              ? 'None'
-                              : pending
-                                  .map((e) => 'id=${e.id} title="${e.title}" body="${e.body}"')
-                                  .join('\n')),
-                        ),
-                      ),
-                      actions: [
-                        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
-                      ],
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.list_alt),
-                label: const Text('Pending'),
-              ),
             ]),
           )
         ],

@@ -273,11 +273,12 @@ async def startup():
                         await agen.aclose()  # type: ignore
                     except Exception:
                         pass
-        # Make dispatch interval configurable to tune delivery latency (default 60s)
+        # Make dispatch interval configurable to tune delivery latency.
+        # Default is 5s to avoid "~45s late" delivery when users set an exact minute.
         try:
-            interval_sec = int(os.getenv("DISPATCH_INTERVAL_SEC", "60"))
+            interval_sec = int(os.getenv("DISPATCH_INTERVAL_SEC", "5"))
         except Exception:
-            interval_sec = 60
+            interval_sec = 5
         if interval_sec < 5:
             interval_sec = 5  # clamp to safe minimum
         print(f"[Startup] Dispatch interval set to {interval_sec}s (DISPATCH_INTERVAL_SEC)")
@@ -2956,6 +2957,10 @@ class SyncReminderItem(BaseModel):
 
 class ReminderSyncRequest(BaseModel):
     items: list[SyncReminderItem]
+    # Whether to deactivate reminders that are not present in the sent snapshot.
+    # Defaults to True to preserve the original "client snapshot is authoritative" behavior.
+    # Clients that are only doing a best-effort upload should send false to avoid accidental data loss.
+    prune_missing: bool = True
 
 class ReminderSyncResponse(BaseModel):
     created: int
@@ -3025,17 +3030,18 @@ async def sync_reminders(
             )
             db.add(row)
             created += 1
-    # Deactivate any not present (soft deactivate rather than delete)
+    # Deactivate any not present (soft deactivate rather than delete) iff prune_missing is enabled
     deactivated = 0
-    current_ids = {object.__getattribute__(r,'id') for r in existing.values()}
-    missing = current_ids - sent_ids
-    for rid in missing:
-        row = existing[rid]
-        if object.__getattribute__(row,'active'):
-            object.__setattr__(row,'active', False)
-            object.__setattr__(row,'updated_at', now_utc)
-            db.add(row)
-            deactivated += 1
+    if getattr(payload, 'prune_missing', True):
+        current_ids = {object.__getattribute__(r,'id') for r in existing.values()}
+        missing = current_ids - sent_ids
+        for rid in missing:
+            row = existing[rid]
+            if object.__getattribute__(row,'active'):
+                object.__setattr__(row,'active', False)
+                object.__setattr__(row,'updated_at', now_utc)
+                db.add(row)
+                deactivated += 1
     await db.commit()
     # Return fresh list
     res2 = await db.execute(select(models.Reminder).where(models.Reminder.patient_id == current_user.id))
@@ -3071,6 +3077,34 @@ async def ack_reminder(
     db.add(row)
     await db.commit()
     return ReminderAckResponse(acknowledged=True, reminder_id=payload.reminder_id, local_date=local_today)
+
+
+# Compatibility endpoint for older clients/docs: acknowledge by path id and return updated reminder row.
+@app.post("/reminders/{reminder_id}/ack", response_model=schemas.ReminderResponse)
+async def ack_reminder_compat(
+    reminder_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: models.Patient = Depends(get_current_user),
+):
+    res = await db.execute(
+        select(models.Reminder)
+        .where(models.Reminder.id == reminder_id)
+        .where(models.Reminder.patient_id == current_user.id)
+    )
+    row = res.scalars().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    try:
+        tz = pytz.timezone(object.__getattribute__(row, 'timezone'))
+    except Exception:
+        tz = pytz.UTC
+    local_today = datetime.utcnow().replace(tzinfo=pytz.UTC).astimezone(tz).date()
+    object.__setattr__(row, 'last_ack_local_date', local_today)
+    object.__setattr__(row, 'updated_at', datetime.utcnow())
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return row
 
 @app.post("/reminders/reschedule-all")
 async def reschedule_all_reminders(

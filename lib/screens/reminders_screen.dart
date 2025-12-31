@@ -31,6 +31,8 @@ class _RemindersScreenState extends State<RemindersScreen> {
   @override
   void initState() {
     super.initState();
+    // Server-only reminders: rely on backend pushes.
+    NotificationService.serverOnlyMode = true;
     _load();
     _checkPermissions();
     // If navigated from Dashboard's Add button, open editor right away
@@ -40,17 +42,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
         _showEditor();
       });
     }
-    // Early proactive permission + exact alarm request to reduce first-run misses.
-    () async {
-      final granted = await NotificationService.ensurePermissions();
-      if (!granted && mounted) setState(() => _notifEnabled = false);
-      try {
-        final canExact = await NotificationService.canScheduleExactNotifications();
-        if (!canExact) {
-          await NotificationService.requestExactAlarmsPermission();
-        }
-      } catch (_) {}
-    }();
+    // No exact-alarm prompts in server-only mode.
   }
 
   Future<void> _checkPermissions() async {
@@ -67,8 +59,6 @@ class _RemindersScreenState extends State<RemindersScreen> {
       _reminders = list;
       _loading = false;
     });
-    if (!mounted) return;
-    await ReminderApi.scheduleLocally(list); // keep local schedules aligned
   }
 
   Future<void> _toggle(ServerReminder r, bool enabled) async {
@@ -288,46 +278,6 @@ class _RemindersScreenState extends State<RemindersScreen> {
                       if (mounted) setState(() => _notifEnabled = granted);
                     },
                     child: const Text('Enable'),
-                  ),
-                  TextButton(
-                    onPressed: () async {
-                      try {
-                        await NotificationService.scheduleInSeconds(
-                          id: DateTime.now().millisecondsSinceEpoch & 0x7fffffff,
-                          seconds: 5,
-                          title: 'Reminder Test',
-                          body: 'If you receive this, notifications work.',
-                        );
-                        if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Test scheduled in 5s')),
-                        );
-                      } catch (e) {
-                        final msg = e.toString();
-                        if (msg.contains('exact_alarms_not_permitted')) {
-                          final go = await showDialog<bool>(
-                            context: context,
-                            builder: (ctx) => AlertDialog(
-                              title: const Text('Allow Exact Alarms'),
-                              content: const Text('Your device is blocking exact alarms. Enable "Alarms & reminders" in system settings so reminders fire on time.'),
-                              actions: [
-                                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                                ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Open Settings')),
-                              ],
-                            ),
-                          );
-                          if (go == true) {
-                            await NotificationService.requestExactAlarmsPermission();
-                          }
-                        } else {
-                          if (!mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Failed to schedule: $e')),
-                          );
-                        }
-                      }
-                    },
-                    child: const Text('Test'),
                   ),
                 ],
               ),

@@ -66,7 +66,6 @@ class NotificationService {
   }
 
   static Future<void> init({bool requestPermission = true, void Function(int id)? onNotificationReceived}) async {
-    if (serverOnlyMode) { _initialized = true; return; }
     if (_initialized) return;
 
     // Timezone init (single attempt)
@@ -140,7 +139,7 @@ class NotificationService {
         await prefs.setBool(_migrationDoneKey, true);
       }
 
-      if (Platform.isAndroid) {
+      if (Platform.isAndroid && !serverOnlyMode) {
         final firstReq = prefs.getBool(_firstRunExactAlarmKey) ?? false;
         if (!firstReq) {
           try {

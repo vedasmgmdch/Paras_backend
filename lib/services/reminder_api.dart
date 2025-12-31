@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'api_service.dart';
 import '../services/notification_service.dart';
 
@@ -54,6 +55,7 @@ class ReminderApi {
   static DateTime? _lastScheduleBatchTime;
   static const _scheduleDebounceMs = 1500;
   static const clientScheduleVersion = 'hybrid_v3';
+  static const _cacheKey = 'server_reminders_cache_v1';
   static Uri _u(String path,[Map<String,String>? qp]) {
     final base = ApiService.baseUrl.endsWith('/') ? ApiService.baseUrl.substring(0, ApiService.baseUrl.length-1) : ApiService.baseUrl;
     return Uri.parse('$base$path').replace(queryParameters: qp);
@@ -61,17 +63,48 @@ class ReminderApi {
 
   static Future<Map<String,String>> _authHeaders() async => await ApiService.getAuthHeaders();
 
+  static Future<void> _saveCacheRaw(String rawJsonList) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_cacheKey, rawJsonList);
+    } catch (_) {}
+  }
+
+  static Future<List<ServerReminder>> listCached() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_cacheKey);
+      if (raw == null || raw.isEmpty) return [];
+      final data = jsonDecode(raw) as List<dynamic>;
+      return data.map((e) => ServerReminder.fromJson(e as Map<String, dynamic>)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
   // List reminders
   static Future<List<ServerReminder>> list() async {
     try {
       final res = await http.get(_u('/reminders'), headers: await _authHeaders());
       if (res.statusCode == 200) {
+        await _saveCacheRaw(res.body);
         final data = jsonDecode(res.body) as List<dynamic>;
         return data.map((e)=>ServerReminder.fromJson(e as Map<String,dynamic>)).toList();
       }
       debugPrint('ReminderApi.list failed ${res.statusCode} ${res.body}');
     } catch (e) { debugPrint('ReminderApi.list error $e'); }
     return [];
+  }
+
+  // Prefer network, but fall back to cached list so we don't wipe schedules when offline.
+  static Future<List<ServerReminder>> listWithCacheFallback() async {
+    final fresh = await list();
+    if (fresh.isNotEmpty) return fresh;
+    final cached = await listCached();
+    if (cached.isNotEmpty) {
+      debugPrint('[ReminderApi] using cached reminders (count=${cached.length})');
+    }
+    return cached;
   }
 
   static Future<ServerReminder?> create({required String title, required String body, required int hour, required int minute, String timezone='Asia/Kolkata', bool active=true, int graceMinutes=20}) async {

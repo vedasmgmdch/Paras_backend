@@ -7,7 +7,7 @@ import '../app_state.dart';
 import 'category_screen.dart';
 import 'home_screen.dart';
 import 'treatment_screen.dart';
-import '../services/reminder_service.dart';
+import '../services/reminder_api.dart';
 import '../services/push_service.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -125,18 +125,7 @@ class _LoginScreenState extends State<LoginScreen> {
         // Pull server-side instruction ticks (non-blocking).
         // Instruction screens will reflect these once loaded.
         unawaited(appState.pullInstructionStatusChanges());
-        // Initial reminders sync (non-blocking navigation if it fails)
-        try {
-          final cached = await ReminderService.loadCache();
-          // Fire and forget sync; we don't await before navigation
-          // Use mounted check in case widget disposed after navigation
-          ReminderService.sync(cached, pruneMissing: false).then((_) async {
-            final latest = await ReminderService.list();
-            await ReminderService.saveCache(latest);
-          });
-        } catch (e) {
-          debugPrint('Initial reminder sync failed: $e');
-        }
+        // Reminders are server-only (push) and follow the account across devices.
         // Route based on what’s already stored for this account.
         if (appState.department != null &&
             appState.doctor != null &&

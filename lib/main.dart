@@ -6,8 +6,6 @@ import 'app_state.dart';
 import 'services/api_service.dart';
 import 'services/notification_service.dart';
 import 'services/push_service.dart';
-// Removed hybrid reminders & server push for simplified local reminder system.
-import 'services/reminder_store.dart';
 import 'services/reminder_api.dart';
 import 'screens/welcome_screen.dart';
 import 'screens/category_screen.dart';
@@ -69,10 +67,10 @@ Future<void> _postStartupInit(AppState appState) async {
   // Let the first frame render before doing heavy startup work.
   await Future<void>.delayed(Duration.zero);
   try {
+    // Server-only reminders: rely on backend pushes (works when app is closed + across devices)
+    NotificationService.serverOnlyMode = true;
     // AlarmManager initialization removed: we rely on plugin pre-scheduled daily notifications.
     await NotificationService.init();
-    // Disable legacy local store scheduling; we will schedule from server list only
-    ReminderStore.hybridActive = true;
     // Log current notification capabilities for diagnostics
     try {
       final caps = await NotificationService.getCapabilities();
@@ -95,19 +93,11 @@ Future<void> _postStartupInit(AppState appState) async {
     await PushService.registerNow();
     await PushService.flushPendingIfAny();
 
-    // Remove any stale schedules left from older versions, then schedule from server list.
+    // Clear any legacy local schedules once; reminders are now server-push only.
     try {
       await NotificationService.cancelAllPending();
     } catch (e) {
       print('Startup cancelAllPending failed: $e');
-    }
-
-    // After token is ready, fetch server reminders and schedule locally.
-    try {
-      final list = await ReminderApi.list();
-      await ReminderApi.scheduleLocally(list);
-    } catch (e) {
-      print('Server-backed reschedule at startup failed: $e');
     }
 
     // Load persisted per-user data without blocking the first frame.

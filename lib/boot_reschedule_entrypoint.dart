@@ -35,13 +35,12 @@ import 'services/reminder_api.dart';
 Future<void> bootRescheduleMain() async {
   try {
     WidgetsFlutterBinding.ensureInitialized();
+    // Server-only reminders: rely on backend pushes; do not schedule local alarms.
+    NotificationService.serverOnlyMode = true;
     await NotificationService.init(requestPermission: false);
-    // Fetch server-backed reminders and reschedule locally.
-    // Note: Calls to network may be limited right after boot; we keep this minimal.
-    final list = await ReminderApi.list();
-    await ReminderApi.scheduleLocally(list);
+    // Nothing else to do.
     // ignore: avoid_print
-    print('[BootReschedule] Rescheduled ${list.length} reminders');
+    print('[BootReschedule] Server-only mode: skipping local reschedule');
   } catch (e) {
     // ignore: avoid_print
     print('[BootReschedule] Error during init: $e');
