@@ -2625,6 +2625,20 @@ async def register_device(
                 payload = schemas.DeviceRegisterRequest(platform=qplat, token=qtok)
         if payload is None:
             raise HTTPException(status_code=422, detail="Body required: JSON or form with platform, token")
+
+        # Optional log to verify client registration on hosted environments
+        if os.getenv("PUSH_REGISTER_LOG", "0").lower() in {"1", "true", "yes", "on"}:
+            try:
+                tok_tail = payload.token[-10:] if isinstance(payload.token, str) and len(payload.token) > 10 else payload.token
+                print({
+                    "evt": "push_register_device",
+                    "patient_id": getattr(current_user, 'id', None),
+                    "platform": payload.platform,
+                    "token_tail": tok_tail,
+                    "ts": datetime.utcnow().isoformat() + "Z",
+                })
+            except Exception:
+                pass
     # Upsert by unique token; if token exists, reassign to current user and update platform
     existing_q = await db.execute(select(models.DeviceToken).where(models.DeviceToken.token == payload.token))
     existing = existing_q.scalars().first()

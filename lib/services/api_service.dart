@@ -73,7 +73,10 @@ class ApiService {
             body: jsonEncode({'platform': platform, 'token': token}),
           )
           .timeout(_slowEndpointTimeout);
-      return response.statusCode == 200;
+      if (response.statusCode == 200) return true;
+      // ignore: avoid_print
+      print('registerDeviceToken failed: ${response.statusCode} -> ${response.body}');
+      return false;
     } catch (e) {
       print('registerDeviceToken error: $e');
       return false;

@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class PushService {
   static bool _initialized = false;
   static bool _pendingRegistration = false; // set when we have a token but no auth yet
+  static bool _registeredThisSession = false;
 
   static Future<void> initializeAndRegister() async {
     if (_initialized) return;
@@ -48,21 +49,9 @@ class PushService {
       }
       if (token != null) {
         final loggedIn = await ApiService.checkIfLoggedIn();
-        final prefs = await SharedPreferences.getInstance();
-        final lastToken = prefs.getString('push.lastToken');
-        if (loggedIn) {
-          // Avoid re-registering on every cold start; only if token changed or we have a pending flag
-          if (lastToken == token) {
-            if (kDebugMode) print('PushService: token unchanged; skip auto-register');
-            _pendingRegistration = false;
-          } else {
-            if (kDebugMode) print('PushService: token changed; will register after-auth');
-            _pendingRegistration = true;
-          }
-        } else {
-          if (kDebugMode) print('Skip device register (not logged in yet)');
-          _pendingRegistration = true;
-        }
+        // Important: don't rely on local prefs to decide whether backend has this token.
+        // Backend tokens can be missing (DB reset/pruned), so always attempt register once per app session.
+        _pendingRegistration = !loggedIn;
       }
     } catch (e) {
       if (kDebugMode) {
@@ -111,20 +100,16 @@ class PushService {
         _pendingRegistration = true;
         return;
       }
+      if (_registeredThisSession) {
+        if (kDebugMode) print('registerNow: already registered this session; skip');
+        _pendingRegistration = false;
+        return;
+      }
       final token = await FirebaseMessaging.instance.getToken();
       if (kDebugMode) {
         print('PushService.registerNow() FCM token: $token');
       }
       if (token != null) {
-        // If we already registered this token and no pending flag, skip
-        try {
-          final prefs = await SharedPreferences.getInstance();
-          final lastToken = prefs.getString('push.lastToken');
-          if (lastToken == token && !_pendingRegistration) {
-            if (kDebugMode) print('registerNow: token unchanged and not pending; skip');
-            return;
-          }
-        } catch (_) {}
         final ok = await ApiService.registerDeviceToken(platform: 'android', token: token);
         if (kDebugMode) {
           print('registerDeviceToken after-auth → ${ok ? 'OK' : 'FAILED'}');
@@ -132,6 +117,7 @@ class PushService {
         if (ok) {
           final prefs = await SharedPreferences.getInstance();
           await prefs.setString('push.lastToken', token);
+          _registeredThisSession = true;
         }
         _pendingRegistration = !ok;
       }
