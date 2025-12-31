@@ -2497,103 +2497,7 @@ async def _internal_dispatch_due(
         base["decisions"] = decisions  # type: ignore[assignment]
     return base
 
-# --- Catch-up helper: when a device registers late, send today's due reminder immediately ---
-async def _catchup_reminders_for_patient(db: AsyncSession, patient_id: int) -> dict[str, Any]:
-    """Best-effort catch-up push if a device token was just registered after the scheduled time.
 
-    Conditions per reminder:
-    - active == True
-    - Now (in reminder tz) is past today's scheduled time (hour:minute)
-    - Not acknowledged today (last_ack_local_date != today)
-    - Not already sent today (last_sent_utc not today)
-    Sends one FCM per active token, then advances next_fire to tomorrow and resets attempts.
-    Controlled by env REMINDER_CATCHUP_ON_REGISTER (default on) and optional REMINDER_CATCHUP_WINDOW_MIN.
-    """
-    def _truthy(v: str | None) -> bool:
-        return str(v).lower() in {"1", "true", "yes", "on"}
-    if not _truthy(os.getenv("REMINDER_CATCHUP_ON_REGISTER", "1")):
-        return {"enabled": False, "sent": 0, "considered": 0}
-    # Optional max window (minutes) since scheduled time to still send catch-up (default: 720 = 12h)
-    try:
-        max_win_min = int(os.getenv("REMINDER_CATCHUP_WINDOW_MIN", "720").strip())
-    except Exception:
-        max_win_min = 720
-    now_utc = datetime.utcnow()
-    res = await db.execute(
-        select(models.Reminder)
-        .where(models.Reminder.patient_id == patient_id)
-        .where(models.Reminder.active == True)
-    )
-    reminders = res.scalars().all()
-    considered = 0
-    sent_total = 0
-    for r in reminders:
-        considered += 1
-        # Resolve tz and local times
-        try:
-            tz = pytz.timezone(getattr(r, 'timezone'))
-        except Exception:
-            tz = pytz.UTC
-        now_local = now_utc.replace(tzinfo=pytz.UTC).astimezone(tz)
-        # Today's scheduled local wall-clock
-        sched_local_today = now_local.replace(hour=getattr(r, 'hour'), minute=getattr(r, 'minute'), second=0, microsecond=0)
-        # If schedule appears in future for today, skip catch-up (normal flow will handle)
-        if now_local < sched_local_today:
-            continue
-        # Optional window: do not send catch-up if too late
-        try:
-            delta_min = (now_local - sched_local_today).total_seconds() / 60.0
-        except Exception:
-            delta_min = 0
-        if max_win_min >= 0 and delta_min > max_win_min:
-            continue
-        # Skip if acknowledged today
-        if getattr(r, 'last_ack_local_date') == now_local.date():
-            continue
-        # Note: We intentionally DO NOT skip if last_sent_utc is today because the user may
-        # have registered a new device after the earlier send went to an old/inactive token.
-        # We enforce single-device-per-user on registration, so duplicate delivery risk is minimal.
-        # Send now
-        token_res = await db.execute(
-            select(models.DeviceToken.token).where(models.DeviceToken.patient_id == patient_id).where(models.DeviceToken.active == True)
-        )
-        tokens = [row[0] for row in token_res.all()]
-        sent_tokens = 0
-        for t in tokens:
-            res_obj = send_fcm_notification_ex(t, getattr(r, 'title'), getattr(r, 'body'))  # type: ignore
-            if res_obj.get("ok"):
-                sent_tokens += 1
-        if sent_tokens > 0:
-            sent_total += sent_tokens
-            # Advance schedule and record delivery
-            object.__setattr__(r, 'last_sent_utc', now_utc)
-            nl, nu = _compute_next_fire(now_utc, getattr(r, 'hour'), getattr(r, 'minute'), getattr(r, 'timezone'))
-            object.__setattr__(r, 'next_fire_local', nl)
-            object.__setattr__(r, 'next_fire_utc', nu)
-            object.__setattr__(r, 'attempts_today', 0)
-            object.__setattr__(r, 'last_delivery_status', 'delivered')
-            object.__setattr__(r, 'updated_at', now_utc)
-            db.add(r)
-            # Optional structured log
-            if os.getenv("REMINDER_DECISION_LOG", "0").lower() in {"1","true","yes","on"}:
-                try:
-                    print({
-                        "evt": "reminder_catchup_send",
-                        "reminder_id": object.__getattribute__(r,'id'),
-                        "patient_id": patient_id,
-                        "sent_tokens": sent_tokens,
-                        "scheduled_local": sched_local_today.isoformat(),
-                        "now_local": now_local.isoformat(),
-                        "ts": datetime.utcnow().isoformat()+"Z",
-                    })
-                except Exception:
-                    pass
-    if sent_total:
-        try:
-            await db.commit()
-        except Exception:
-            pass
-    return {"enabled": True, "sent": sent_total, "considered": considered}
 @app.post("/push/register-device", response_model=schemas.DeviceTokenResponse)
 async def register_device(
     request: Request,
@@ -2663,25 +2567,6 @@ async def register_device(
             for d in others_q.scalars().all():
                 await db.delete(d)
             await db.commit()
-        # Attempt catch-up as well for existing/reactivated tokens
-        try:
-            pid = object.__getattribute__(current_user, 'id')
-            catchup_res = await _catchup_reminders_for_patient(db, pid)
-            if os.getenv("REMINDER_DECISION_LOG", "0").lower() in {"1","true","yes","on"}:
-                try:
-                    print({
-                        "evt": "register_device_catchup",
-                        "patient_id": pid,
-                        "device_id": object.__getattribute__(existing, 'id'),
-                        "sent": catchup_res.get("sent"),
-                        "considered": catchup_res.get("considered"),
-                        "enabled": catchup_res.get("enabled"),
-                        "ts": datetime.utcnow().isoformat()+"Z",
-                    })
-                except Exception:
-                    pass
-        except Exception as _e:
-            print(f"[RegisterDevice] catch-up error: {_e}")
         return existing
     row = models.DeviceToken(patient_id=current_user.id, platform=payload.platform, token=payload.token)
     db.add(row)
@@ -2697,26 +2582,7 @@ async def register_device(
         for d in others_q.scalars().all():
             await db.delete(d)
         await db.commit()
-    # After successful registration, attempt a best-effort reminder catch-up for today
-    try:
-        pid = object.__getattribute__(current_user, 'id')
-        catchup_res = await _catchup_reminders_for_patient(db, pid)
-        if os.getenv("REMINDER_DECISION_LOG", "0").lower() in {"1","true","yes","on"}:
-            try:
-                print({
-                    "evt": "register_device_catchup",
-                    "patient_id": pid,
-                    "device_id": object.__getattribute__(row, 'id'),
-                    "sent": catchup_res.get("sent"),
-                    "considered": catchup_res.get("considered"),
-                    "enabled": catchup_res.get("enabled"),
-                    "ts": datetime.utcnow().isoformat()+"Z",
-                })
-            except Exception:
-                pass
-    except Exception as _e:
-        # Don't fail device registration on catch-up errors
-        print(f"[RegisterDevice] catch-up error: {_e}")
+
     return row
 
 @app.get("/push/devices", response_model=List[schemas.DeviceTokenResponse])
