@@ -174,10 +174,6 @@ class _LoginScreenState extends State<LoginScreen> {
       });
       return;
     }
-    if (!mounted) return;
-    setState(() {
-      _loading = false;
-    });
   }
 
   void _showForgotPasswordDialog() {

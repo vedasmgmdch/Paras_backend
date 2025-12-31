@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../widgets/ui_safety.dart';
 import 'chat_screen.dart';
+import '../widgets/no_animation_page_route.dart';
 
 class DoctorPatientProgressScreen extends StatefulWidget {
   final String username;
@@ -23,7 +24,10 @@ class _DoctorPatientProgressScreenState extends State<DoctorPatientProgressScree
   }
 
   Future<void> _load() async {
-    setState(() { _loading = true; _error = false; });
+    setState(() {
+      _loading = true;
+      _error = false;
+    });
     final res = await ApiService.getPatientInstructionProgress(widget.username, days: 14);
     if (!mounted) return;
     setState(() {
@@ -38,51 +42,51 @@ class _DoctorPatientProgressScreenState extends State<DoctorPatientProgressScree
     return Scaffold(
       appBar: AppBar(
         title: Text('Progress • ${widget.username}'),
-        actions: [
-          IconButton(onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh)),
-        ],
+        actions: [IconButton(onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh))],
       ),
       body: SafeArea(
         child: _loading
             ? const Center(child: CircularProgressIndicator())
             : _error || _data == null
-                ? _ErrorState(onRetry: _load)
-                : RefreshIndicator(
-                    onRefresh: _load,
-                    child: ListView(
-                      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
-                      children: [
-                        _HeaderCard(data: _data!),
-                        const SizedBox(height: 16),
-                        _SummaryPie(data: _data!),
-                        const SizedBox(height: 16),
-                        _DailyAdherenceList(data: _data!),
-                        const SizedBox(height: 16),
-                        ElevatedButton.icon(
-                          onPressed: () {
-                            final patient = (_data?['patient'] as Map<String, dynamic>?) ?? const {};
-                            final displayName = (patient['name'] ?? '').toString();
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => ChatScreen(
-                                  patientUsername: widget.username,
-                                  asDoctor: true,
-                                  patientDisplayName: displayName,
-                                ),
-                              ),
-                            );
-                          },
-                          icon: const Icon(Icons.chat_bubble_outline),
-                          label: const Text('Chat with Patient'),
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            backgroundColor: Colors.deepPurple,
-                            foregroundColor: Colors.white,
+            ? _ErrorState(onRetry: _load)
+            : RefreshIndicator(
+                onRefresh: _load,
+                child: ListView(
+                  padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+                  children: [
+                    _HeaderCard(data: _data!),
+                    const SizedBox(height: 16),
+                    _SummaryPie(data: _data!),
+                    const SizedBox(height: 16),
+                    _DailyAdherenceList(data: _data!),
+                    const SizedBox(height: 16),
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        final patient = (_data?['patient'] as Map<String, dynamic>?) ?? const {};
+                        final displayName = (patient['name'] ?? '').toString();
+                        Navigator.of(context).push(
+                          NoAnimationPageRoute(
+                            builder: (_) => ChatScreen(
+                              patientUsername: widget.username,
+                              asDoctor: true,
+                              patientDisplayName: displayName,
+                              readOnly: patient['procedure_completed'] == true,
+                              bannerText: patient['procedure_completed'] == true ? 'Treatment completed' : null,
+                            ),
                           ),
-                        ),
-                      ],
+                        );
+                      },
+                      icon: const Icon(Icons.chat_bubble_outline),
+                      label: const Text('Chat with Patient'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        backgroundColor: Colors.deepPurple,
+                        foregroundColor: Colors.white,
+                      ),
                     ),
-                  ),
+                  ],
+                ),
+              ),
       ),
     );
   }
@@ -96,31 +100,38 @@ class _HeaderCard extends StatelessWidget {
     final patient = data['patient'] as Map<String, dynamic>? ?? {};
     final treatment = (patient['treatment'] ?? '').toString();
     final subtype = (patient['subtype'] ?? '').toString();
-    final procLabel = treatment.isEmpty
-        ? ''
-        : (subtype.isNotEmpty ? '$treatment ($subtype)' : treatment);
+    final procLabel = treatment.isEmpty ? '' : (subtype.isNotEmpty ? '$treatment ($subtype)' : treatment);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            const Icon(Icons.person_outline, size: 32),
-            const SizedBox(width: 12),
-            Expanded(
-              child: SafeText(
-                procLabel.isEmpty
-                    ? (patient['username'] ?? 'Unknown')
-                    : '${patient['username'] ?? 'Unknown'} • $procLabel',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.person_outline, size: 32),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: SafeText(
+                    procLabel.isEmpty
+                        ? (patient['username'] ?? 'Unknown')
+                        : '${patient['username'] ?? 'Unknown'} • $procLabel',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+              ],
             ),
-          ]),
-          const SizedBox(height: 8),
-          Wrap(spacing: 12, runSpacing: 8, children: [
-            _Chip(label: 'Department: ${patient['department'] ?? '-'}'),
-            _Chip(label: 'Doctor: ${patient['doctor'] ?? '-'}'),
-          ])
-        ]),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              children: [
+                _Chip(label: 'Department: ${patient['department'] ?? '-'}'),
+                _Chip(label: 'Doctor: ${patient['doctor'] ?? '-'}'),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -134,15 +145,10 @@ class _Chip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-  color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.08),
+        color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Text(
-        label,
-        style: Theme.of(context).textTheme.bodySmall,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
+      child: Text(label, style: Theme.of(context).textTheme.bodySmall, maxLines: 1, overflow: TextOverflow.ellipsis),
     );
   }
 }
@@ -172,14 +178,17 @@ class _SummaryPie extends StatelessWidget {
                 children: [
                   Text('Overall Adherence', style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 6),
-                  Text('$pct% followed', style: Theme.of(context).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.bold)),
+                  Text(
+                    '$pct% followed',
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.bold),
+                  ),
                   const SizedBox(height: 8),
                   Text('Followed: $followed'),
                   Text('Unfollowed: $unfollowed'),
                   Text('Total: $total'),
                 ],
               ),
-            )
+            ),
           ],
         ),
       ),
@@ -207,7 +216,10 @@ class _DonutChart extends StatelessWidget {
             backgroundColor: Colors.red.withValues(alpha: 0.25),
             valueColor: AlwaysStoppedAnimation<Color>(Colors.green),
           ),
-          Text('${(fRatio * 100).toStringAsFixed(0)}%', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+          Text(
+            '${(fRatio * 100).toStringAsFixed(0)}%',
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+          ),
         ],
       ),
     );
@@ -224,16 +236,10 @@ class _DailyAdherenceList extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const ListTile(
-            title: Text('14-Day Daily Adherence'),
-            subtitle: Text('Followed vs Unfollowed per day'),
-          ),
+          const ListTile(title: Text('14-Day Daily Adherence'), subtitle: Text('Followed vs Unfollowed per day')),
           const Divider(height: 1),
           if (daily.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text('No instruction data in this period'),
-            )
+            const Padding(padding: EdgeInsets.all(16), child: Text('No instruction data in this period'))
           else
             ...daily.map((d) {
               final date = d['date'] as String? ?? '';

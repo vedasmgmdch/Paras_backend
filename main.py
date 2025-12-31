@@ -15,6 +15,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text, delete
+from sqlalchemy.exc import IntegrityError
 
 import schemas
 from database import engine
@@ -22,7 +23,7 @@ from database import engine
 from utils import send_registration_email, send_fcm_notification, send_fcm_notification_ex
 import os
 from fastapi import Request
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy import func
 from datetime import datetime, timedelta
 import pytz
@@ -281,6 +282,43 @@ async def startup():
             interval_sec = 5  # clamp to safe minimum
         print(f"[Startup] Dispatch interval set to {interval_sec}s (DISPATCH_INTERVAL_SEC)")
         scheduler.add_job(_run_dispatch, IntervalTrigger(seconds=interval_sec), id="dispatch_due", replace_existing=True)
+
+        # Optional: adherence nudges (server-side instruction follow-up)
+        if os.getenv("ADHERENCE_NUDGE_ENABLED", "1").lower() in {"1", "true", "yes", "on"}:
+            _adherence_lock = asyncio.Lock()
+            async def _run_adherence():
+                if _adherence_lock.locked():
+                    return
+                async with _adherence_lock:
+                    agen = get_db()
+                    db = None
+                    try:
+                        db = await agen.__anext__()  # type: ignore
+                    except StopAsyncIteration:
+                        db = None
+                    try:
+                        if db is not None:
+                            debug_env = os.getenv("ADHERENCE_DEBUG", "0").lower() in {"1", "true", "yes", "on"}
+                            res = await _internal_send_adherence_nudges(db)
+                            if debug_env:
+                                print(f"[Scheduler][adherence][debug] {res}")
+                    except Exception as e:
+                        print(f"[Scheduler] adherence internal error: {e}")
+                    finally:
+                        try:
+                            await agen.aclose()  # type: ignore
+                        except Exception:
+                            pass
+
+            try:
+                adh_interval_sec = int(os.getenv("ADHERENCE_INTERVAL_SEC", "300"))
+            except Exception:
+                adh_interval_sec = 300
+            if adh_interval_sec < 30:
+                adh_interval_sec = 30
+            print(f"[Startup] Adherence interval set to {adh_interval_sec}s (ADHERENCE_INTERVAL_SEC)")
+            scheduler.add_job(_run_adherence, IntervalTrigger(seconds=adh_interval_sec), id="adherence_nudge", replace_existing=True)
+
         scheduler.start()
     else:
         print("[Startup] Scheduler disabled via SCHEDULER_ENABLED env var")
@@ -373,6 +411,200 @@ def _compute_next_fire(now_utc: datetime, hour: int, minute: int, tz_name: str) 
     candidate = tz.normalize(candidate)
     candidate_utc = candidate.astimezone(pytz.UTC).replace(tzinfo=None)
     return candidate.replace(tzinfo=None), candidate_utc
+
+
+async def _internal_send_adherence_nudges(db: AsyncSession) -> dict[str, Any]:
+    """Server-side adherence nudges.
+
+    Strategy:
+      - For each patient with an active device token and an active (or recent) reminder timezone,
+        compute their local "today".
+      - If local time is within the configured window, and adherence for today is below threshold
+        (or there is no activity), send an FCM push.
+      - Suppress to once per patient per local day using models.AdherenceNudge unique constraint.
+    """
+    now_utc = datetime.utcnow()
+
+    enabled = os.getenv("ADHERENCE_NUDGE_ENABLED", "1").lower() in {"1", "true", "yes", "on"}
+    if not enabled:
+        return {"enabled": False, "evaluated": 0, "nudged": 0, "skipped": 0}
+
+    try:
+        target_hour = int(os.getenv("ADHERENCE_NUDGE_LOCAL_HOUR", "20"))
+    except Exception:
+        target_hour = 20
+    try:
+        minute_window = int(os.getenv("ADHERENCE_NUDGE_MINUTE_WINDOW", "30"))
+    except Exception:
+        minute_window = 30
+    if minute_window < 1:
+        minute_window = 1
+    if minute_window > 60:
+        minute_window = 60
+    try:
+        threshold = float(os.getenv("ADHERENCE_NUDGE_THRESHOLD", "0.6"))
+    except Exception:
+        threshold = 0.6
+    try:
+        max_days_after = int(os.getenv("ADHERENCE_MAX_DAYS_AFTER_PROCEDURE", "60"))
+    except Exception:
+        max_days_after = 60
+    # India (including Maharashtra) uses Asia/Kolkata
+    default_tz = os.getenv("ADHERENCE_DEFAULT_TZ", "Asia/Kolkata")
+
+    def _extract_fcm_error(body: str | None) -> str | None:
+        if not body:
+            return None
+        for key in ["UNREGISTERED", "InvalidRegistration", "NotRegistered", "MismatchSenderId", "QuotaExceeded", "Internal", "Unavailable"]:
+            if key in body:
+                return key
+        return None
+
+    async def _get_patient_timezone(patient_id: int) -> str:
+        # Use reminder timezone if available (best proxy for user's current device timezone)
+        try:
+            tz_res = await db.execute(
+                select(models.Reminder.timezone)
+                .where(models.Reminder.patient_id == patient_id)
+                .order_by(models.Reminder.updated_at.desc())
+                .limit(1)
+            )
+            tz_name = tz_res.scalar_one_or_none()
+            if tz_name:
+                return str(tz_name)
+        except Exception:
+            pass
+        return default_tz
+
+    evaluated = 0
+    nudged = 0
+    skipped = 0
+
+    # Consider only patients that currently have at least one active token.
+    # This also reduces DB work for large tables.
+    pat_res = await db.execute(
+        select(models.Patient)
+        .join(models.DeviceToken, models.DeviceToken.patient_id == models.Patient.id)
+        .where(models.DeviceToken.active == True)
+        .where(or_(models.Patient.procedure_completed == False, models.Patient.procedure_completed.is_(None)))
+        .distinct()
+    )
+    patients = pat_res.scalars().all()
+
+    for p in patients:
+        evaluated += 1
+        pid = object.__getattribute__(p, "id")
+        proc_date = getattr(p, "procedure_date")
+        if not proc_date:
+            skipped += 1
+            continue
+
+        tz_name = await _get_patient_timezone(pid)
+        try:
+            tz = pytz.timezone(tz_name)
+        except Exception:
+            tz = pytz.UTC
+            tz_name = "UTC"
+
+        now_local = now_utc.replace(tzinfo=pytz.UTC).astimezone(tz)
+        if now_local.hour != target_hour:
+            skipped += 1
+            continue
+        if now_local.minute >= minute_window:
+            skipped += 1
+            continue
+
+        local_day = now_local.date()
+        day_delta = (local_day - proc_date).days
+        if day_delta < 0 or (max_days_after >= 0 and day_delta > max_days_after):
+            skipped += 1
+            continue
+
+        # Compute adherence for today (local day)
+        sres = await db.execute(
+            select(models.InstructionStatus.followed)
+            .where(models.InstructionStatus.patient_id == pid)
+            .where(models.InstructionStatus.date == local_day)
+        )
+        flags = [bool(row[0]) for row in sres.all()]
+        total = len(flags)
+        followed = sum(1 for f in flags if f)
+        ratio_val: float | None = None
+        if total > 0:
+            ratio_val = followed / float(total)
+
+        needs_attention = (total == 0) or (ratio_val is not None and ratio_val < threshold)
+        if not needs_attention:
+            skipped += 1
+            continue
+
+        # Suppress to once/day via unique constraint
+        nudge_row = models.AdherenceNudge(
+            patient_id=pid,
+            local_date=local_day,
+            timezone=tz_name,
+            total=total,
+            followed=followed,
+            ratio=(f"{ratio_val:.3f}" if ratio_val is not None else None),
+            status="pending",
+            created_at=now_utc,
+        )
+        db.add(nudge_row)
+        try:
+            await db.commit()
+            await db.refresh(nudge_row)
+        except IntegrityError:
+            await db.rollback()
+            skipped += 1
+            continue
+
+        # Send to all active tokens
+        tok_res = await db.execute(
+            select(models.DeviceToken.token)
+            .where(models.DeviceToken.patient_id == pid)
+            .where(models.DeviceToken.active == True)
+        )
+        tokens = [row[0] for row in tok_res.all()]
+        if not tokens:
+            object.__setattr__(nudge_row, "tokens_attempted", 0)
+            object.__setattr__(nudge_row, "tokens_sent", 0)
+            object.__setattr__(nudge_row, "status", "no_tokens")
+            db.add(nudge_row)
+            await db.commit()
+            nudged += 1
+            continue
+
+        title = os.getenv("ADHERENCE_NUDGE_TITLE", "Instruction Reminder")
+        body = os.getenv("ADHERENCE_NUDGE_BODY", "Please follow your instructions today.")
+        data = {"type": "adherence_nudge", "local_date": local_day.isoformat()}
+
+        attempted = 0
+        sent_tokens = 0
+        for t in tokens:
+            attempted += 1
+            res_obj = send_fcm_notification_ex(str(t), title, body, data=data)  # type: ignore
+            if res_obj.get("ok"):
+                sent_tokens += 1
+            else:
+                err_code = _extract_fcm_error(res_obj.get("body"))
+                if err_code in {"UNREGISTERED", "NotRegistered"}:
+                    tok_row = await db.execute(select(models.DeviceToken).where(models.DeviceToken.token == t))
+                    tok = tok_row.scalars().first()
+                    if tok and getattr(tok, "active"):
+                        object.__setattr__(tok, "active", False)
+                        object.__setattr__(tok, "deactivated_at", datetime.utcnow())
+                        object.__setattr__(tok, "deactivated_reason", "UNREGISTERED")
+                        db.add(tok)
+
+        object.__setattr__(nudge_row, "tokens_attempted", attempted)
+        object.__setattr__(nudge_row, "tokens_sent", sent_tokens)
+        object.__setattr__(nudge_row, "status", "sent" if sent_tokens > 0 else "failed")
+        db.add(nudge_row)
+        await db.commit()
+
+        nudged += 1
+
+    return {"enabled": True, "evaluated": evaluated, "nudged": nudged, "skipped": skipped}
 
 async def get_bearer_token(request: Request) -> str:
     token = _extract_bearer_from_request(request)

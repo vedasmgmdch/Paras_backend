@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../app_state.dart';
@@ -125,38 +127,48 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen>
       });
     }
 
-    // After first frame: pull server ticks, hydrate UI, then snapshot.
+    // After first frame: hydrate immediately from local logs, then refresh from server.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await appState.pullInstructionStatusChanges();
+      await appState.loadInstructionLogs(username: appState.username);
       if (!mounted) return;
 
-      final hydratedGeneral = appState.buildFollowedChecklistForDay(
-        day: selectedDate,
-        type: 'general',
-        length: bracesDos.length,
-        instructionTextForIndex: (i) => bracesDos[i][selectedLang] ?? '',
-        username: appState.username,
-        treatment: appState.treatment,
-        subtype: appState.treatmentSubtype,
-      );
-      final hydratedSpecific = appState.buildFollowedChecklistForDay(
-        day: selectedDate,
-        type: 'specific',
-        length: bracesSpecificInstructions.length,
-        instructionTextForIndex: (i) => bracesSpecificInstructions[i][selectedLang] ?? '',
-        username: appState.username,
-        treatment: appState.treatment,
-        subtype: appState.treatmentSubtype,
-      );
+      void hydrateFromAppState() {
+        final hydratedGeneral = appState.buildFollowedChecklistForDay(
+          day: selectedDate,
+          type: 'general',
+          length: bracesDos.length,
+          instructionTextForIndex: (i) => bracesDos[i][selectedLang] ?? '',
+          username: appState.username,
+          treatment: appState.treatment,
+          subtype: appState.treatmentSubtype,
+        );
+        final hydratedSpecific = appState.buildFollowedChecklistForDay(
+          day: selectedDate,
+          type: 'specific',
+          length: bracesSpecificInstructions.length,
+          instructionTextForIndex: (i) => bracesSpecificInstructions[i][selectedLang] ?? '',
+          username: appState.username,
+          treatment: appState.treatment,
+          subtype: appState.treatmentSubtype,
+        );
 
-      setState(() {
-        _dosChecked = hydratedGeneral;
-        _specificChecked = hydratedSpecific;
-      });
-      appState.setChecklistForKey(_generalChecklistKey(selectedDate), _dosChecked);
-      appState.setChecklistForKey(_specificChecklistKey(selectedDate), _specificChecked);
+        setState(() {
+          _dosChecked = hydratedGeneral;
+          _specificChecked = hydratedSpecific;
+        });
+        appState.setChecklistForKey(_generalChecklistKey(selectedDate), _dosChecked);
+        appState.setChecklistForKey(_specificChecklistKey(selectedDate), _specificChecked);
+      }
 
+      hydrateFromAppState();
       _saveAllLogsForDay();
+
+      unawaited(() async {
+        await appState.pullInstructionStatusChanges();
+        if (!mounted) return;
+        hydrateFromAppState();
+        _saveAllLogsForDay();
+      }());
     });
   }
 

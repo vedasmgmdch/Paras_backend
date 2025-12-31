@@ -18,6 +18,7 @@ import 'screens/prd_instructions_screen.dart';
 import 'screens/user_screen.dart';
 import 'screens/doctor_login_screen.dart';
 import 'screens/doctors_patients_list_screen.dart';
+import 'screens/doctor_select_screen.dart';
 // ignore_for_file: avoid_print
 // Firebase messaging handled centrally in PushService.
 // import 'package:firebase_messaging/firebase_messaging.dart';
@@ -28,6 +29,36 @@ final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<v
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  FlutterError.onError = (FlutterErrorDetails details) {
+    FlutterError.presentError(details);
+    print('[FlutterError] ${details.exceptionAsString()}');
+    if (details.stack != null) {
+      print(details.stack);
+    }
+  };
+
+  WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
+    print('[Uncaught] $error');
+    print(stack);
+    return true; // handled
+  };
+
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    // Avoid a blank screen in release; show a minimal fallback.
+    return Material(
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Text(
+            'Something went wrong. Please go back and try again.',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      ),
+    );
+  };
+
   // Render ASAP: do not block first frame on network/plugin init.
   final appState = AppState();
   runApp(ChangeNotifierProvider(create: (_) => appState, child: const ToothCareGuideApp()));
@@ -107,6 +138,21 @@ TimeOfDay? parseTimeOfDay(dynamic timeStr) {
   return TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
 }
 
+class _NoTransitionsBuilder extends PageTransitionsBuilder {
+  const _NoTransitionsBuilder();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    return child;
+  }
+}
+
 class ToothCareGuideApp extends StatelessWidget {
   const ToothCareGuideApp({super.key});
 
@@ -114,13 +160,25 @@ class ToothCareGuideApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'ToothCareGuide',
-      theme: ThemeData(primarySwatch: Colors.blue),
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+        pageTransitionsTheme: const PageTransitionsTheme(
+          builders: {
+            TargetPlatform.android: _NoTransitionsBuilder(),
+            TargetPlatform.iOS: _NoTransitionsBuilder(),
+            TargetPlatform.windows: _NoTransitionsBuilder(),
+            TargetPlatform.macOS: _NoTransitionsBuilder(),
+            TargetPlatform.linux: _NoTransitionsBuilder(),
+          },
+        ),
+      ),
       navigatorObservers: [routeObserver],
       routes: {
         // Root route now decides dynamically: if a patient is already logged in (token + username)
         // we bypass the role selection UserScreen and continue straight to patient flow via AppEntryGate.
         '/': (_) => const RootDecider(),
         '/doctor-login': (_) => const DoctorLoginScreen(),
+        '/doctor-select': (_) => const DoctorSelectScreen(),
         '/doctor-patients': (_) => const DoctorsPatientsListScreen(),
         '/patient': (_) => const AppEntryGate(),
       },
@@ -165,7 +223,16 @@ class _AppEntryGateState extends State<AppEntryGate> {
   }
 
   Future<void> _checkAutoLogin() async {
-    final appState = Provider.of<AppState>(context, listen: false);
+    // Watchdog: never stay on a spinner forever.
+    unawaited(
+      Future<void>.delayed(const Duration(seconds: 25)).then((_) {
+        if (!mounted) return;
+        if (_loading) setState(() => _loading = false);
+      }),
+    );
+
+    try {
+      final appState = Provider.of<AppState>(context, listen: false);
 
     // If user data exists (from shared prefs), skip login!
     if (appState.token != null && appState.username != null) {
@@ -207,18 +274,18 @@ class _AppEntryGateState extends State<AppEntryGate> {
       return;
     }
 
-    // If not persisted, fallback to API check (for first run/after logout)
-    final isLoggedIn = await ApiService.checkIfLoggedIn();
-    if (!isLoggedIn) {
-      setState(() => _loading = false);
-      return;
-    }
+      // If not persisted, fallback to API check (for first run/after logout)
+      final isLoggedIn = await ApiService.checkIfLoggedIn();
+      if (!isLoggedIn) {
+        if (mounted) setState(() => _loading = false);
+        return;
+      }
 
-    final userDetails = await ApiService.getUserDetails();
-    if (userDetails == null) {
+      final userDetails = await ApiService.getUserDetails();
+      if (userDetails == null) {
       setState(() => _loading = false);
       return;
-    }
+      }
 
     appState.setUserDetails(
       fullName: userDetails['name'],
@@ -274,7 +341,12 @@ class _AppEntryGateState extends State<AppEntryGate> {
       return;
     }
 
-    setState(() => _loading = false);
+      setState(() => _loading = false);
+    } catch (e) {
+      // Last-resort: do not get stuck on loading if something unexpected happens.
+      print('[AppEntryGate] auto-login error: $e');
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   @override

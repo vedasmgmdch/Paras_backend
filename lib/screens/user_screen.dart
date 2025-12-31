@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'doctor_login_screen.dart';
+import '../widgets/no_animation_page_route.dart';
 
 class UserScreen extends StatelessWidget {
   const UserScreen({super.key});
@@ -48,7 +50,9 @@ class UserScreen extends StatelessWidget {
                 description: 'View assigned patients and monitor recovery progress.',
                 buttonLabel: 'Enter Doctor Login',
                 color: Colors.blue,
-                onTap: () => Navigator.of(context).pushNamed('/doctor-login'),
+                onTap: () => Navigator.of(context).push(
+                  NoAnimationPageRoute(builder: (_) => const DoctorLoginScreen()),
+                ),
               ),
               const SizedBox(height: 28),
               _PortalCard(

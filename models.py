@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, Date, DateTime, ForeignKey, Boolean, Time
+from sqlalchemy import UniqueConstraint
 from sqlalchemy import Index
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -199,5 +200,26 @@ class Reminder(Base):
     attempts_today = Column(Integer, default=0, nullable=False)
     last_attempt_utc = Column(DateTime, nullable=True)
     last_delivery_status = Column(String, nullable=True)  # delivered|retry|token_invalid|failed_permanent
+
+    patient = relationship("Patient")
+
+
+class AdherenceNudge(Base):
+    __tablename__ = "adherence_nudges"
+    __table_args__ = (
+        UniqueConstraint("patient_id", "local_date", name="ux_adherence_nudge_patient_day"),
+        Index("ix_adherence_nudges_patient_date", "patient_id", "local_date"),
+    )
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, index=True)
+    local_date = Column(Date, nullable=False, index=True)
+    timezone = Column(String, nullable=True)
+    total = Column(Integer, nullable=True)
+    followed = Column(Integer, nullable=True)
+    ratio = Column(String, nullable=True)  # store as string to avoid float precision surprises across DBs
+    tokens_attempted = Column(Integer, default=0, nullable=False)
+    tokens_sent = Column(Integer, default=0, nullable=False)
+    status = Column(String, nullable=True)  # sent|no_tokens|failed|skipped
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     patient = relationship("Patient")

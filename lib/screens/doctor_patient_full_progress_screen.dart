@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../services/api_service.dart';
 import 'chat_screen.dart';
+import '../widgets/no_animation_page_route.dart';
 
 // This doctor view is a read-only mirror of the patient's ProgressScreen, showing:
 // - Recovery Dashboard (day of recovery + progress bar)
@@ -18,12 +19,7 @@ class _ProgressStatus {
   final double score;
   final Color color;
 
-  const _ProgressStatus({
-    required this.label,
-    required this.sublabel,
-    required this.score,
-    required this.color,
-  });
+  const _ProgressStatus({required this.label, required this.sublabel, required this.score, required this.color});
 }
 
 class DoctorPatientFullProgressScreen extends StatefulWidget {
@@ -194,10 +190,7 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
             ),
           ),
           const SizedBox(height: 8),
-          Text(
-            status.sublabel,
-            style: const TextStyle(color: Colors.black54, fontSize: 13),
-          ),
+          Text(status.sublabel, style: const TextStyle(color: Colors.black54, fontSize: 13)),
         ],
       ),
     );
@@ -333,12 +326,8 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
   // --- Instruction log helpers (aligned with patient screen) ---
   String _normType(String s) => s.trim().toLowerCase();
 
-  String _normText(String s) => s
-      .trim()
-      .toLowerCase()
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .replaceAll('–', '-')
-      .replaceAll('—', '-');
+  String _normText(String s) =>
+      s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ').replaceAll('–', '-').replaceAll('—', '-');
 
   int? _asInt(dynamic v) {
     if (v is int) return v;
@@ -569,11 +558,15 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
                                 ? null
                                 : () {
                                     Navigator.of(context).push(
-                                      MaterialPageRoute(
+                                      NoAnimationPageRoute(
                                         builder: (_) => ChatScreen(
                                           patientUsername: widget.username,
                                           asDoctor: true,
                                           patientDisplayName: (_patientInfo?['name'] ?? '').toString(),
+                                          readOnly: (_patientInfo?['procedure_completed'] == true),
+                                          bannerText: (_patientInfo?['procedure_completed'] == true)
+                                              ? 'Treatment completed'
+                                              : null,
                                         ),
                                       ),
                                     );

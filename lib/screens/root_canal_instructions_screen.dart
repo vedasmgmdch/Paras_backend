@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../app_state.dart';
@@ -133,36 +135,46 @@ class _RootCanalInstructionsScreenState extends State<RootCanalInstructionsScree
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await appState.pullInstructionStatusChanges();
+      await appState.loadInstructionLogs(username: appState.username);
       if (!mounted) return;
 
-      final hydratedGeneral = appState.buildFollowedChecklistForDay(
-        day: selectedDate,
-        type: 'general',
-        length: generalInstructions.length,
-        instructionTextForIndex: (i) => generalInstructions[i][selectedLang] ?? '',
-        username: appState.username,
-        treatment: appState.treatment,
-        subtype: appState.treatmentSubtype,
-      );
-      final hydratedSpecific = appState.buildFollowedChecklistForDay(
-        day: selectedDate,
-        type: 'specific',
-        length: specificInstructions.length,
-        instructionTextForIndex: (i) => specificInstructions[i][selectedLang] ?? '',
-        username: appState.username,
-        treatment: appState.treatment,
-        subtype: appState.treatmentSubtype,
-      );
+      void hydrateFromAppState() {
+        final hydratedGeneral = appState.buildFollowedChecklistForDay(
+          day: selectedDate,
+          type: 'general',
+          length: generalInstructions.length,
+          instructionTextForIndex: (i) => generalInstructions[i][selectedLang] ?? '',
+          username: appState.username,
+          treatment: appState.treatment,
+          subtype: appState.treatmentSubtype,
+        );
+        final hydratedSpecific = appState.buildFollowedChecklistForDay(
+          day: selectedDate,
+          type: 'specific',
+          length: specificInstructions.length,
+          instructionTextForIndex: (i) => specificInstructions[i][selectedLang] ?? '',
+          username: appState.username,
+          treatment: appState.treatment,
+          subtype: appState.treatmentSubtype,
+        );
 
-      setState(() {
-        _generalChecked = hydratedGeneral;
-        _specificChecked = hydratedSpecific;
-      });
-      appState.setChecklistForKey(_generalChecklistKey(selectedDate), _generalChecked);
-      appState.setChecklistForKey(_specificChecklistKey(selectedDate), _specificChecked);
+        setState(() {
+          _generalChecked = hydratedGeneral;
+          _specificChecked = hydratedSpecific;
+        });
+        appState.setChecklistForKey(_generalChecklistKey(selectedDate), _generalChecked);
+        appState.setChecklistForKey(_specificChecklistKey(selectedDate), _specificChecked);
+      }
 
+      hydrateFromAppState();
       _saveAllLogsForDay();
+
+      unawaited(() async {
+        await appState.pullInstructionStatusChanges();
+        if (!mounted) return;
+        hydrateFromAppState();
+        _saveAllLogsForDay();
+      }());
     });
   }
 

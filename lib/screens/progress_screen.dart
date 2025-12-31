@@ -5,6 +5,7 @@ import '../app_state.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../main.dart'; // Import for global routeObserver
 import 'chat_screen.dart';
+import '../widgets/no_animation_page_route.dart';
 
 class ProgressScreen extends StatefulWidget {
   const ProgressScreen({super.key});
@@ -76,12 +77,8 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
     String? treatment,
     String? subtype,
   }) {
-    String norm(String s) => s
-        .trim()
-        .toLowerCase()
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .replaceAll('–', '-')
-        .replaceAll('—', '-');
+    String norm(String s) =>
+        s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ').replaceAll('–', '-').replaceAll('—', '-');
 
     final bool isPfdFixed = (treatment == 'Prosthesis Fitted' && subtype == 'Fixed Dentures');
     final Set<String> allowedPfdGeneral = {
@@ -97,13 +94,21 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
     };
     final Set<String> allowedPfdSpecific = {
       norm('If your bite feels high or uncomfortable, contact your dentist for an adjustment.'),
-      norm('If the restoration feels loose or comes off, keep it safe and contact your dentist. Do not try to glue it yourself.'),
-      norm('Clean carefully around the restoration and gumline; use floss/interdental aids as advised by your dentist.'),
+      norm(
+        'If the restoration feels loose or comes off, keep it safe and contact your dentist. Do not try to glue it yourself.',
+      ),
+      norm(
+        'Clean carefully around the restoration and gumline; use floss/interdental aids as advised by your dentist.',
+      ),
       norm('If you notice persistent pain, swelling, or bleeding, contact your dentist.'),
       // Marathi variants
       norm('चावताना दात उंच वाटत असतील किंवा अस्वस्थ वाटत असेल, समायोजनासाठी दंतवैद्याशी संपर्क साधा.'),
-      norm('पुनर्स्थापना सैल वाटली किंवा निघाली तर ती सुरक्षित ठेवा आणि दंतवैद्याशी संपर्क साधा. स्वतः चिकटवण्याचा प्रयत्न करू नका.'),
-      norm('पुनर्स्थापना व हिरड्यांच्या सीमेजवळ नीट स्वच्छता ठेवा; दंतवैद्याने सांगितल्याप्रमाणे फ्लॉस/इंटरडेंटल साधने वापरा.'),
+      norm(
+        'पुनर्स्थापना सैल वाटली किंवा निघाली तर ती सुरक्षित ठेवा आणि दंतवैद्याशी संपर्क साधा. स्वतः चिकटवण्याचा प्रयत्न करू नका.',
+      ),
+      norm(
+        'पुनर्स्थापना व हिरड्यांच्या सीमेजवळ नीट स्वच्छता ठेवा; दंतवैद्याने सांगितल्याप्रमाणे फ्लॉस/इंटरडेंटल साधने वापरा.',
+      ),
       norm('दुखणे, सूज किंवा रक्तस्राव सतत राहिल्यास दंतवैद्याशी संपर्क साधा.'),
     };
 
@@ -203,8 +208,10 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
     // Instructions log date dropdown must be limited to the first 14 days from procedure date.
     // Range: procedureDate .. min(today, procedureDate + 13 days)
     final int days =
-        (nowLocal.difference(DateTime(procedureDate.year, procedureDate.month, procedureDate.day)).inDays + 1)
-            .clamp(1, 14);
+        (nowLocal.difference(DateTime(procedureDate.year, procedureDate.month, procedureDate.day)).inDays + 1).clamp(
+          1,
+          14,
+        );
     final List<String> allDates = List.generate(days, (i) {
       final d = procedureDate.add(Duration(days: i));
       return "${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}";
@@ -509,137 +516,132 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                          Container(
-                            margin: const EdgeInsets.only(bottom: 18),
-                            padding: const EdgeInsets.all(20),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF2196F3),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    const Expanded(
-                                      child: Text(
-                                        'Recovery Dashboard',
-                                        style: TextStyle(
-                                          fontSize: 22,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.white,
-                                        ),
-                                      ),
-                                    ),
-                                    const Icon(Icons.favorite_border, color: Colors.white),
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  'Day $dayOfRecovery of recovery',
-                                  style: const TextStyle(fontSize: 16, color: Colors.white),
-                                ),
-                                const SizedBox(height: 12),
-                                LinearProgressIndicator(
-                                  value: (dayOfRecovery / totalRecoveryDays).clamp(0, 1),
-                                  backgroundColor: Colors.white24,
-                                  color: Colors.white,
-                                  minHeight: 5,
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  'Recovery Progress: $progressPercent%',
-                                  style: const TextStyle(color: Colors.white, fontSize: 14),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Container(
-                            margin: const EdgeInsets.only(bottom: 20),
-                            padding: const EdgeInsets.all(22),
-                            width: double.infinity,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF2196F3),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: const [
-                                Text(
-                                  'Recovery Progress',
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 18),
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF2196F3),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Expanded(
+                                child: Text(
+                                  'Recovery Dashboard',
                                   style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
                                 ),
-                                SizedBox(height: 6),
-                                Text(
-                                  "Monitor your recovery day by day",
-                                  style: TextStyle(fontSize: 15, color: Colors.white),
-                                ),
-                              ],
-                            ),
+                              ),
+                              const Icon(Icons.favorite_border, color: Colors.white),
+                            ],
                           ),
-                          Card(
-                            margin: const EdgeInsets.only(bottom: 28),
-                            elevation: 2,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                            child: Padding(
-                              padding: const EdgeInsets.all(18.0),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Padding(
-                                    padding: EdgeInsets.only(bottom: 10.0),
-                                    child: Text('Summary', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
-                                  ),
-                                  _buildSummaryRow(
-                                    'Days since procedure',
-                                    '$daysSinceProcedure',
-                                    'days',
-                                    const Color(0xFFE8F0FE),
-                                    const Color(0xFF2196F3),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  _buildSummaryRow(
-                                    'Expected healing',
-                                    '7-14',
-                                    'days',
-                                    const Color(0xFFF2FBF3),
-                                    const Color(0xFF22B573),
-                                  ),
-                                ],
+                          const SizedBox(height: 8),
+                          Text(
+                            'Day $dayOfRecovery of recovery',
+                            style: const TextStyle(fontSize: 16, color: Colors.white),
+                          ),
+                          const SizedBox(height: 12),
+                          LinearProgressIndicator(
+                            value: (dayOfRecovery / totalRecoveryDays).clamp(0, 1),
+                            backgroundColor: Colors.white24,
+                            color: Colors.white,
+                            minHeight: 5,
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Recovery Progress: $progressPercent%',
+                            style: const TextStyle(color: Colors.white, fontSize: 14),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 20),
+                      padding: const EdgeInsets.all(22),
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF2196F3),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          Text(
+                            'Recovery Progress',
+                            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
+                          ),
+                          SizedBox(height: 6),
+                          Text("Monitor your recovery day by day", style: TextStyle(fontSize: 15, color: Colors.white)),
+                        ],
+                      ),
+                    ),
+                    Card(
+                      margin: const EdgeInsets.only(bottom: 28),
+                      elevation: 2,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      child: Padding(
+                        padding: const EdgeInsets.all(18.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Padding(
+                              padding: EdgeInsets.only(bottom: 10.0),
+                              child: Text('Summary', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
+                            ),
+                            _buildSummaryRow(
+                              'Days since procedure',
+                              '$daysSinceProcedure',
+                              'days',
+                              const Color(0xFFE8F0FE),
+                              const Color(0xFF2196F3),
+                            ),
+                            const SizedBox(height: 10),
+                            _buildSummaryRow(
+                              'Expected healing',
+                              '7-14',
+                              'days',
+                              const Color(0xFFF2FBF3),
+                              const Color(0xFF22B573),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    _buildPieChart(appState.instructionLogs),
+                    _buildInstructionsFollowedBox(appState.instructionLogs),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.deepPurple,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          padding: const EdgeInsets.symmetric(vertical: 15),
+                        ),
+                        icon: const Icon(Icons.chat_bubble_outline),
+                        label: const Text(
+                          "Chat with Doctor",
+                          style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                        ),
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            NoAnimationPageRoute(
+                              builder: (_) => ChatScreen(
+                                patientUsername: _username,
+                                asDoctor: false,
+                                doctorName: _doctorName,
+                                readOnly: appState.procedureCompleted == true,
+                                bannerText: appState.procedureCompleted == true ? 'Treatment completed' : null,
                               ),
                             ),
-                          ),
-                          _buildPieChart(appState.instructionLogs),
-                          _buildInstructionsFollowedBox(appState.instructionLogs),
-                          const SizedBox(height: 24),
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton.icon(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.deepPurple,
-                                foregroundColor: Colors.white,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                padding: const EdgeInsets.symmetric(vertical: 15),
-                              ),
-                              icon: const Icon(Icons.chat_bubble_outline),
-                              label: const Text(
-                                "Chat with Doctor",
-                                style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
-                              ),
-                              onPressed: () {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => ChatScreen(
-                                      patientUsername: _username,
-                                      asDoctor: false,
-                                      doctorName: _doctorName,
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                          const SizedBox(height: 24),
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 24),
                   ],
                 ),
               ),
@@ -677,5 +679,4 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
       ),
     );
   }
-
 }

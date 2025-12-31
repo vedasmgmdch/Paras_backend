@@ -255,11 +255,6 @@ class AppState extends ChangeNotifier {
     return int.tryParse(v.toString());
   }
 
-  bool _matchesOrEmpty(dynamic a, String b) {
-    final aa = (a ?? '').toString();
-    return aa.isEmpty || b.isEmpty || aa == b;
-  }
-
   bool isInstructionFollowedForDay({
     required DateTime day,
     required String type,
@@ -330,12 +325,17 @@ class AppState extends ChangeNotifier {
   // addInstructionLog() calls without awaiting them (race condition -> duplicates).
   Future<void> _instructionLogOp = Future<void>.value();
 
+  String? _instructionLogsLoadedForUser;
+  bool _instructionLogsHydrated = false;
+
   List<Map<String, dynamic>> get instructionLogs => List.unmodifiable(_instructionLogs);
 
   Future<void> resetLocalStateForTreatmentReplacement({String? username}) async {
     final user = username ?? this.username;
     // Clear instruction log cache so old treatment rows can't pollute UI.
     _instructionLogs.clear();
+    _instructionLogsHydrated = false;
+    _instructionLogsLoadedForUser = null;
     _lastInstructionSyncUtc = null;
     _pendingInstructionBatches.clear();
     _pendingBatchTouched.clear();
@@ -353,11 +353,28 @@ class AppState extends ChangeNotifier {
     await prefs.setString(key, jsonEncode(_instructionLogs));
   }
 
-  Future<void> loadInstructionLogs({String? username}) async {
+  Future<void> loadInstructionLogs({String? username, bool force = false}) async {
+    final userKey = (username ?? this.username)?.toString();
+    if (!force && _instructionLogsHydrated && _instructionLogsLoadedForUser == userKey) {
+      return;
+    }
+
+    final wasHydrated = _instructionLogsHydrated;
+
     final prefs = await SharedPreferences.getInstance();
     final key = username != null ? 'instruction_logs_${username}' : 'instruction_logs';
     final data = prefs.getString(key);
     final legacy = prefs.getString('instruction_logs'); // migrate if present
+
+    // If we already have logs in-memory and there is no persisted data to read or migrate,
+    // just mark hydrated and return.
+    if (!force && data == null && legacy == null && _instructionLogs.isNotEmpty) {
+      _instructionLogsHydrated = true;
+      _instructionLogsLoadedForUser = userKey;
+      return;
+    }
+
+    final beforeCount = _instructionLogs.length;
     _instructionLogs.clear();
     if (data != null) {
       final List<dynamic> decoded = jsonDecode(data);
@@ -429,9 +446,17 @@ class AppState extends ChangeNotifier {
     if (before != after) {
       debugPrint('[InstructionLogs] normalized+deduped: $before -> $after');
     }
-    await _saveInstructionLogs(username: username ?? this.username);
-    debugPrint('Loaded instruction logs for $username: count = \\${_instructionLogs.length}');
-    notifyListeners();
+
+    // Avoid unnecessary writes/notifications when nothing actually changed.
+    final didChange = force || !wasHydrated || beforeCount != _instructionLogs.length || legacy != null;
+
+    _instructionLogsHydrated = true;
+    _instructionLogsLoadedForUser = userKey;
+    if (didChange) {
+      await _saveInstructionLogs(username: username ?? this.username);
+      debugPrint('Loaded instruction logs for $username: count = \${_instructionLogs.length}');
+      notifyListeners();
+    }
   }
 
   // --- Quarantine / allowlist for known-bad legacy data ---
@@ -782,11 +807,6 @@ class AppState extends ChangeNotifier {
       }
 
       String norm(String s) => s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
-
-      bool matchesOrEmpty(dynamic a, String b) {
-        final aa = (a ?? '').toString();
-        return aa.isEmpty || b.isEmpty || aa == b;
-      }
 
       bool sameRow(Map<String, dynamic> log) {
         if ((log['date'] ?? '').toString() != formattedDate) return false;

@@ -9,7 +9,7 @@ import 'package:flutter/material.dart';
 dynamic _jsonDecodeInBackground(String body) => jsonDecode(body);
 
 class ApiService {
-  static const Duration _slowEndpointTimeout = Duration(seconds: 25);
+  static const Duration _slowEndpointTimeout = Duration(seconds: 60);
   static Future<dynamic> _decodeJson(String body) async {
     // Avoid isolate overhead for small payloads.
     if (body.length < 50 * 1024) {
@@ -24,7 +24,7 @@ class ApiService {
   static Future<DateTime?> getServerUtcNow() async {
     try {
       final headers = await getAuthHeaders();
-      final res = await http.get(Uri.parse('$baseUrl/diag/echo'), headers: headers);
+      final res = await http.get(Uri.parse('$baseUrl/diag/echo'), headers: headers).timeout(_slowEndpointTimeout);
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final utcStr = data['utc']?.toString();
@@ -47,7 +47,7 @@ class ApiService {
       final headers = await getAuthHeaders();
       final url = Uri.parse('$baseUrl/episodes/mark-complete');
       final body = jsonEncode({"procedure_completed": true});
-      final response = await http.post(url, headers: headers, body: body);
+      final response = await http.post(url, headers: headers, body: body).timeout(_slowEndpointTimeout);
       if (response.statusCode == 200) {
         return true;
       } else {
@@ -66,11 +66,13 @@ class ApiService {
   static Future<bool> registerDeviceToken({required String platform, required String token}) async {
     try {
       final headers = await getAuthHeaders();
-      final response = await http.post(
-        Uri.parse('$baseUrl/push/register-device'),
-        headers: headers,
-        body: jsonEncode({'platform': platform, 'token': token}),
-      );
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/push/register-device'),
+            headers: headers,
+            body: jsonEncode({'platform': platform, 'token': token}),
+          )
+          .timeout(_slowEndpointTimeout);
       return response.statusCode == 200;
     } catch (e) {
       print('registerDeviceToken error: $e');
@@ -84,7 +86,7 @@ class ApiService {
   static Future<List<Map<String, dynamic>>> listDeviceTokens() async {
     try {
       final headers = await getAuthHeaders();
-      final res = await http.get(Uri.parse('$baseUrl/push/devices'), headers: headers);
+      final res = await http.get(Uri.parse('$baseUrl/push/devices'), headers: headers).timeout(_slowEndpointTimeout);
       if (res.statusCode == 200) {
         final decoded = jsonDecode(res.body);
         if (decoded is List) {
@@ -105,11 +107,13 @@ class ApiService {
   static Future<bool> sendTestPush({required String title, required String body}) async {
     try {
       final headers = await getAuthHeaders();
-      final response = await http.post(
-        Uri.parse('$baseUrl/push/test'),
-        headers: headers,
-        body: jsonEncode({'title': title, 'body': body}),
-      );
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/push/test'),
+            headers: headers,
+            body: jsonEncode({'title': title, 'body': body}),
+          )
+          .timeout(_slowEndpointTimeout);
       return response.statusCode == 200;
     } catch (e) {
       print('sendTestPush error: $e');
@@ -128,7 +132,9 @@ class ApiService {
       final iso = utc.toIso8601String();
       final trimmed = iso.endsWith('Z') ? iso.substring(0, iso.length - 1) : iso;
       final payload = {'title': title, 'body': body, 'send_at': trimmed};
-      final res = await http.post(Uri.parse('$baseUrl/push/schedule'), headers: headers, body: jsonEncode(payload));
+      final res = await http
+          .post(Uri.parse('$baseUrl/push/schedule'), headers: headers, body: jsonEncode(payload))
+          .timeout(_slowEndpointTimeout);
       if (res.statusCode == 200) return true;
       print('schedulePush failed: ${res.statusCode} → ${res.body}');
       return false;
@@ -144,7 +150,9 @@ class ApiService {
   static Future<Map<String, dynamic>?> dispatchMine() async {
     try {
       final headers = await getAuthHeaders();
-      final res = await http.post(Uri.parse('$baseUrl/push/dispatch-mine'), headers: headers, body: jsonEncode({}));
+      final res = await http
+          .post(Uri.parse('$baseUrl/push/dispatch-mine'), headers: headers, body: jsonEncode({}))
+          .timeout(_slowEndpointTimeout);
       if (res.statusCode == 200) {
         return jsonDecode(res.body) as Map<String, dynamic>;
       }
@@ -169,7 +177,9 @@ class ApiService {
     }
     print('REQUEST SIGNUP OTP BODY: ' + jsonEncode(body));
     try {
-      final response = await http.post(url, headers: {'Content-Type': 'application/json'}, body: jsonEncode(body));
+      final response = await http
+          .post(url, headers: {'Content-Type': 'application/json'}, body: jsonEncode(body))
+          .timeout(_slowEndpointTimeout);
       if (response.statusCode == 200) {
         return true;
       } else {
@@ -199,7 +209,9 @@ class ApiService {
     body['otp'] = otp;
     print('VERIFY SIGNUP OTP BODY: ' + jsonEncode(body));
     try {
-      final response = await http.post(url, headers: {'Content-Type': 'application/json'}, body: jsonEncode(body));
+      final response = await http
+          .post(url, headers: {'Content-Type': 'application/json'}, body: jsonEncode(body))
+          .timeout(_slowEndpointTimeout);
       if (response.statusCode == 200) {
         return true;
       } else {
@@ -227,7 +239,9 @@ class ApiService {
     body['otp'] = otp;
     print('VERIFY OTP BODY: ' + jsonEncode(body));
     try {
-      final response = await http.post(url, headers: {'Content-Type': 'application/json'}, body: jsonEncode(body));
+      final response = await http
+          .post(url, headers: {'Content-Type': 'application/json'}, body: jsonEncode(body))
+          .timeout(_slowEndpointTimeout);
       if (response.statusCode == 200) {
         return true;
       } else {
@@ -254,7 +268,9 @@ class ApiService {
     body['new_password'] = newPassword;
     print('RESET PASSWORD BODY: ' + jsonEncode(body));
     try {
-      final response = await http.post(url, headers: {'Content-Type': 'application/json'}, body: jsonEncode(body));
+      final response = await http
+          .post(url, headers: {'Content-Type': 'application/json'}, body: jsonEncode(body))
+          .timeout(_slowEndpointTimeout);
       if (response.statusCode == 200) {
         return true;
       } else {
@@ -337,11 +353,13 @@ class ApiService {
         if (data.containsKey('email')) 'email': (data['email'] ?? '').toString().trim(),
         if (data.containsKey('name')) 'name': (data['name'] ?? '').toString().trim(),
       };
-      final response = await http.post(
-        Uri.parse('$baseUrl/signup'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(normalized),
-      );
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/signup'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(normalized),
+          )
+          .timeout(_slowEndpointTimeout);
 
       if (response.statusCode == 200) {
         final resBody = jsonDecode(response.body);
@@ -367,11 +385,13 @@ class ApiService {
   static Future<String?> login(String username, String password) async {
     try {
       final normalizedUsername = username.trim();
-      final response = await http.post(
-        Uri.parse('$baseUrl/login'),
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: {'username': normalizedUsername, 'password': password},
-      );
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/login'),
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: {'username': normalizedUsername, 'password': password},
+          )
+          .timeout(_slowEndpointTimeout);
 
       if (response.statusCode == 200) {
         final resBody = jsonDecode(response.body);
@@ -419,7 +439,7 @@ class ApiService {
   static Future<List<dynamic>?> getChatThread() async {
     try {
       final headers = await getAuthHeaders();
-      final res = await http.get(Uri.parse('$baseUrl/chat/thread'), headers: headers);
+      final res = await http.get(Uri.parse('$baseUrl/chat/thread'), headers: headers).timeout(_slowEndpointTimeout);
       if (res.statusCode == 200) {
         final decoded = await _decodeJson(res.body);
         if (decoded is List) return decoded;
@@ -436,11 +456,13 @@ class ApiService {
   static Future<bool> sendChatMessage(String message) async {
     try {
       final headers = await getAuthHeaders();
-      final res = await http.post(
-        Uri.parse('$baseUrl/chat/thread'),
-        headers: headers,
-        body: jsonEncode({'message': message}),
-      );
+      final res = await http
+          .post(
+            Uri.parse('$baseUrl/chat/thread'),
+            headers: headers,
+            body: jsonEncode({'message': message}),
+          )
+          .timeout(_slowEndpointTimeout);
       if (res.statusCode == 200 || res.statusCode == 201) return true;
       // ignore: avoid_print
       print('sendChatMessage failed: ${res.statusCode} -> ${res.body}');
@@ -454,7 +476,9 @@ class ApiService {
   static Future<List<dynamic>?> getDoctorChatThread(String patientUsername) async {
     try {
       final headers = await getDoctorAuthHeaders();
-      final res = await http.get(Uri.parse('$baseUrl/doctor/patients/$patientUsername/chat'), headers: headers);
+      final res = await http
+          .get(Uri.parse('$baseUrl/doctor/patients/$patientUsername/chat'), headers: headers)
+          .timeout(_slowEndpointTimeout);
       if (res.statusCode == 200) {
         final decoded = await _decodeJson(res.body);
         if (decoded is List) return decoded;
@@ -471,11 +495,13 @@ class ApiService {
   static Future<bool> sendDoctorChatMessage(String patientUsername, String message) async {
     try {
       final headers = await getDoctorAuthHeaders();
-      final res = await http.post(
-        Uri.parse('$baseUrl/doctor/patients/$patientUsername/chat'),
-        headers: headers,
-        body: jsonEncode({'message': message}),
-      );
+      final res = await http
+          .post(
+            Uri.parse('$baseUrl/doctor/patients/$patientUsername/chat'),
+            headers: headers,
+            body: jsonEncode({'message': message}),
+          )
+          .timeout(_slowEndpointTimeout);
       if (res.statusCode == 200 || res.statusCode == 201) return true;
       // ignore: avoid_print
       print('sendDoctorChatMessage failed: ${res.statusCode} -> ${res.body}');
@@ -492,7 +518,7 @@ class ApiService {
   static Future<Map<String, dynamic>?> getUserDetails() async {
     try {
       final headers = await getAuthHeaders();
-      final response = await http.get(Uri.parse('$baseUrl/patients/me'), headers: headers);
+      final response = await http.get(Uri.parse('$baseUrl/patients/me'), headers: headers).timeout(_slowEndpointTimeout);
 
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
@@ -511,7 +537,7 @@ class ApiService {
       // ignore: avoid_print
       print('[ApiService] listReminders() → GET /reminders');
       final headers = await getAuthHeaders();
-      final res = await http.get(Uri.parse('$baseUrl/reminders'), headers: headers);
+      final res = await http.get(Uri.parse('$baseUrl/reminders'), headers: headers).timeout(_slowEndpointTimeout);
       if (res.statusCode == 200) {
         final body = jsonDecode(res.body);
         if (body is List) {
@@ -550,7 +576,9 @@ class ApiService {
         'active': active,
         'grace_minutes': graceMinutes,
       });
-      final res = await http.post(Uri.parse('$baseUrl/reminders'), headers: headers, body: payload);
+        final res = await http
+          .post(Uri.parse('$baseUrl/reminders'), headers: headers, body: payload)
+          .timeout(_slowEndpointTimeout);
       if (res.statusCode == 200) {
         final parsed = jsonDecode(res.body) as Map<String, dynamic>;
         // ignore: avoid_print
@@ -569,7 +597,9 @@ class ApiService {
       // ignore: avoid_print
       print('[ApiService] updateReminder(id=$id) keys=${patch.keys.toList()}');
       final headers = await getAuthHeaders();
-      final res = await http.patch(Uri.parse('$baseUrl/reminders/$id'), headers: headers, body: jsonEncode(patch));
+        final res = await http
+          .patch(Uri.parse('$baseUrl/reminders/$id'), headers: headers, body: jsonEncode(patch))
+          .timeout(_slowEndpointTimeout);
       if (res.statusCode == 200) {
         final parsed = jsonDecode(res.body) as Map<String, dynamic>;
         // ignore: avoid_print
@@ -590,7 +620,7 @@ class ApiService {
       // ignore: avoid_print
       print('[ApiService] deleteReminder(id=$id)');
       final headers = await getAuthHeaders();
-      final res = await http.delete(Uri.parse('$baseUrl/reminders/$id'), headers: headers);
+      final res = await http.delete(Uri.parse('$baseUrl/reminders/$id'), headers: headers).timeout(_slowEndpointTimeout);
       if (res.statusCode == 200) return true;
       print('deleteReminder failed: ${res.statusCode} → ${res.body}');
     } catch (e) {
@@ -604,11 +634,13 @@ class ApiService {
       // ignore: avoid_print
       print('[ApiService] ackReminder(id=$id)');
       final headers = await getAuthHeaders();
-      final res = await http.post(
-        Uri.parse('$baseUrl/reminders/ack'),
-        headers: headers,
-        body: jsonEncode({'reminder_id': id}),
-      );
+      final res = await http
+          .post(
+            Uri.parse('$baseUrl/reminders/ack'),
+            headers: headers,
+            body: jsonEncode({'reminder_id': id}),
+          )
+          .timeout(_slowEndpointTimeout);
       if (res.statusCode == 200) return true;
       print('ackReminder failed: ${res.statusCode} → ${res.body}');
     } catch (e) {
@@ -622,11 +654,13 @@ class ApiService {
       // ignore: avoid_print
       print('[ApiService] syncReminders(count=${items.length})');
       final headers = await getAuthHeaders();
-      final res = await http.post(
-        Uri.parse('$baseUrl/reminders/sync'),
-        headers: headers,
-        body: jsonEncode({'items': items}),
-      );
+      final res = await http
+          .post(
+            Uri.parse('$baseUrl/reminders/sync'),
+            headers: headers,
+            body: jsonEncode({'items': items}),
+          )
+          .timeout(_slowEndpointTimeout);
       if (res.statusCode == 200) {
         final parsed = jsonDecode(res.body) as Map<String, dynamic>;
         // ignore: avoid_print
@@ -645,7 +679,7 @@ class ApiService {
   // --------------------------
   static Future<http.Response> getProfile() async {
     final headers = await getAuthHeaders();
-    return await http.get(Uri.parse('$baseUrl/patients/me'), headers: headers);
+    return await http.get(Uri.parse('$baseUrl/patients/me'), headers: headers).timeout(_slowEndpointTimeout);
   }
 
   // --------------------------
@@ -654,11 +688,13 @@ class ApiService {
   static Future<bool> submitProgress(String message) async {
     try {
       final headers = await getAuthHeaders();
-      final response = await http.post(
-        Uri.parse('$baseUrl/progress'),
-        headers: headers,
-        body: jsonEncode({'message': message}),
-      );
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/progress'),
+            headers: headers,
+            body: jsonEncode({'message': message}),
+          )
+          .timeout(_slowEndpointTimeout);
 
       if (response.statusCode == 200) {
         return true;
@@ -678,7 +714,9 @@ class ApiService {
   static Future<bool> rotateIfDue() async {
     try {
       final headers = await getAuthHeaders();
-      final response = await http.post(Uri.parse('$baseUrl/episodes/rotate-if-due'), headers: headers);
+      final response = await http
+          .post(Uri.parse('$baseUrl/episodes/rotate-if-due'), headers: headers)
+          .timeout(_slowEndpointTimeout);
       if (response.statusCode == 200) {
         final body = jsonDecode(response.body);
         return body['rotated'] == true;
@@ -728,11 +766,13 @@ class ApiService {
   static Future<bool> saveDepartmentDoctor({required String department, required String doctor}) async {
     try {
       final headers = await getAuthHeaders();
-      final response = await http.post(
-        Uri.parse('$baseUrl/department-doctor'),
-        headers: headers,
-        body: jsonEncode({'department': department, 'doctor': doctor}),
-      );
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/department-doctor'),
+            headers: headers,
+            body: jsonEncode({'department': department, 'doctor': doctor}),
+          )
+          .timeout(_slowEndpointTimeout);
       if (response.statusCode == 200) {
         return true;
       } else {
@@ -748,7 +788,7 @@ class ApiService {
   static Future<List<dynamic>?> getEpisodeHistory() async {
     try {
       final headers = await getAuthHeaders();
-      final response = await http.get(Uri.parse('$baseUrl/episodes/history'), headers: headers);
+      final response = await http.get(Uri.parse('$baseUrl/episodes/history'), headers: headers).timeout(_slowEndpointTimeout);
       if (response.statusCode == 200) {
         final decoded = await _decodeJson(response.body);
         if (decoded is List) return decoded;
@@ -787,7 +827,7 @@ class ApiService {
         'procedure_time':
             '${procedureTime.hour.toString().padLeft(2, '0')}:${procedureTime.minute.toString().padLeft(2, '0')}',
       };
-      final response = await http.post(url, headers: headers, body: jsonEncode(body));
+      final response = await http.post(url, headers: headers, body: jsonEncode(body)).timeout(_slowEndpointTimeout);
       if (response.statusCode == 200) {
         return true;
       } else {
@@ -819,7 +859,7 @@ class ApiService {
         'procedure_time':
             '${procedureTime.hour.toString().padLeft(2, '0')}:${procedureTime.minute.toString().padLeft(2, '0')}',
       };
-      final res = await http.post(url, headers: headers, body: jsonEncode(body));
+      final res = await http.post(url, headers: headers, body: jsonEncode(body)).timeout(_slowEndpointTimeout);
       if (res.statusCode == 200) return true;
       print('replaceTreatmentEpisode failed: ${res.statusCode} → ${res.body}');
       return false;
@@ -840,7 +880,9 @@ class ApiService {
     print('REQUEST RESET BODY: ' + jsonEncode(body));
 
     try {
-      final response = await http.post(url, headers: {'Content-Type': 'application/json'}, body: jsonEncode(body));
+      final response = await http
+          .post(url, headers: {'Content-Type': 'application/json'}, body: jsonEncode(body))
+          .timeout(_slowEndpointTimeout);
       if (response.statusCode == 200) {
         return true;
       } else {
@@ -864,16 +906,18 @@ class ApiService {
   // --------------------------
   static Future<String?> doctorLogin(String username, String password) async {
     try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/doctor-login'),
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: {'username': username.trim(), 'password': password},
-      );
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/doctor-login'),
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: {'username': username.trim(), 'password': password},
+          )
+          .timeout(_slowEndpointTimeout);
       if (response.statusCode == 200) {
         final resBody = jsonDecode(response.body);
         final token = resBody['access_token'];
         if (token != null) {
-          await saveToken(token);
+          await saveDoctorToken(token);
         }
         return null;
       } else {
@@ -934,7 +978,7 @@ class ApiService {
     try {
       final headers = await getDoctorAuthHeaders();
       final uri = Uri.parse('$baseUrl/doctor/patients/$username/instruction-progress?days=$days');
-      final res = await http.get(uri, headers: headers);
+      final res = await http.get(uri, headers: headers).timeout(_slowEndpointTimeout);
       if (res.statusCode == 200) {
         return jsonDecode(res.body) as Map<String, dynamic>;
       }
@@ -960,7 +1004,7 @@ class ApiService {
       if (dateTo != null) qp['date_to'] = dateTo;
       final base = '$baseUrl/doctor/patients/$username/instruction-status';
       final uri = qp.isEmpty ? Uri.parse(base) : Uri.parse(base).replace(queryParameters: qp);
-      final res = await http.get(uri, headers: headers);
+      final res = await http.get(uri, headers: headers).timeout(_slowEndpointTimeout);
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         if (data is List) {
@@ -982,7 +1026,7 @@ class ApiService {
     try {
       final headers = await getDoctorAuthHeaders();
       final uri = Uri.parse('$baseUrl/doctor/patients/$username/progress');
-      final res = await http.get(uri, headers: headers);
+      final res = await http.get(uri, headers: headers).timeout(_slowEndpointTimeout);
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         if (data is List) {
@@ -1025,7 +1069,9 @@ class ApiService {
       }
       if (normalized.isEmpty) return true; // nothing valid
       final body = jsonEncode({'items': normalized});
-      final res = await http.post(Uri.parse('$baseUrl/instruction-status'), headers: headers, body: body);
+      final res = await http
+          .post(Uri.parse('$baseUrl/instruction-status'), headers: headers, body: body)
+          .timeout(_slowEndpointTimeout);
       if (res.statusCode == 200) {
         return true;
       }
@@ -1041,7 +1087,7 @@ class ApiService {
     try {
       final headers = await getDoctorAuthHeaders();
       final uri = Uri.parse('$baseUrl/doctor/patients/$username/info');
-      final res = await http.get(uri, headers: headers);
+      final res = await http.get(uri, headers: headers).timeout(_slowEndpointTimeout);
       if (res.statusCode == 200) {
         return jsonDecode(res.body) as Map<String, dynamic>;
       }
