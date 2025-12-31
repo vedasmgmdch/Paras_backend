@@ -6,7 +6,6 @@ import 'app_state.dart';
 import 'services/api_service.dart';
 import 'services/notification_service.dart';
 import 'services/push_service.dart';
-import 'services/reminder_api.dart';
 import 'screens/welcome_screen.dart';
 import 'screens/category_screen.dart';
 import 'screens/home_screen.dart';

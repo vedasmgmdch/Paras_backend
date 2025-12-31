@@ -29,7 +29,6 @@
 
 import 'package:flutter/widgets.dart';
 import 'services/notification_service.dart';
-import 'services/reminder_api.dart';
 
 @pragma('vm:entry-point')
 Future<void> bootRescheduleMain() async {

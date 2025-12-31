@@ -7,7 +7,6 @@ import '../app_state.dart';
 import 'category_screen.dart';
 import 'home_screen.dart';
 import 'treatment_screen.dart';
-import '../services/reminder_api.dart';
 import '../services/push_service.dart';
 
 class LoginScreen extends StatefulWidget {
