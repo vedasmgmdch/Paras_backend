@@ -2245,6 +2245,8 @@ async def _internal_dispatch_due(
                     "reminder_id": reminder_id,
                     "patient_id": str(getattr(r, 'patient_id')),
                     "fire_utc": now2.isoformat() + "Z",
+                    "title": str(getattr(r, 'title')),
+                    "body": str(getattr(r, 'body')),
                 }
                 res_obj = send_fcm_notification_ex(
                     t,
@@ -2445,6 +2447,8 @@ async def _internal_dispatch_due(
                 "reminder_id": reminder_id,
                 "patient_id": str(getattr(r, 'patient_id')),
                 "fire_utc": now2.isoformat() + "Z",
+                "title": str(getattr(r, 'title')),
+                "body": str(getattr(r, 'body')),
             }
             res_obj = send_fcm_notification_ex(
                 t,

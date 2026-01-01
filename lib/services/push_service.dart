@@ -2,14 +2,84 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'api_service.dart';
 import 'notification_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+@pragma('vm:entry-point')
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // NOTE: This runs in a background Dart isolate.
+  // Keep it minimal and avoid UI/navigation work.
+  if (!Platform.isAndroid) return;
+  try {
+    await Firebase.initializeApp();
+  } catch (_) {}
+
+  // If the message contains a notification payload, Android will display it automatically
+  // while the app is backgrounded. Avoid duplicates.
+  if (message.notification != null) return;
+
+  final data = message.data;
+  final kind = (data['kind'] ?? data['type'])?.toString();
+  if (kind != 'reminder') return;
+
+  final title = data['title']?.toString();
+  final body = data['body']?.toString();
+  if (title == null || body == null) return;
+
+  int id = DateTime.now().millisecondsSinceEpoch.remainder(2147483647);
+  final rid = data['reminder_id']?.toString();
+  if (rid != null) {
+    final parsed = int.tryParse(rid);
+    if (parsed != null) id = parsed;
+  }
+
+  try {
+    final plugin = FlutterLocalNotificationsPlugin();
+    const initSettings = InitializationSettings(
+      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+    );
+    await plugin.initialize(initSettings);
+
+    final androidImpl = plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+    if (androidImpl != null) {
+      await androidImpl.createNotificationChannel(
+        const AndroidNotificationChannel(
+          'reminders_channel_alarm_v2',
+          'Reminders (Alarm)',
+          description: 'Scheduled reminders for tooth-care app',
+          importance: Importance.max,
+        ),
+      );
+    }
+
+    const details = NotificationDetails(
+      android: AndroidNotificationDetails(
+        'reminders_channel_alarm_v2',
+        'Reminders (Alarm)',
+        channelDescription: 'Scheduled reminders for tooth-care app',
+        importance: Importance.max,
+        priority: Priority.max,
+        playSound: true,
+        enableVibration: true,
+      ),
+    );
+    await plugin.show(id, title, body, details);
+  } catch (_) {}
+}
 
 class PushService {
   static bool _initialized = false;
   static bool _pendingRegistration = false; // set when we have a token but no auth yet
   static bool _registeredThisSession = false;
+
+  static void registerBackgroundHandler() {
+    if (!Platform.isAndroid) return;
+    try {
+      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+    } catch (_) {}
+  }
 
   static Future<void> initializeAndRegister() async {
     if (_initialized) return;

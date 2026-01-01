@@ -27,6 +27,9 @@ final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<v
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Must be registered before runApp() to handle background/data messages.
+  PushService.registerBackgroundHandler();
+
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.presentError(details);
     print('[FlutterError] ${details.exceptionAsString()}');
