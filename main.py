@@ -2215,10 +2215,44 @@ async def _internal_dispatch_due(
                     })
                 continue
 
+            if decision_log_enabled:
+                try:
+                    print({
+                        "evt": "reminder_decision",
+                        "reminder_id": object.__getattribute__(r, 'id'),
+                        "patient_id": getattr(r, 'patient_id'),
+                        "action": "send_start",
+                        "mode": "server_only",
+                        "tokens": tokens_count,
+                        "data": {
+                            "kind": "reminder",
+                            "reminder_id": str(object.__getattribute__(r, 'id')),
+                            "patient_id": str(getattr(r, 'patient_id')),
+                            "fire_utc": now2.isoformat() + "Z",
+                        },
+                        "android_channel_id": "reminders_channel_alarm_v2",
+                        "ts": datetime.utcnow().isoformat() + "Z",
+                    })
+                except Exception:
+                    pass
+
             sent_tokens = 0
             any_token_invalid = False
             for t in tokens:
-                res_obj = send_fcm_notification_ex(t, getattr(r, 'title'), getattr(r, 'body'))  # type: ignore
+                reminder_id = str(object.__getattribute__(r, 'id'))
+                data = {
+                    "kind": "reminder",
+                    "reminder_id": reminder_id,
+                    "patient_id": str(getattr(r, 'patient_id')),
+                    "fire_utc": now2.isoformat() + "Z",
+                }
+                res_obj = send_fcm_notification_ex(
+                    t,
+                    getattr(r, 'title'),
+                    getattr(r, 'body'),
+                    data=data,
+                    android_channel_id="reminders_channel_alarm_v2",
+                )  # type: ignore
                 if res_obj.get("ok"):
                     sent += 1
                     sent_tokens += 1
@@ -2381,10 +2415,44 @@ async def _internal_dispatch_due(
                 except Exception:
                     pass
             continue
+
+        if decision_log_enabled:
+            try:
+                print({
+                    "evt": "reminder_decision",
+                    "reminder_id": object.__getattribute__(r, 'id'),
+                    "patient_id": getattr(r, 'patient_id'),
+                    "action": "send_start",
+                    "mode": "normal",
+                    "tokens": tokens_count,
+                    "data": {
+                        "kind": "reminder",
+                        "reminder_id": str(object.__getattribute__(r, 'id')),
+                        "patient_id": str(getattr(r, 'patient_id')),
+                        "fire_utc": now2.isoformat() + "Z",
+                    },
+                    "android_channel_id": "reminders_channel_alarm_v2",
+                    "ts": datetime.utcnow().isoformat() + "Z",
+                })
+            except Exception:
+                pass
         sent_tokens = 0
         any_token_invalid = False
         for t in tokens:
-            res_obj = send_fcm_notification_ex(t, getattr(r, 'title'), getattr(r, 'body'))  # type: ignore
+            reminder_id = str(object.__getattribute__(r, 'id'))
+            data = {
+                "kind": "reminder",
+                "reminder_id": reminder_id,
+                "patient_id": str(getattr(r, 'patient_id')),
+                "fire_utc": now2.isoformat() + "Z",
+            }
+            res_obj = send_fcm_notification_ex(
+                t,
+                getattr(r, 'title'),
+                getattr(r, 'body'),
+                data=data,
+                android_channel_id="reminders_channel_alarm_v2",
+            )  # type: ignore
             if res_obj.get("ok"):
                 sent += 1
                 sent_tokens += 1

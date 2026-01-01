@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'api_service.dart';
+import 'notification_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class PushService {
@@ -82,8 +83,30 @@ class PushService {
     // Suppress foreground popups to avoid burst notifications on app reopen.
     // Background notifications (system handled) will still appear if the message carries a notification payload.
     FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
-      if (kDebugMode) {
-        print('FCM foreground message received (suppressed): title="${message.notification?.title}" body="${message.notification?.body}" data=${message.data}');
+      final kind = (message.data['kind'] ?? message.data['type'])?.toString();
+      final title = message.notification?.title;
+      final body = message.notification?.body;
+
+      // Important: Android does NOT display FCM notification messages while the app is in the foreground.
+      // We only surface reminders here to avoid "burst" popups for other message types.
+      if (kind == 'reminder' && title != null && body != null) {
+        int id = DateTime.now().millisecondsSinceEpoch.remainder(2147483647);
+        final rid = message.data['reminder_id']?.toString();
+        if (rid != null) {
+          final parsed = int.tryParse(rid);
+          if (parsed != null) id = parsed;
+        }
+        try {
+          await NotificationService.showNow(id: id, title: title, body: body);
+        } catch (e) {
+          if (kDebugMode) {
+            print('Foreground reminder local-notification error: $e');
+          }
+        }
+      } else {
+        if (kDebugMode) {
+          print('FCM foreground message received (suppressed): title="${title ?? ''}" body="${body ?? ''}" data=${message.data}');
+        }
       }
     });
   }
