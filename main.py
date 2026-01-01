@@ -2179,8 +2179,10 @@ async def _internal_dispatch_due(
         except Exception:
             tz = pytz.UTC
         now_local = now2.replace(tzinfo=pytz.UTC).astimezone(tz)
-        # Apply forced grace override if configured
-        if force_grace is not None and getattr(r, 'grace_minutes') != force_grace:
+        # Apply forced grace override only in non-server-only mode.
+        # In server-only mode grace is ignored for send decisions, so forcing it
+        # would just mutate DB rows and spam logs.
+        if (not server_only) and (force_grace is not None) and getattr(r, 'grace_minutes') != force_grace:
             try:
                 object.__setattr__(r, 'grace_minutes', force_grace)
             except Exception:
