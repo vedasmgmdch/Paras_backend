@@ -58,7 +58,6 @@ class _HomeScreenState extends State<HomeScreen> {
             _selectedIndex = 2; // Instructions tab
           });
         },
-
       ),
     ];
   }
@@ -102,17 +101,13 @@ class _HomeScreenState extends State<HomeScreen> {
     if (treatment == "Tooth Fracture") {
       if (subtype == "Filling") {
         return FillingInstructionsScreen(date: today);
-      }
-      else if (subtype == "Teeth Cleaning") {
+      } else if (subtype == "Teeth Cleaning") {
         return TCInstructionsScreen(date: today);
-      }
-      else if (subtype == "Teeth Whitening") {
+      } else if (subtype == "Teeth Whitening") {
         return TWInstructionsScreen(date: today);
-      }
-      else if (subtype == "Gum Surgery") {
+      } else if (subtype == "Gum Surgery") {
         return GSInstructionsScreen(date: today);
-      }
-      else if (subtype == "Veneers/Laminates") {
+      } else if (subtype == "Veneers/Laminates") {
         return VLInstructionsScreen(date: today);
       }
       return const _NoInstructionsSelected();
@@ -120,6 +115,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // This line fixes the error!
     return const _NoInstructionsSelected();
   }
+
   @override
   Widget build(BuildContext context) {
     List<Widget> pages = List<Widget>.from(_pages);
@@ -248,6 +244,8 @@ class TreatmentOptionsSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    bool _isSameDay(DateTime a, DateTime b) => a.year == b.year && a.month == b.month && a.day == b.day;
+
     Future<void> openInstructionsFor(AppState appState) async {
       final String? treatment = appState.treatment;
       final String? subtype = appState.treatmentSubtype;
@@ -296,17 +294,42 @@ class TreatmentOptionsSheet extends StatelessWidget {
       }
     }
 
-    Future<TimeOfDay?> _pickTime(BuildContext ctx, TimeOfDay initial) async {
-      return await showTimePicker(context: ctx, initialTime: initial);
+    Future<TimeOfDay?> _pickTime(
+      BuildContext ctx,
+      TimeOfDay initial, {
+      DateTime? forDate,
+    }) async {
+      var attemptInitial = initial;
+      while (true) {
+        final picked = await showTimePicker(context: ctx, initialTime: attemptInitial);
+        if (picked == null) return null;
+
+        if (forDate != null) {
+          final now = DateTime.now();
+          final chosen = DateTime(forDate.year, forDate.month, forDate.day, picked.hour, picked.minute);
+          if (_isSameDay(forDate, now) && chosen.isAfter(now)) {
+            if (ctx.mounted) {
+              ScaffoldMessenger.of(ctx).showSnackBar(
+                const SnackBar(content: Text('Please select a time that is not in the future.')),
+              );
+            }
+            attemptInitial = TimeOfDay.fromDateTime(now);
+            continue;
+          }
+        }
+
+        return picked;
+      }
     }
 
     Future<DateTime?> _pickDate(BuildContext ctx, DateTime initialDate) async {
       final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
       return await showDatePicker(
         context: ctx,
         initialDate: initialDate,
-        firstDate: DateTime(now.year - 2),
-        lastDate: DateTime(now.year + 2),
+        firstDate: DateTime(2000),
+        lastDate: today,
       );
     }
 
@@ -315,7 +338,7 @@ class TreatmentOptionsSheet extends StatelessWidget {
       final today = DateTime.now();
       final pickedDate = await _pickDate(context, today);
       if (pickedDate == null) return; // cancelled
-      final pickedTime = await _pickTime(context, TimeOfDay.now());
+      final pickedTime = await _pickTime(context, TimeOfDay.now(), forDate: pickedDate);
       if (pickedTime == null) return;
 
       // Save to backend (if endpoint available) and to AppState
@@ -379,12 +402,13 @@ class TreatmentOptionsSheet extends StatelessWidget {
       return res == true;
     }
 
-    Future<void> _promptDateTimeAndReplaceTreatment(AppState appState, {required String treatment, String? subtype}) async {
+    Future<void> _promptDateTimeAndReplaceTreatment(AppState appState,
+        {required String treatment, String? subtype}) async {
       // Ask for procedure date and time, then call server replace endpoint.
       final today = DateTime.now();
       final pickedDate = await _pickDate(context, today);
       if (pickedDate == null) return;
-      final pickedTime = await _pickTime(context, TimeOfDay.now());
+      final pickedTime = await _pickTime(context, TimeOfDay.now(), forDate: pickedDate);
       if (pickedTime == null) return;
 
       final ok = await ApiService.replaceTreatmentEpisode(
@@ -415,6 +439,16 @@ class TreatmentOptionsSheet extends StatelessWidget {
       final oldTreatment = (appState.treatment ?? '').toString();
       final oldSubtype = (appState.treatmentSubtype ?? '').toString();
       final newSubtype = (subtype ?? '').toString();
+
+      // If user taps the currently ongoing treatment again, do not re-prompt for date/time.
+      // Just open instructions and inform them it's already active.
+      if (oldTreatment.isNotEmpty && oldTreatment == treatment && oldSubtype == newSubtype) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('This is your current ongoing treatment.')),
+        );
+        await openInstructionsFor(appState);
+        return;
+      }
 
       final confirmed = await _confirmTreatmentReplacement(
         ctx: context,
@@ -554,9 +588,17 @@ class _HomeMainContentState extends State<HomeMainContent> {
         final first = list.first;
         label = NotificationService.nextFireLabel(first.hour, first.minute);
       }
-      if (mounted) setState(() { _remindersCount = list.length; _nextReminderLabel = label; });
+      if (mounted)
+        setState(() {
+          _remindersCount = list.length;
+          _nextReminderLabel = label;
+        });
     } catch (_) {
-      if (mounted) setState(() { _remindersCount = 0; _nextReminderLabel = null; });
+      if (mounted)
+        setState(() {
+          _remindersCount = 0;
+          _nextReminderLabel = null;
+        });
     } finally {
       if (mounted) setState(() => _loadingReminders = false);
     }
@@ -584,10 +626,7 @@ class _HomeMainContentState extends State<HomeMainContent> {
               const SizedBox(height: 16),
               const Text(
                 "Missing Department",
-                style: TextStyle(
-                    fontSize: 22,
-                    color: Colors.red,
-                    fontWeight: FontWeight.bold),
+                style: TextStyle(fontSize: 22, color: Colors.red, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
               const Text(
@@ -662,7 +701,9 @@ class _HomeMainContentState extends State<HomeMainContent> {
                       children: [
                         const Icon(Icons.person, color: Colors.blue),
                         const SizedBox(width: 8),
-                        Expanded(child: SafeText('Hello, $name!', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold))),
+                        Expanded(
+                            child: SafeText('Hello, $name!',
+                                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold))),
                       ],
                     ),
                   ),
@@ -672,7 +713,9 @@ class _HomeMainContentState extends State<HomeMainContent> {
                     children: [
                       const Icon(Icons.local_hospital, color: Colors.indigo),
                       const SizedBox(width: 8),
-                      Expanded(child: SafeText("Department: $department", style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 16))),
+                      Expanded(
+                          child: SafeText("Department: $department",
+                              style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 16))),
                     ],
                   ),
                 ),
@@ -683,7 +726,9 @@ class _HomeMainContentState extends State<HomeMainContent> {
                       children: [
                         const Icon(Icons.medical_services, color: Colors.teal),
                         const SizedBox(width: 8),
-                        Expanded(child: SafeText("Doctor: $doctor", style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 16))),
+                        Expanded(
+                            child: SafeText("Doctor: $doctor",
+                                style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 16))),
                       ],
                     ),
                   ),
@@ -697,7 +742,7 @@ class _HomeMainContentState extends State<HomeMainContent> {
                         Expanded(
                           child: Tooltip(
                             message:
-                            "Treatment: $treatment${(subtype != null && subtype.isNotEmpty) ? " ($subtype)" : ""}",
+                                "Treatment: $treatment${(subtype != null && subtype.isNotEmpty) ? " ($subtype)" : ""}",
                             child: SafeText(
                               "Treatment: $treatment${(subtype != null && subtype.isNotEmpty) ? " ($subtype)" : ""}",
                               style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 16),
@@ -733,9 +778,7 @@ class _HomeMainContentState extends State<HomeMainContent> {
                           ),
                           Chip(
                             label: Text(
-                              appState.procedureCompleted == true
-                                  ? 'Marked Complete'
-                                  : 'In Recovery',
+                              appState.procedureCompleted == true ? 'Marked Complete' : 'In Recovery',
                             ),
                             backgroundColor: Colors.white70,
                             labelStyle: TextStyle(color: Colors.blue.shade900, fontWeight: FontWeight.w600),
@@ -865,8 +908,7 @@ class _HomeMainContentState extends State<HomeMainContent> {
                 Card(
                   margin: const EdgeInsets.symmetric(vertical: 8),
                   elevation: 2,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                   child: Padding(
                     padding: const EdgeInsets.all(18.0),
                     child: Row(
@@ -880,10 +922,7 @@ class _HomeMainContentState extends State<HomeMainContent> {
                             children: [
                               Row(
                                 children: [
-                                  const Text('Reminders',
-                                      style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 20)),
+                                  const Text('Reminders', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
                                   const Spacer(),
                                   SizedBox(
                                     height: 36,
@@ -971,8 +1010,7 @@ class _HomeMainContentState extends State<HomeMainContent> {
                 Card(
                   margin: const EdgeInsets.symmetric(vertical: 8),
                   elevation: 2,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                   child: Padding(
                     padding: const EdgeInsets.all(18.0),
                     child: Column(
@@ -984,8 +1022,7 @@ class _HomeMainContentState extends State<HomeMainContent> {
                             const SizedBox(width: 10),
                             const Text(
                               'Daily Care Activities',
-                              style: TextStyle(
-                                  fontWeight: FontWeight.bold, fontSize: 20),
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
                             ),
                           ],
                         ),
@@ -1042,9 +1079,7 @@ class _HomeMainContentState extends State<HomeMainContent> {
                                     const SizedBox(height: 12),
                                     Text(
                                       activity['title'] as String,
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 15),
+                                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
                                     ),
                                     const SizedBox(height: 8),
                                     Expanded(
@@ -1060,12 +1095,10 @@ class _HomeMainContentState extends State<HomeMainContent> {
                                             Row(
                                               crossAxisAlignment: CrossAxisAlignment.start,
                                               children: [
-                                                const Icon(Icons.play_arrow,
-                                                    color: Colors.white, size: 24),
+                                                const Icon(Icons.play_arrow, color: Colors.white, size: 24),
                                                 const Spacer(),
                                                 Container(
-                                                  padding: const EdgeInsets.symmetric(
-                                                      horizontal: 6, vertical: 2),
+                                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                                   decoration: BoxDecoration(
                                                     color: Colors.white12,
                                                     borderRadius: BorderRadius.circular(6),
@@ -1073,9 +1106,7 @@ class _HomeMainContentState extends State<HomeMainContent> {
                                                   child: Text(
                                                     activity['duration'] as String,
                                                     style: const TextStyle(
-                                                        color: Colors.white,
-                                                        fontSize: 12,
-                                                        fontWeight: FontWeight.bold),
+                                                        color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
                                                   ),
                                                 ),
                                               ],
@@ -1087,9 +1118,7 @@ class _HomeMainContentState extends State<HomeMainContent> {
                                                 (activity['desc'] as String).split('\n')[0],
                                                 textAlign: TextAlign.center,
                                                 style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 12,
-                                                    fontWeight: FontWeight.w400),
+                                                    color: Colors.white, fontSize: 12, fontWeight: FontWeight.w400),
                                                 overflow: TextOverflow.ellipsis,
                                                 maxLines: 1,
                                               ),
@@ -1102,9 +1131,7 @@ class _HomeMainContentState extends State<HomeMainContent> {
                                                     : '',
                                                 textAlign: TextAlign.center,
                                                 style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 12,
-                                                    fontWeight: FontWeight.w400),
+                                                    color: Colors.white, fontSize: 12, fontWeight: FontWeight.w400),
                                                 overflow: TextOverflow.ellipsis,
                                                 maxLines: 1,
                                               ),

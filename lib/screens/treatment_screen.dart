@@ -57,27 +57,30 @@ class _ToothFractureOptions extends StatelessWidget {
             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20, color: Colors.black87),
           ),
           const SizedBox(height: 18),
-          ...List.generate(options.length, (i) => Padding(
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            child: Card(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-                side: BorderSide(
-                  color: selectedIndex == i ? const Color(0xFF2196F3) : const Color(0xFF0CA9E7),
-                  width: selectedIndex == i ? 2.5 : 1.5,
-                ),
-              ),
-              elevation: 0,
-              child: ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: selectedIndex == i ? const Color(0xFF2196F3) : const Color(0xFF0CA9E7),
-                  child: Icon(options[i]['icon'], color: Colors.white, size: iconSize),
-                ),
-                title: Text(options[i]['label'], style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 17)),
-                onTap: () => onOptionTap(i),
-              ),
-            ),
-          )),
+          ...List.generate(
+              options.length,
+              (i) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: Card(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(
+                          color: selectedIndex == i ? const Color(0xFF2196F3) : const Color(0xFF0CA9E7),
+                          width: selectedIndex == i ? 2.5 : 1.5,
+                        ),
+                      ),
+                      elevation: 0,
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: selectedIndex == i ? const Color(0xFF2196F3) : const Color(0xFF0CA9E7),
+                          child: Icon(options[i]['icon'], color: Colors.white, size: iconSize),
+                        ),
+                        title: Text(options[i]['label'],
+                            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 17)),
+                        onTap: () => onOptionTap(i),
+                      ),
+                    ),
+                  )),
           const SizedBox(height: 18),
           SizedBox(
             width: double.infinity,
@@ -213,10 +216,7 @@ class _ProsthesisTypeSelectorState extends State<ProsthesisTypeSelector> {
                     children: [
                       const Text(
                         'Fixed Dentures',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 17,
-                            color: Colors.black),
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: Colors.black),
                       ),
                       const SizedBox(height: 16),
                       Icon(Icons.view_module, color: Colors.cyan, size: iconSize),
@@ -269,10 +269,7 @@ class _ProsthesisTypeSelectorState extends State<ProsthesisTypeSelector> {
                     children: [
                       const Text(
                         'Removable Dentures',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 17,
-                            color: Colors.black),
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: Colors.black),
                       ),
                       const SizedBox(height: 16),
                       Icon(Icons.circle, color: Colors.cyan, size: iconSize),
@@ -288,19 +285,33 @@ class _ProsthesisTypeSelectorState extends State<ProsthesisTypeSelector> {
   }
 
   Future<DateTime?> showDateTimePicker(BuildContext context) async {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
     final DateTime? date = await showDatePicker(
       context: context,
-      initialDate: DateTime.now(),
+      initialDate: today,
       firstDate: DateTime(2020),
-      lastDate: DateTime(2100),
+      lastDate: today,
     );
     if (date == null) return null;
-    final TimeOfDay? time = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.now(),
-    );
-    if (time == null) return null;
-    return DateTime(date.year, date.month, date.day, time.hour, time.minute);
+
+    var initialTime = TimeOfDay.fromDateTime(now);
+    while (true) {
+      final TimeOfDay? time = await showTimePicker(
+        context: context,
+        initialTime: initialTime,
+      );
+      if (time == null) return null;
+      final selected = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+      if (date.year == today.year && date.month == today.month && date.day == today.day && selected.isAfter(now)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please select a time that is not in the future.')),
+        );
+        initialTime = TimeOfDay.fromDateTime(now);
+        continue;
+      }
+      return selected;
+    }
   }
 }
 
@@ -381,9 +392,7 @@ class ImplantTypeSelector extends StatelessWidget {
                   child: Container(
                     decoration: BoxDecoration(
                       border: Border.all(
-                        color: selectedStage == "First Stage"
-                            ? Colors.deepPurple
-                            : Colors.deepPurple.shade100,
+                        color: selectedStage == "First Stage" ? Colors.deepPurple : Colors.deepPurple.shade100,
                         width: selectedStage == "First Stage" ? 2 : 1,
                       ),
                       borderRadius: BorderRadius.circular(16),
@@ -402,10 +411,7 @@ class ImplantTypeSelector extends StatelessWidget {
                       children: [
                         const Text(
                           'First Stage',
-                          style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 17,
-                              color: Colors.black),
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: Colors.black),
                         ),
                         const SizedBox(height: 16),
                         Icon(Icons.looks_one, color: Colors.deepPurple, size: iconSize),
@@ -423,9 +429,7 @@ class ImplantTypeSelector extends StatelessWidget {
                   child: Container(
                     decoration: BoxDecoration(
                       border: Border.all(
-                        color: selectedStage == "Second Stage"
-                            ? Colors.deepPurple
-                            : Colors.deepPurple.shade100,
+                        color: selectedStage == "Second Stage" ? Colors.deepPurple : Colors.deepPurple.shade100,
                         width: selectedStage == "Second Stage" ? 2 : 1,
                       ),
                       borderRadius: BorderRadius.circular(16),
@@ -444,10 +448,7 @@ class ImplantTypeSelector extends StatelessWidget {
                       children: [
                         const Text(
                           'Second Stage',
-                          style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 17,
-                              color: Colors.black),
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: Colors.black),
                         ),
                         const SizedBox(height: 16),
                         Icon(Icons.looks_two, color: Colors.deepPurple, size: iconSize),
@@ -528,10 +529,9 @@ class _TreatmentScreenMainState extends State<TreatmentScreenMain> {
 
   @override
   Widget build(BuildContext context) {
-    final bool isProsthesisFitted = _selectedIndex != null &&
-        treatments[_selectedIndex!]['label'] == 'Prosthesis Fitted';
-    final bool isImplant = _selectedIndex != null &&
-        treatments[_selectedIndex!]['label'] == 'Implant';
+    final bool isProsthesisFitted =
+        _selectedIndex != null && treatments[_selectedIndex!]['label'] == 'Prosthesis Fitted';
+    final bool isImplant = _selectedIndex != null && treatments[_selectedIndex!]['label'] == 'Implant';
 
     final treatmentIconSize = _treatmentIconSize(context);
 
@@ -567,69 +567,73 @@ class _TreatmentScreenMainState extends State<TreatmentScreenMain> {
             onContinue: _selectedFractureOptionIndex == null
                 ? null
                 : () async {
-              final pickedDate = await showDatePicker(
-                context: context,
-                initialDate: DateTime.now(),
-                firstDate: DateTime(2000),
-                lastDate: DateTime(2100),
-              );
-              if (pickedDate == null) return;
-              final pickedTime = await showTimePicker(
-                context: context,
-                initialTime: TimeOfDay.now(),
-              );
-              if (pickedTime == null) return;
+                    final pickedDate = await showDatePicker(
+                      context: context,
+                      initialDate: DateTime.now(),
+                      firstDate: DateTime(2000),
+                      lastDate: DateTime.now(),
+                    );
+                    if (pickedDate == null) return;
+                    final pickedTime = await showTimePicker(
+                      context: context,
+                      initialTime: TimeOfDay.now(),
+                    );
+                    if (pickedTime == null) return;
 
-              final selectedDateTime = DateTime(
-                pickedDate.year,
-                pickedDate.month,
-                pickedDate.day,
-                pickedTime.hour,
-                pickedTime.minute,
-              );
+                    final selectedDateTime = DateTime(
+                      pickedDate.year,
+                      pickedDate.month,
+                      pickedDate.day,
+                      pickedTime.hour,
+                      pickedTime.minute,
+                    );
 
-              final appState =
-              Provider.of<AppState>(context, listen: false);
-              final subtype =
-              fractureOptions[_selectedFractureOptionIndex!]['label'] as String;
+                    if (selectedDateTime.isAfter(DateTime.now())) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Please select a date/time that is not in the future.')),
+                      );
+                      return;
+                    }
 
-              appState.setTreatment("Tooth Fracture", subtype: subtype);
-              appState.setProcedureDateTime(
-                  selectedDateTime, TimeOfDay.fromDateTime(selectedDateTime));
+                    final appState = Provider.of<AppState>(context, listen: false);
+                    final subtype = fractureOptions[_selectedFractureOptionIndex!]['label'] as String;
 
-              await ApiService.saveTreatmentInfo(
-                username: appState.username ?? widget.userName,
-                treatment: "Tooth Fracture",
-                subtype: subtype,
-                procedureDate: selectedDateTime,
-                procedureTime: TimeOfDay.fromDateTime(selectedDateTime),
-              );
+                    appState.setTreatment("Tooth Fracture", subtype: subtype);
+                    appState.setProcedureDateTime(selectedDateTime, TimeOfDay.fromDateTime(selectedDateTime));
 
-        Widget navScreen;
-              switch (subtype) {
-                case "Filling":
-          navScreen = FillingInstructionsScreen(date: DateTime.now());
-                  break;
-                case "Teeth Cleaning":
-          navScreen = TCInstructionsScreen(date: DateTime.now());
-                  break;
-                case "Teeth Whitening":
-          navScreen = TWInstructionsScreen(date: DateTime.now());
-                  break;
-                case "Gum Surgery":
-          navScreen = GSInstructionsScreen(date: DateTime.now());
-                  break;
-                case "Veneers/Laminates":
-          navScreen = VLInstructionsScreen(date: DateTime.now());
-                  break;
-                default:
-          navScreen = FillingInstructionsScreen(date: DateTime.now());
-              }
-              Navigator.of(context).pushAndRemoveUntil(
-                MaterialPageRoute(builder: (_) => navScreen),
-                    (route) => false,
-              );
-            },
+                    await ApiService.saveTreatmentInfo(
+                      username: appState.username ?? widget.userName,
+                      treatment: "Tooth Fracture",
+                      subtype: subtype,
+                      procedureDate: selectedDateTime,
+                      procedureTime: TimeOfDay.fromDateTime(selectedDateTime),
+                    );
+
+                    Widget navScreen;
+                    switch (subtype) {
+                      case "Filling":
+                        navScreen = FillingInstructionsScreen(date: DateTime.now());
+                        break;
+                      case "Teeth Cleaning":
+                        navScreen = TCInstructionsScreen(date: DateTime.now());
+                        break;
+                      case "Teeth Whitening":
+                        navScreen = TWInstructionsScreen(date: DateTime.now());
+                        break;
+                      case "Gum Surgery":
+                        navScreen = GSInstructionsScreen(date: DateTime.now());
+                        break;
+                      case "Veneers/Laminates":
+                        navScreen = VLInstructionsScreen(date: DateTime.now());
+                        break;
+                      default:
+                        navScreen = FillingInstructionsScreen(date: DateTime.now());
+                    }
+                    Navigator.of(context).pushAndRemoveUntil(
+                      MaterialPageRoute(builder: (_) => navScreen),
+                      (route) => false,
+                    );
+                  },
           ),
         ),
       );
@@ -655,17 +659,13 @@ class _TreatmentScreenMainState extends State<TreatmentScreenMain> {
               final type = parts[0];
               final dateTime = DateTime.tryParse(parts[1]);
               if (dateTime != null) {
-        if (type == "Fixed Dentures") {
+                if (type == "Fixed Dentures") {
                   Navigator.of(context).pushReplacement(
-                    MaterialPageRoute(
-            builder: (_) =>
-              PFDInstructionsScreen(date: DateTime.now())),
+                    MaterialPageRoute(builder: (_) => PFDInstructionsScreen(date: DateTime.now())),
                   );
                 } else if (type == "Removable Dentures") {
                   Navigator.of(context).pushReplacement(
-                    MaterialPageRoute(
-            builder: (_) =>
-              PRDInstructionsScreen(date: DateTime.now())),
+                    MaterialPageRoute(builder: (_) => PRDInstructionsScreen(date: DateTime.now())),
                   );
                 }
               }
@@ -708,55 +708,58 @@ class _TreatmentScreenMainState extends State<TreatmentScreenMain> {
             onContinue: _selectedImplantStage == null
                 ? null
                 : () async {
-              final pickedDate = await showDatePicker(
-                context: context,
-                initialDate: DateTime.now(),
-                firstDate: DateTime(2000),
-                lastDate: DateTime(2100),
-              );
-              if (pickedDate == null) return;
-              final pickedTime = await showTimePicker(
-                context: context,
-                initialTime: TimeOfDay.now(),
-              );
-              if (pickedTime == null) return;
+                    final pickedDate = await showDatePicker(
+                      context: context,
+                      initialDate: DateTime.now(),
+                      firstDate: DateTime(2000),
+                      lastDate: DateTime.now(),
+                    );
+                    if (pickedDate == null) return;
+                    final pickedTime = await showTimePicker(
+                      context: context,
+                      initialTime: TimeOfDay.now(),
+                    );
+                    if (pickedTime == null) return;
 
-              final selectedDateTime = DateTime(
-                pickedDate.year,
-                pickedDate.month,
-                pickedDate.day,
-                pickedTime.hour,
-                pickedTime.minute,
-              );
+                    final selectedDateTime = DateTime(
+                      pickedDate.year,
+                      pickedDate.month,
+                      pickedDate.day,
+                      pickedTime.hour,
+                      pickedTime.minute,
+                    );
 
-              final appState = Provider.of<AppState>(context, listen: false);
-              appState.setTreatment('Implant', subtype: _selectedImplantStage);
-              appState.setProcedureDateTime(selectedDateTime, TimeOfDay.fromDateTime(selectedDateTime));
+                    if (selectedDateTime.isAfter(DateTime.now())) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Please select a date/time that is not in the future.')),
+                      );
+                      return;
+                    }
 
-              await ApiService.saveTreatmentInfo(
-                username: appState.username ?? widget.userName,
-                treatment: "Implant",
-                subtype: _selectedImplantStage,
-                procedureDate: selectedDateTime,
-                procedureTime: TimeOfDay.fromDateTime(selectedDateTime),
-              );
+                    final appState = Provider.of<AppState>(context, listen: false);
+                    appState.setTreatment('Implant', subtype: _selectedImplantStage);
+                    appState.setProcedureDateTime(selectedDateTime, TimeOfDay.fromDateTime(selectedDateTime));
 
-        if (_selectedImplantStage == "First Stage") {
-                Navigator.of(context).pushAndRemoveUntil(
-                  MaterialPageRoute(
-            builder: (_) =>
-              IFSInstructionsScreen(date: DateTime.now())),
-                      (route) => false,
-                );
-              } else if (_selectedImplantStage == "Second Stage") {
-                Navigator.of(context).pushAndRemoveUntil(
-                  MaterialPageRoute(
-            builder: (_) =>
-              ISSInstructionsScreen(date: DateTime.now())),
-                      (route) => false,
-                );
-              }
-            },
+                    await ApiService.saveTreatmentInfo(
+                      username: appState.username ?? widget.userName,
+                      treatment: "Implant",
+                      subtype: _selectedImplantStage,
+                      procedureDate: selectedDateTime,
+                      procedureTime: TimeOfDay.fromDateTime(selectedDateTime),
+                    );
+
+                    if (_selectedImplantStage == "First Stage") {
+                      Navigator.of(context).pushAndRemoveUntil(
+                        MaterialPageRoute(builder: (_) => IFSInstructionsScreen(date: DateTime.now())),
+                        (route) => false,
+                      );
+                    } else if (_selectedImplantStage == "Second Stage") {
+                      Navigator.of(context).pushAndRemoveUntil(
+                        MaterialPageRoute(builder: (_) => ISSInstructionsScreen(date: DateTime.now())),
+                        (route) => false,
+                      );
+                    }
+                  },
             onBackToTreatment: () {
               setState(() {
                 _selectedIndex = null;
@@ -784,10 +787,7 @@ class _TreatmentScreenMainState extends State<TreatmentScreenMain> {
             children: [
               TextSpan(
                 text: "Hi ${widget.userName}",
-                style: const TextStyle(
-                    color: Colors.black,
-                    fontSize: 22,
-                    fontWeight: FontWeight.w400),
+                style: const TextStyle(color: Colors.black, fontSize: 22, fontWeight: FontWeight.w400),
               ),
               const TextSpan(
                 text: ", ",
@@ -852,13 +852,10 @@ class _TreatmentScreenMainState extends State<TreatmentScreenMain> {
                         },
                         child: Container(
                           decoration: BoxDecoration(
-                            color: isSelected
-                                ? Colors.blue.withValues(alpha: 0.08)
-                                : Colors.blue.withValues(alpha: 0.04),
+                            color:
+                                isSelected ? Colors.blue.withValues(alpha: 0.08) : Colors.blue.withValues(alpha: 0.04),
                             border: Border.all(
-                              color: isSelected
-                                  ? Colors.blue
-                                  : Colors.blue.shade100,
+                              color: isSelected ? Colors.blue : Colors.blue.shade100,
                               width: isSelected ? 2.0 : 1.0,
                             ),
                             borderRadius: BorderRadius.circular(24),
@@ -923,155 +920,179 @@ class _TreatmentScreenMainState extends State<TreatmentScreenMain> {
                       onPressed: _selectedIndex == null
                           ? null
                           : () async {
-                        final selectedTreatment =
-                        treatments[_selectedIndex!]['label'] as String;
+                              final selectedTreatment = treatments[_selectedIndex!]['label'] as String;
 
-                        final appState =
-                        Provider.of<AppState>(context, listen: false);
-                        final username = appState.username ?? widget.userName;
+                              final appState = Provider.of<AppState>(context, listen: false);
+                              final username = appState.username ?? widget.userName;
 
-                        DateTime? procedureDate;
-                        TimeOfDay? procedureTime;
+                              DateTime? procedureDate;
+                              TimeOfDay? procedureTime;
 
-                        if (selectedTreatment == 'Tooth Taken Out') {
-                          procedureDate = await showDatePicker(
-                            context: context,
-                            initialDate: DateTime.now(),
-                            firstDate: DateTime(2000),
-                            lastDate: DateTime(2101),
-                          );
-                          if (procedureDate == null) return;
-                          procedureTime = await showTimePicker(
-                            context: context,
-                            initialTime: TimeOfDay.now(),
-                          );
-                          if (procedureTime == null) return;
-                          final procedureDateTime = DateTime(
-                            procedureDate.year,
-                            procedureDate.month,
-                            procedureDate.day,
-                            procedureTime.hour,
-                            procedureTime.minute,
-                          );
-                          appState.setTreatment(
-                            selectedTreatment,
-                            subtype: null,
-                          );
-                          appState.setProcedureDateTime(
-                            procedureDateTime,
-                            procedureTime,
-                          );
-                          await ApiService.saveTreatmentInfo(
-                            username: username,
-                            treatment: selectedTreatment,
-                            subtype: null,
-                            procedureDate: procedureDateTime,
-                            procedureTime: procedureTime,
-                          );
-        Navigator.of(context).pushAndRemoveUntil(
-                            MaterialPageRoute(
-                              builder: (_) =>
-          TTOInstructionsScreen(date: DateTime.now()),
-                            ),
-                                (route) => false,
-                          );
-                        } else if (selectedTreatment == 'Root Canal/Filling') {
-                          procedureDate = await showDatePicker(
-                            context: context,
-                            initialDate: DateTime.now(),
-                            firstDate: DateTime(2020),
-                            lastDate: DateTime(2100),
-                          );
-                          if (procedureDate != null) {
-                            procedureTime = await showTimePicker(
-                              context: context,
-                              initialTime: TimeOfDay.now(),
-                            );
-                            if (procedureTime != null) {
-                              final selectedDateTime = DateTime(
-                                procedureDate.year,
-                                procedureDate.month,
-                                procedureDate.day,
-                                procedureTime.hour,
-                                procedureTime.minute,
-                              );
-                              appState.setTreatment(
-                                selectedTreatment,
-                                procedureDate: selectedDateTime,
-                              );
-                              appState.setProcedureDateTime(
-                                selectedDateTime,
-                                procedureTime,
-                              );
-                              await ApiService.saveTreatmentInfo(
-                                username: username,
-                                treatment: selectedTreatment,
-                                subtype: null,
-                                procedureDate: selectedDateTime,
-                                procedureTime: procedureTime,
-                              );
-                Navigator.of(context).pushAndRemoveUntil(
-                                MaterialPageRoute(
-                                  builder: (_) =>
-                    RootCanalInstructionsScreen(
-                      date: DateTime.now()),
-                                ),
-                                    (route) => false,
-                              );
-                            }
-                          }
-                        } else if (selectedTreatment == 'Implant') {
-                          // Handled above by ImplantTypeSelector
-                        } else if (selectedTreatment == 'Tooth Fracture') {
-                          setState(() {
-                            showFractureOptions = true;
-                          });
-                        } else if (selectedTreatment == 'Braces') {
-                          await showDatePicker(
-                            context: context,
-                            initialDate: DateTime.now(),
-                            firstDate: DateTime(2000),
-                            lastDate: DateTime(2100),
-                          ).then((date) async {
-                            if (date != null) {
-                              procedureDate = date;
-                              await showTimePicker(
-                                context: context,
-                                initialTime: TimeOfDay.now(),
-                              ).then((time) async {
-                                if (time != null) {
-                                  procedureTime = time;
-                                  appState.setProcedureDateTime(
-                                      procedureDate!, procedureTime!);
-                                  appState.setTreatment(selectedTreatment);
-                                  await ApiService.saveTreatmentInfo(
-                                    username: username,
-                                    treatment: selectedTreatment,
-                                    subtype: null,
-                                    procedureDate: procedureDate!,
-                                    procedureTime: procedureTime!,
+                              if (selectedTreatment == 'Tooth Taken Out') {
+                                procedureDate = await showDatePicker(
+                                  context: context,
+                                  initialDate: DateTime.now(),
+                                  firstDate: DateTime(2000),
+                                  lastDate: DateTime.now(),
+                                );
+                                if (procedureDate == null) return;
+                                procedureTime = await showTimePicker(
+                                  context: context,
+                                  initialTime: TimeOfDay.now(),
+                                );
+                                if (procedureTime == null) return;
+                                final procedureDateTime = DateTime(
+                                  procedureDate.year,
+                                  procedureDate.month,
+                                  procedureDate.day,
+                                  procedureTime.hour,
+                                  procedureTime.minute,
+                                );
+
+                                if (procedureDateTime.isAfter(DateTime.now())) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                        content: Text('Please select a date/time that is not in the future.')),
                                   );
-                  Navigator.of(context).pushAndRemoveUntil(
-                                    MaterialPageRoute(
-                    builder: (_) =>
-                    BracesInstructionsScreen(date: DateTime.now()),
-                                    ),
-                                        (route) => false,
-                                  );
+                                  return;
                                 }
-                              });
-                            }
-                          });
-                        }
-                      },
+                                appState.setTreatment(
+                                  selectedTreatment,
+                                  subtype: null,
+                                );
+                                appState.setProcedureDateTime(
+                                  procedureDateTime,
+                                  procedureTime,
+                                );
+                                await ApiService.saveTreatmentInfo(
+                                  username: username,
+                                  treatment: selectedTreatment,
+                                  subtype: null,
+                                  procedureDate: procedureDateTime,
+                                  procedureTime: procedureTime,
+                                );
+                                Navigator.of(context).pushAndRemoveUntil(
+                                  MaterialPageRoute(
+                                    builder: (_) => TTOInstructionsScreen(date: DateTime.now()),
+                                  ),
+                                  (route) => false,
+                                );
+                              } else if (selectedTreatment == 'Root Canal/Filling') {
+                                procedureDate = await showDatePicker(
+                                  context: context,
+                                  initialDate: DateTime.now(),
+                                  firstDate: DateTime(2020),
+                                  lastDate: DateTime.now(),
+                                );
+                                if (procedureDate != null) {
+                                  procedureTime = await showTimePicker(
+                                    context: context,
+                                    initialTime: TimeOfDay.now(),
+                                  );
+                                  if (procedureTime != null) {
+                                    final selectedDateTime = DateTime(
+                                      procedureDate.year,
+                                      procedureDate.month,
+                                      procedureDate.day,
+                                      procedureTime.hour,
+                                      procedureTime.minute,
+                                    );
+
+                                    if (selectedDateTime.isAfter(DateTime.now())) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                            content: Text('Please select a date/time that is not in the future.')),
+                                      );
+                                      return;
+                                    }
+                                    appState.setTreatment(
+                                      selectedTreatment,
+                                      procedureDate: selectedDateTime,
+                                    );
+                                    appState.setProcedureDateTime(
+                                      selectedDateTime,
+                                      procedureTime,
+                                    );
+                                    await ApiService.saveTreatmentInfo(
+                                      username: username,
+                                      treatment: selectedTreatment,
+                                      subtype: null,
+                                      procedureDate: selectedDateTime,
+                                      procedureTime: procedureTime,
+                                    );
+                                    Navigator.of(context).pushAndRemoveUntil(
+                                      MaterialPageRoute(
+                                        builder: (_) => RootCanalInstructionsScreen(date: DateTime.now()),
+                                      ),
+                                      (route) => false,
+                                    );
+                                  }
+                                }
+                              } else if (selectedTreatment == 'Implant') {
+                                // Handled above by ImplantTypeSelector
+                              } else if (selectedTreatment == 'Tooth Fracture') {
+                                setState(() {
+                                  showFractureOptions = true;
+                                });
+                              } else if (selectedTreatment == 'Braces') {
+                                await showDatePicker(
+                                  context: context,
+                                  initialDate: DateTime.now(),
+                                  firstDate: DateTime(2000),
+                                  lastDate: DateTime.now(),
+                                ).then((date) async {
+                                  if (date != null) {
+                                    procedureDate = date;
+                                    await showTimePicker(
+                                      context: context,
+                                      initialTime: TimeOfDay.now(),
+                                    ).then((time) async {
+                                      if (time != null) {
+                                        procedureTime = time;
+
+                                        final dt = DateTime(
+                                          procedureDate!.year,
+                                          procedureDate!.month,
+                                          procedureDate!.day,
+                                          procedureTime!.hour,
+                                          procedureTime!.minute,
+                                        );
+                                        if (dt.isAfter(DateTime.now())) {
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            const SnackBar(
+                                                content: Text('Please select a date/time that is not in the future.')),
+                                          );
+                                          return;
+                                        }
+
+                                        appState.setProcedureDateTime(procedureDate!, procedureTime!);
+                                        appState.setTreatment(selectedTreatment);
+                                        await ApiService.saveTreatmentInfo(
+                                          username: username,
+                                          treatment: selectedTreatment,
+                                          subtype: null,
+                                          procedureDate: procedureDate!,
+                                          procedureTime: procedureTime!,
+                                        );
+                                        Navigator.of(context).pushAndRemoveUntil(
+                                          MaterialPageRoute(
+                                            builder: (_) => BracesInstructionsScreen(date: DateTime.now()),
+                                          ),
+                                          (route) => false,
+                                        );
+                                      }
+                                    });
+                                  }
+                                });
+                              }
+                            },
                       style: ElevatedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 22),
                         backgroundColor: Colors.blue,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(24),
                         ),
-                        textStyle: const TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 18),
+                        textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
                       ),
                       child: const Text("Continue"),
                     ),

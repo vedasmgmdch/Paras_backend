@@ -12,6 +12,29 @@ class _TreatmentHistoryScreenState extends State<TreatmentHistoryScreen> {
   // If this screen has instruction checklists, add log saving logic as in other instruction screens.
   late Future<List<dynamic>?> _historyFuture;
 
+  DateTime? _tryParseDate(String raw) {
+    final s = raw.trim();
+    if (s.isEmpty) return null;
+    // 1) ISO-8601 (server-friendly)
+    final iso = DateTime.tryParse(s);
+    if (iso != null) return iso;
+
+    // 2) Common user-facing formats: dd/MM/yyyy or dd-MM-yyyy
+    final normalized = s.replaceAll('-', '/');
+    final parts = normalized.split('/');
+    if (parts.length == 3) {
+      final d = int.tryParse(parts[0]);
+      final m = int.tryParse(parts[1]);
+      final y = int.tryParse(parts[2]);
+      if (d != null && m != null && y != null) {
+        if (y >= 1900 && y <= 3000 && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+          return DateTime(y, m, d);
+        }
+      }
+    }
+    return null;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -25,7 +48,8 @@ class _TreatmentHistoryScreenState extends State<TreatmentHistoryScreen> {
     final time = (t['procedure_time'] ?? '').toString().trim();
     // Handle possible variations: true/false, 'true'/'false', 1/0
     final rawLocked = t['locked'];
-    final isLocked = rawLocked == true || rawLocked == 1 || (rawLocked is String && rawLocked.toString().toLowerCase() == 'true');
+    final isLocked =
+        rawLocked == true || rawLocked == 1 || (rawLocked is String && rawLocked.toString().toLowerCase() == 'true');
 
     // Defensive fallback UI
     final displayTreatment = treatment.isNotEmpty ? treatment : "No Treatment";
@@ -84,7 +108,7 @@ class _TreatmentHistoryScreenState extends State<TreatmentHistoryScreen> {
               final rotated = await ApiService.rotateIfDue();
               if (!mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text(rotated ? 'Rotated: new episode opened' : 'No rotation: not yet due')), 
+                SnackBar(content: Text(rotated ? 'Rotated: new episode opened' : 'No rotation: not yet due')),
               );
               setState(() {
                 _historyFuture = ApiService.getEpisodeHistory();
@@ -134,20 +158,22 @@ class _TreatmentHistoryScreenState extends State<TreatmentHistoryScreen> {
           }
           // Separate current vs completed using backend's locked flag.
           bool isLocked(dynamic t) {
-            final m = t as Map;
-            final lc = m['locked'];
+            if (t is! Map) return false;
+            final lc = t['locked'];
             return lc == true || lc == 1 || (lc is String && lc.toString().toLowerCase() == 'true');
           }
+
           final completedTreatments = treatments.where((t) => isLocked(t)).toList();
           final ongoingTreatments = treatments.where((t) => !isLocked(t)).toList();
 
           // Sort both groups by date descending (most recent first)
           int parseDate(dynamic t) {
-            final m = t as Map;
-            final ds = (m['procedure_date'] ?? '').toString();
-            final dt = DateTime.tryParse(ds);
+            if (t is! Map) return 0;
+            final ds = (t['procedure_date'] ?? '').toString();
+            final dt = _tryParseDate(ds);
             return dt?.millisecondsSinceEpoch ?? 0;
           }
+
           ongoingTreatments.sort((a, b) => parseDate(b).compareTo(parseDate(a)));
           completedTreatments.sort((a, b) => parseDate(b).compareTo(parseDate(a)));
 
@@ -166,7 +192,10 @@ class _TreatmentHistoryScreenState extends State<TreatmentHistoryScreen> {
               ),
               // Show ongoing treatment cards if any
               if (ongoingTreatments.isNotEmpty)
-                ...ongoingTreatments.map((t) => buildTreatmentCard(t as Map<String, dynamic>)),
+                ...ongoingTreatments.map((t) {
+                  final m = (t is Map) ? Map<String, dynamic>.from(t as Map) : <String, dynamic>{};
+                  return buildTreatmentCard(m);
+                }),
               Padding(
                 padding: const EdgeInsets.all(12.0),
                 child: Text(
@@ -180,7 +209,10 @@ class _TreatmentHistoryScreenState extends State<TreatmentHistoryScreen> {
               ),
               // Show completed treatment cards if any
               if (completedTreatments.isNotEmpty)
-                ...completedTreatments.map((t) => buildTreatmentCard(t as Map<String, dynamic>)),
+                ...completedTreatments.map((t) {
+                  final m = (t is Map) ? Map<String, dynamic>.from(t as Map) : <String, dynamic>{};
+                  return buildTreatmentCard(m);
+                }),
             ],
           );
         },

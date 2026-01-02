@@ -56,12 +56,15 @@ class ReminderApi {
   static const _scheduleDebounceMs = 1500;
   static const clientScheduleVersion = 'hybrid_v3';
   static const _cacheKey = 'server_reminders_cache_v1';
-  static Uri _u(String path,[Map<String,String>? qp]) {
-    final base = ApiService.baseUrl.endsWith('/') ? ApiService.baseUrl.substring(0, ApiService.baseUrl.length-1) : ApiService.baseUrl;
+  static const _scheduledIdsKey = 'server_reminders_local_scheduled_ids_v1';
+  static Uri _u(String path, [Map<String, String>? qp]) {
+    final base = ApiService.baseUrl.endsWith('/')
+        ? ApiService.baseUrl.substring(0, ApiService.baseUrl.length - 1)
+        : ApiService.baseUrl;
     return Uri.parse('$base$path').replace(queryParameters: qp);
   }
 
-  static Future<Map<String,String>> _authHeaders() async => await ApiService.getAuthHeaders();
+  static Future<Map<String, String>> _authHeaders() async => await ApiService.getAuthHeaders();
 
   static Future<void> _saveCacheRaw(String rawJsonList) async {
     try {
@@ -89,10 +92,12 @@ class ReminderApi {
       if (res.statusCode == 200) {
         await _saveCacheRaw(res.body);
         final data = jsonDecode(res.body) as List<dynamic>;
-        return data.map((e)=>ServerReminder.fromJson(e as Map<String,dynamic>)).toList();
+        return data.map((e) => ServerReminder.fromJson(e as Map<String, dynamic>)).toList();
       }
       debugPrint('ReminderApi.list failed ${res.statusCode} ${res.body}');
-    } catch (e) { debugPrint('ReminderApi.list error $e'); }
+    } catch (e) {
+      debugPrint('ReminderApi.list error $e');
+    }
     return [];
   }
 
@@ -107,7 +112,14 @@ class ReminderApi {
     return cached;
   }
 
-  static Future<ServerReminder?> create({required String title, required String body, required int hour, required int minute, String timezone='Asia/Kolkata', bool active=true, int graceMinutes=20}) async {
+  static Future<ServerReminder?> create(
+      {required String title,
+      required String body,
+      required int hour,
+      required int minute,
+      String timezone = 'Asia/Kolkata',
+      bool active = true,
+      int graceMinutes = 20}) async {
     final payload = {
       'title': title,
       'body': body,
@@ -120,28 +132,40 @@ class ReminderApi {
     try {
       final res = await http.post(_u('/reminders'), headers: await _authHeaders(), body: jsonEncode(payload));
       if (res.statusCode == 200) {
-        return ServerReminder.fromJson(jsonDecode(res.body) as Map<String,dynamic>);
+        return ServerReminder.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
       }
       debugPrint('ReminderApi.create failed ${res.statusCode} ${res.body}');
-    } catch (e) { debugPrint('ReminderApi.create error $e'); }
+    } catch (e) {
+      debugPrint('ReminderApi.create error $e');
+    }
     return null;
   }
 
-  static Future<ServerReminder?> update(int id, {String? title, String? body, int? hour, int? minute, String? timezone, bool? active, int? graceMinutes, bool? ackToday}) async {
-    final patch = <String,dynamic>{};
-    if (title != null) patch['title']=title;
-    if (body != null) patch['body']=body;
-    if (hour != null) patch['hour']=hour;
-    if (minute != null) patch['minute']=minute;
-    if (timezone != null) patch['timezone']=timezone;
-    if (active != null) patch['active']=active;
-    if (graceMinutes != null) patch['grace_minutes']=graceMinutes;
-    if (ackToday == true) patch['ack_today']=true;
+  static Future<ServerReminder?> update(int id,
+      {String? title,
+      String? body,
+      int? hour,
+      int? minute,
+      String? timezone,
+      bool? active,
+      int? graceMinutes,
+      bool? ackToday}) async {
+    final patch = <String, dynamic>{};
+    if (title != null) patch['title'] = title;
+    if (body != null) patch['body'] = body;
+    if (hour != null) patch['hour'] = hour;
+    if (minute != null) patch['minute'] = minute;
+    if (timezone != null) patch['timezone'] = timezone;
+    if (active != null) patch['active'] = active;
+    if (graceMinutes != null) patch['grace_minutes'] = graceMinutes;
+    if (ackToday == true) patch['ack_today'] = true;
     try {
       final res = await http.patch(_u('/reminders/$id'), headers: await _authHeaders(), body: jsonEncode(patch));
-      if (res.statusCode == 200) return ServerReminder.fromJson(jsonDecode(res.body) as Map<String,dynamic>);
+      if (res.statusCode == 200) return ServerReminder.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
       debugPrint('ReminderApi.update failed ${res.statusCode} ${res.body}');
-    } catch (e) { debugPrint('ReminderApi.update error $e'); }
+    } catch (e) {
+      debugPrint('ReminderApi.update error $e');
+    }
     return null;
   }
 
@@ -149,26 +173,65 @@ class ReminderApi {
     try {
       final res = await http.delete(_u('/reminders/$id'), headers: await _authHeaders());
       return res.statusCode == 200;
-    } catch (e) { debugPrint('ReminderApi.delete error $e'); }
+    } catch (e) {
+      debugPrint('ReminderApi.delete error $e');
+    }
     return false;
+  }
+
+  /// Best-effort reconciliation to prevent "ghost" local notifications.
+  ///
+  /// Even if the app is currently running in server-only mode, users may still have
+  /// pending local schedules from older builds or previous modes. This cancels local
+  /// schedules for:
+  /// - IDs that existed previously but are now missing from the server list (deleted)
+  /// - IDs that are present but inactive (disabled)
+  static Future<void> reconcileLocalCancellations(List<ServerReminder> serverList) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final prev =
+          (prefs.getStringList(_scheduledIdsKey) ?? <String>[]).map((s) => int.tryParse(s)).whereType<int>().toSet();
+
+      final currentIds = serverList.map((r) => r.id).toSet();
+      final removed = prev.difference(currentIds);
+
+      for (final id in removed) {
+        debugPrint('[ReminderApi] reconcile: cancel removed local schedules id=$id');
+        await NotificationService.cancelHybridIds(id);
+      }
+      for (final r in serverList.where((e) => !e.active)) {
+        debugPrint('[ReminderApi] reconcile: cancel inactive local schedules id=${r.id}');
+        await NotificationService.cancelHybridIds(r.id);
+      }
+
+      await prefs.setStringList(_scheduledIdsKey, currentIds.map((e) => e.toString()).toList());
+    } catch (e) {
+      debugPrint('[ReminderApi] reconcileLocalCancellations error: $e');
+    }
   }
 
   // Schedule local notifications for active reminders (idempotent-ish) – simplistic: always reschedule daily id.
   static Future<void> scheduleLocally(List<ServerReminder> list) async {
     final now = DateTime.now();
-    if (_lastScheduleBatchTime != null && now.difference(_lastScheduleBatchTime!).inMilliseconds < _scheduleDebounceMs) {
+    if (_lastScheduleBatchTime != null &&
+        now.difference(_lastScheduleBatchTime!).inMilliseconds < _scheduleDebounceMs) {
       debugPrint('[ReminderApi] scheduleLocally debounced (batch too soon)');
       return;
     }
     _lastScheduleBatchTime = now;
     debugPrint('[ReminderApi] scheduleLocally batch size=${list.length} version=$clientScheduleVersion at=$now');
+
+    // Always cancel removed/inactive first to avoid leftovers.
+    await reconcileLocalCancellations(list);
+
     for (final r in list) {
       if (!r.active) {
         debugPrint('[ReminderApi.scheduleLocally] cancel inactive id=${r.id}');
-        await NotificationService.cancel(r.id);
+        await NotificationService.cancelHybridIds(r.id);
         continue;
       }
-      debugPrint('[ReminderApi] schedule hybrid id=${r.id} ${r.hour.toString().padLeft(2,'0')}:${r.minute.toString().padLeft(2,'0')} "${r.title}"');
+      debugPrint(
+          '[ReminderApi] schedule hybrid id=${r.id} ${r.hour.toString().padLeft(2, '0')}:${r.minute.toString().padLeft(2, '0')} "${r.title}"');
       await NotificationService.scheduleHybridDaily(
         id: r.id,
         hour: r.hour,

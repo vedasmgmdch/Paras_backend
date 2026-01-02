@@ -59,14 +59,24 @@ class _RemindersScreenState extends State<RemindersScreen> {
       _reminders = list;
       _loading = false;
     });
+
+    // Defensive: cancel local schedules for reminders that were deleted/disabled on the server.
+    // This prevents "ghost" notifications from older builds/modes.
+    await ReminderApi.reconcileLocalCancellations(list);
   }
 
   Future<void> _toggle(ServerReminder r, bool enabled) async {
     await ReminderApi.update(r.id, active: enabled);
+    if (!enabled) {
+      // Defensive: ensure any local schedules are removed immediately.
+      await NotificationService.cancelHybridIds(r.id);
+    }
     await _load();
   }
 
   Future<void> _delete(ServerReminder r) async {
+    // Defensive: ensure any local schedules are removed immediately.
+    await NotificationService.cancelHybridIds(r.id);
     await ReminderApi.delete(r.id);
     await _load();
   }
@@ -76,9 +86,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
     final formKey = GlobalKey<FormState>();
     final titleCtrl = TextEditingController(text: existing?.title ?? '');
     final bodyCtrl = TextEditingController(text: existing?.body ?? '');
-    TimeOfDay time = existing != null
-        ? TimeOfDay(hour: existing.hour, minute: existing.minute)
-        : TimeOfDay.now();
+    TimeOfDay time = existing != null ? TimeOfDay(hour: existing.hour, minute: existing.minute) : TimeOfDay.now();
     bool saving = false;
 
     await showModalBottomSheet(
@@ -110,9 +118,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
                       labelText: 'Title',
                       border: OutlineInputBorder(),
                     ),
-                    validator: (v) => (v == null || v.trim().isEmpty)
-                        ? 'Please enter a title'
-                        : null,
+                    validator: (v) => (v == null || v.trim().isEmpty) ? 'Please enter a title' : null,
                   ),
                   const SizedBox(height: 12),
                   TextFormField(
@@ -194,11 +200,15 @@ class _RemindersScreenState extends State<RemindersScreen> {
                                   try {
                                     if (!hasPerm) {
                                       ScaffoldMessenger.of(rootContext).showSnackBar(
-                                        const SnackBar(content: Text('Notification permission not granted — reminders may not fire.')),
+                                        const SnackBar(
+                                            content:
+                                                Text('Notification permission not granted — reminders may not fire.')),
                                       );
                                     } else {
                                       ScaffoldMessenger.of(rootContext).showSnackBar(
-                                        SnackBar(content: Text(existing == null ? 'Reminder added (server)' : 'Reminder updated')),
+                                        SnackBar(
+                                            content: Text(
+                                                existing == null ? 'Reminder added (server)' : 'Reminder updated')),
                                       );
                                     }
                                   } catch (_) {}
@@ -370,8 +380,8 @@ class _RemindersScreenState extends State<RemindersScreen> {
                                       friendly = '${delta.inHours}h';
                                     }
                                     final dayWord = _isToday(next) ? 'Today' : 'Tomorrow';
-                                    final hh = next.hour.toString().padLeft(2,'0');
-                                    final mm = next.minute.toString().padLeft(2,'0');
+                                    final hh = next.hour.toString().padLeft(2, '0');
+                                    final mm = next.minute.toString().padLeft(2, '0');
                                     return Text('Next: $dayWord $hh:$mm (in $friendly)');
                                   }),
                                 ],
@@ -410,15 +420,19 @@ class _RemindersScreenState extends State<RemindersScreen> {
                                           title: const Text('Delete reminder?'),
                                           content: const Text('This will remove the reminder and its schedule.'),
                                           actions: [
-                                            TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text('Cancel')),
-                                            ElevatedButton(onPressed: () => Navigator.pop(dCtx, true), child: const Text('Delete')),
+                                            TextButton(
+                                                onPressed: () => Navigator.pop(dCtx, false),
+                                                child: const Text('Cancel')),
+                                            ElevatedButton(
+                                                onPressed: () => Navigator.pop(dCtx, true),
+                                                child: const Text('Delete')),
                                           ],
                                         ),
                                       );
                                       if (confirm == true) {
                                         await _delete(r);
-                                        }
-                                      },
+                                      }
+                                    },
                                   ),
                                 ],
                               ),

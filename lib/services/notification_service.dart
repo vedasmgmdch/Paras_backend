@@ -62,7 +62,9 @@ class NotificationService {
 
   static void Function(int id)? _foregroundCallback;
   static void handleBackgroundTap(int id) {
-    try { _foregroundCallback?.call(id); } catch (_) {}
+    try {
+      _foregroundCallback?.call(id);
+    } catch (_) {}
   }
 
   static Future<void> init({bool requestPermission = true, void Function(int id)? onNotificationReceived}) async {
@@ -97,10 +99,10 @@ class NotificationService {
       onDidReceiveNotificationResponse: (resp) {
         try {
           final id = resp.id;
-            if (id != null) {
-              _foregroundCallback?.call(id);
-              _notifyFireObservers(id);
-            }
+          if (id != null) {
+            _foregroundCallback?.call(id);
+            _notifyFireObservers(id);
+          }
         } catch (_) {}
       },
       onDidReceiveBackgroundNotificationResponse: notificationTapBackground,
@@ -131,11 +133,18 @@ class NotificationService {
     try {
       final prefs = await SharedPreferences.getInstance();
       final storedPref = prefs.getBool(_preferAlarmClockKey);
-      if (storedPref != null) _preferAlarmClock = storedPref; else await prefs.setBool(_preferAlarmClockKey, _preferAlarmClock);
+      if (storedPref != null)
+        _preferAlarmClock = storedPref;
+      else
+        await prefs.setBool(_preferAlarmClockKey, _preferAlarmClock);
 
       final migrated = prefs.getBool(_migrationDoneKey) ?? false;
       if (!migrated) {
-        try { await _plugin.cancelAll(); } catch (e) { debugPrint('[NotificationService] migration cancelAll error: $e'); }
+        try {
+          await _plugin.cancelAll();
+        } catch (e) {
+          debugPrint('[NotificationService] migration cancelAll error: $e');
+        }
         await prefs.setBool(_migrationDoneKey, true);
       }
 
@@ -148,7 +157,9 @@ class NotificationService {
               debugPrint('[NotificationService] requesting exact alarms (first run)');
               await requestExactAlarmsPermission();
             }
-          } catch (e) { debugPrint('[NotificationService] exact alarm request error: $e'); }
+          } catch (e) {
+            debugPrint('[NotificationService] exact alarm request error: $e');
+          }
           await prefs.setBool(_firstRunExactAlarmKey, true);
         }
 
@@ -157,11 +168,13 @@ class NotificationService {
           final androidImpl = _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
           final notifEnabled = androidImpl == null ? true : (await androidImpl.areNotificationsEnabled() ?? true);
           final canExactNow = await canScheduleExactNotifications();
-          debugPrint('[NotificationService][diagnostics] strictExactMode=$strictExactMode notificationsEnabled=$notifEnabled canExact=$canExactNow');
+          debugPrint(
+              '[NotificationService][diagnostics] strictExactMode=$strictExactMode notificationsEnabled=$notifEnabled canExact=$canExactNow');
           if (strictExactMode && !canExactNow) {
             final alreadyPrompted = prefs.getBool(_diagPromptKey) ?? false;
             if (!alreadyPrompted) {
-              debugPrint('[NotificationService][diagnostics] Strict mode active but exact alarms not granted. Prompting once...');
+              debugPrint(
+                  '[NotificationService][diagnostics] Strict mode active but exact alarms not granted. Prompting once...');
               try {
                 // Try system prompt (Android 13+); if still not granted, open settings screen.
                 await requestExactAlarmsPermission();
@@ -185,9 +198,17 @@ class NotificationService {
     debugPrint('[NotificationService] init complete (plugin-only)');
   }
 
-  static String currentTimeZoneName() { try { return tz.local.name; } catch (_) { return 'unknown'; } }
+  static String currentTimeZoneName() {
+    try {
+      return tz.local.name;
+    } catch (_) {
+      return 'unknown';
+    }
+  }
 
-  static void setAlarmManagerEnabled(bool enabled) { useAlarmManager = false; /* no-op */ }
+  static void setAlarmManagerEnabled(bool enabled) {
+    useAlarmManager = false; /* no-op */
+  }
 
   // NOTE: Payload storage helpers removed (AlarmManager path deprecated)
 
@@ -209,7 +230,10 @@ class NotificationService {
   static bool isPreferringAlarmClock() => _preferAlarmClock;
   static Future<void> setPreferAlarmClock(bool value) async {
     _preferAlarmClock = value;
-    try { final prefs = await SharedPreferences.getInstance(); await prefs.setBool(_preferAlarmClockKey, value); } catch (_) {}
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_preferAlarmClockKey, value);
+    } catch (_) {}
   }
 
   static void setOnNotificationReceived(void Function(int id)? handler) {
@@ -240,13 +264,21 @@ class NotificationService {
   }
 
   // Quick one-off test: schedule after X seconds
-  static Future<void> scheduleInSeconds({required int id, required int seconds, required String title, required String body}) async {
-    if (serverOnlyMode) { debugPrint('[NotificationService] serverOnlyMode skip scheduleInSeconds id=$id'); return; }
+  static Future<void> scheduleInSeconds(
+      {required int id, required int seconds, required String title, required String body}) async {
+    if (serverOnlyMode) {
+      debugPrint('[NotificationService] serverOnlyMode skip scheduleInSeconds id=$id');
+      return;
+    }
     await init();
-    if (!Platform.isAndroid) { await showNow(id: id, title: title, body: body); return; }
+    if (!Platform.isAndroid) {
+      await showNow(id: id, title: title, body: body);
+      return;
+    }
     final when = tz.TZDateTime.now(tz.local).add(Duration(seconds: seconds));
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      _channelId, _channelName,
+      _channelId,
+      _channelName,
       channelDescription: _channelDesc,
       importance: Importance.max,
       priority: Priority.max,
@@ -259,7 +291,11 @@ class NotificationService {
     try {
       final mode = strictExactMode ? AndroidScheduleMode.alarmClock : AndroidScheduleMode.exactAllowWhileIdle;
       await _plugin.zonedSchedule(
-        id, title, body, when, details,
+        id,
+        title,
+        body,
+        when,
+        details,
         uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
         androidScheduleMode: mode,
       );
@@ -268,22 +304,36 @@ class NotificationService {
       debugPrint('[NotificationService] scheduleInSeconds exact failed: $e');
       try {
         await _plugin.zonedSchedule(
-          id, title, body, when, details,
+          id,
+          title,
+          body,
+          when,
+          details,
           uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
           androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
         );
         debugPrint('[NotificationService] scheduled short test (inexact fallback)');
-      } catch (e2) { debugPrint('[NotificationService] scheduleInSeconds failed both modes: $e2'); }
+      } catch (e2) {
+        debugPrint('[NotificationService] scheduleInSeconds failed both modes: $e2');
+      }
     }
   }
 
-  static Future<void> scheduleNotification({required int id, required DateTime scheduledAt, required String title, required String body}) async {
-    if (serverOnlyMode) { debugPrint('[NotificationService] serverOnlyMode skip one-off id=$id'); return; }
+  static Future<void> scheduleNotification(
+      {required int id, required DateTime scheduledAt, required String title, required String body}) async {
+    if (serverOnlyMode) {
+      debugPrint('[NotificationService] serverOnlyMode skip one-off id=$id');
+      return;
+    }
     await init();
-    if (!Platform.isAndroid) { await showNow(id: id, title: title, body: body); return; }
+    if (!Platform.isAndroid) {
+      await showNow(id: id, title: title, body: body);
+      return;
+    }
     final when = tz.TZDateTime.from(scheduledAt, tz.local);
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      _channelId, _channelName,
+      _channelId,
+      _channelName,
       channelDescription: _channelDesc,
       importance: Importance.max,
       priority: Priority.max,
@@ -296,7 +346,11 @@ class NotificationService {
     try {
       final mode = strictExactMode ? AndroidScheduleMode.alarmClock : AndroidScheduleMode.exactAllowWhileIdle;
       await _plugin.zonedSchedule(
-        id, title, body, when, details,
+        id,
+        title,
+        body,
+        when,
+        details,
         uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
         androidScheduleMode: mode,
       );
@@ -305,19 +359,33 @@ class NotificationService {
       debugPrint('[NotificationService] one-off exact failed: $e');
       try {
         await _plugin.zonedSchedule(
-          id, title, body, when, details,
+          id,
+          title,
+          body,
+          when,
+          details,
           uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
           androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
         );
         debugPrint('[NotificationService] scheduled one-off (inexact fallback)');
-      } catch (e2) { debugPrint('[NotificationService] one-off scheduling failed both modes: $e2'); }
+      } catch (e2) {
+        debugPrint('[NotificationService] one-off scheduling failed both modes: $e2');
+      }
     }
   }
 
   // Schedule a daily notification at a specific local time.
   // Simplified variant (no catch-up / grace) for basic reliable daily reminders.
-  static Future<void> scheduleDailyBasic({required int id, required int hour, required int minute, required String title, required String body, bool forceStartTomorrow = false}) async {
-    if (serverOnlyMode) return; await init(); if (!Platform.isAndroid) return;
+  static Future<void> scheduleDailyBasic(
+      {required int id,
+      required int hour,
+      required int minute,
+      required String title,
+      required String body,
+      bool forceStartTomorrow = false}) async {
+    if (serverOnlyMode) return;
+    await init();
+    if (!Platform.isAndroid) return;
     final now = tz.TZDateTime.now(tz.local);
     tz.TZDateTime first = tz.TZDateTime(tz.local, now.year, now.month, now.day, hour, minute);
     final deltaSecInitial = first.difference(now).inSeconds;
@@ -327,7 +395,8 @@ class NotificationService {
       debugPrint('[DailyBasic][debug] rolled to tomorrow first=$first');
     }
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      _channelId, _channelName,
+      _channelId,
+      _channelName,
       channelDescription: _channelDesc,
       importance: Importance.max,
       priority: Priority.max,
@@ -340,18 +409,30 @@ class NotificationService {
     try {
       final mode = strictExactMode ? AndroidScheduleMode.alarmClock : AndroidScheduleMode.exactAllowWhileIdle;
       await _plugin.zonedSchedule(
-        id, title, body, first, details,
+        id,
+        title,
+        body,
+        first,
+        details,
         uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
         matchDateTimeComponents: DateTimeComponents.time,
         androidScheduleMode: mode,
       );
       final last = _lastLoggedFirstFire[id];
-      if (last == null || last != first) { debugPrint('[NotificationService] scheduled (daily-basic) id=$id firstFire=$first deltaFromNowSec=${first.difference(now).inSeconds} mode=$mode'); _lastLoggedFirstFire[id] = first; }
+      if (last == null || last != first) {
+        debugPrint(
+            '[NotificationService] scheduled (daily-basic) id=$id firstFire=$first deltaFromNowSec=${first.difference(now).inSeconds} mode=$mode');
+        _lastLoggedFirstFire[id] = first;
+      }
     } catch (e) {
       debugPrint('[NotificationService] scheduleDailyBasic exact failed id=$id error=$e');
       try {
         await _plugin.zonedSchedule(
-          id, title, body, first, details,
+          id,
+          title,
+          body,
+          first,
+          details,
           uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
           matchDateTimeComponents: DateTimeComponents.time,
           androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
@@ -381,11 +462,20 @@ class NotificationService {
     required String title,
     required String body,
   }) async {
-    if (serverOnlyMode) { debugPrint('[NotificationService][hybrid] serverOnly skip id=$id'); return; }
+    if (serverOnlyMode) {
+      debugPrint('[NotificationService][hybrid] serverOnly skip id=$id');
+      return;
+    }
     await init();
     final granted = await areNotificationsEnabled();
-    if (!granted) { debugPrint('[NotificationService][hybrid] notifications disabled, attempting permission request'); await ensurePermissions(); }
-    if (!Platform.isAndroid) { await showNow(id: id, title: title, body: body); return; }
+    if (!granted) {
+      debugPrint('[NotificationService][hybrid] notifications disabled, attempting permission request');
+      await ensurePermissions();
+    }
+    if (!Platform.isAndroid) {
+      await showNow(id: id, title: title, body: body);
+      return;
+    }
 
     final now = DateTime.now();
     DateTime todayTarget = DateTime(now.year, now.month, now.day, hour, minute);
@@ -396,24 +486,26 @@ class NotificationService {
       await _plugin.cancel(id + 600000000);
       await _plugin.cancel(id + 610000000);
       await _plugin.cancel(id + 620000000);
-  await _plugin.cancel(id + 630000000);
+      await _plugin.cancel(id + 630000000);
     } catch (_) {}
 
-  // Decide strategy
-  // If we will schedule a one-off today (strict mode with future target), start repeating from tomorrow to avoid double fire.
-  // Otherwise, schedule repeating normally (it will roll itself if past).
+    // Decide strategy
+    // If we will schedule a one-off today (strict mode with future target), start repeating from tomorrow to avoid double fire.
+    // Otherwise, schedule repeating normally (it will roll itself if past).
 
     // Decide strategy
     if (strictExactMode) {
       bool willOneOffToday = deltaSec > 0;
-      await scheduleDailyBasic(id: id, hour: hour, minute: minute, title: title, body: body, forceStartTomorrow: willOneOffToday);
+      await scheduleDailyBasic(
+          id: id, hour: hour, minute: minute, title: title, body: body, forceStartTomorrow: willOneOffToday);
       // Strict: only schedule the precise one-off today if still in the future; otherwise, rely on daily repeating.
       if (deltaSec > 0) {
         final oneOffId = id + 600000000;
         debugPrint('[NotificationService][hybrid][strict] one-off exact id=$oneOffId fireInSec=$deltaSec');
         await scheduleNotification(id: oneOffId, scheduledAt: todayTarget, title: title, body: body);
       } else {
-        debugPrint('[NotificationService][hybrid][strict] target passed (deltaSec=$deltaSec); relying on next daily occurrence');
+        debugPrint(
+            '[NotificationService][hybrid][strict] target passed (deltaSec=$deltaSec); relying on next daily occurrence');
       }
     } else {
       await scheduleDailyBasic(id: id, hour: hour, minute: minute, title: title, body: body);
@@ -424,7 +516,8 @@ class NotificationService {
         await scheduleNotification(id: oneOffId, scheduledAt: todayTarget, title: title, body: body);
       } else if (deltaSec >= -300) {
         final boundaryId = id + 610000000;
-        debugPrint('[NotificationService][hybrid] boundary window deltaSec=$deltaSec scheduling confirmation id=$boundaryId in 10s');
+        debugPrint(
+            '[NotificationService][hybrid] boundary window deltaSec=$deltaSec scheduling confirmation id=$boundaryId in 10s');
         await scheduleInSeconds(id: boundaryId, seconds: 10, title: title, body: body);
         final boundaryFallbackId = id + 620000000;
         debugPrint('[NotificationService][hybrid] boundary secondary fallback id=$boundaryFallbackId in 40s');
@@ -433,7 +526,8 @@ class NotificationService {
         debugPrint('[NotificationService][hybrid] boundary extended fallback id=$boundaryExtendedId in 120s');
         await scheduleInSeconds(id: boundaryExtendedId, seconds: 120, title: title, body: body);
       } else {
-        debugPrint('[NotificationService][hybrid] past window deltaSec=$deltaSec -> no immediate one-off (next daily covers)');
+        debugPrint(
+            '[NotificationService][hybrid] past window deltaSec=$deltaSec -> no immediate one-off (next daily covers)');
       }
     }
 
@@ -457,12 +551,19 @@ class NotificationService {
     return first;
   }
 
-  static Future<void> scheduleDailyNotification({required int id, required int hour, required int minute, required String title, required String body}) async {
+  static Future<void> scheduleDailyNotification(
+      {required int id, required int hour, required int minute, required String title, required String body}) async {
     final nowMono = DateTime.now();
     final last = _lastDailyScheduleAttempt[id];
-    if (last != null && nowMono.difference(last).inSeconds < 3) { debugPrint('[NotificationService] daily skip duplicate id=$id'); return; }
+    if (last != null && nowMono.difference(last).inSeconds < 3) {
+      debugPrint('[NotificationService] daily skip duplicate id=$id');
+      return;
+    }
     _lastDailyScheduleAttempt[id] = nowMono;
-    if (serverOnlyMode) { debugPrint('[NotificationService] skip daily (serverOnly) id=$id'); return; }
+    if (serverOnlyMode) {
+      debugPrint('[NotificationService] skip daily (serverOnly) id=$id');
+      return;
+    }
     await init();
     if (!Platform.isAndroid) return;
 
@@ -473,16 +574,25 @@ class NotificationService {
     bool rollToTomorrow = false;
     bool scheduleCatchUpOneOff = false;
     if (initialDelta < 0) {
-      if (initialDelta.abs() <= _catchUpGraceMinutes * 60) { scheduleCatchUpOneOff = true; rollToTomorrow = true; }
-      else { rollToTomorrow = true; }
-    } else if (initialDelta <= 30) { scheduleCatchUpOneOff = true; }
+      if (initialDelta.abs() <= _catchUpGraceMinutes * 60) {
+        scheduleCatchUpOneOff = true;
+        rollToTomorrow = true;
+      } else {
+        rollToTomorrow = true;
+      }
+    } else if (initialDelta <= 30) {
+      scheduleCatchUpOneOff = true;
+    }
     DateTime scheduledLocal = rollToTomorrow ? todayTarget.add(const Duration(days: 1)) : todayTarget;
-    if (scheduledLocal.isBefore(nowLocal.subtract(const Duration(seconds: 5)))) scheduledLocal = scheduledLocal.add(const Duration(days: 1));
+    if (scheduledLocal.isBefore(nowLocal.subtract(const Duration(seconds: 5))))
+      scheduledLocal = scheduledLocal.add(const Duration(days: 1));
     final scheduledTz = tz.TZDateTime.from(scheduledLocal, tz.local);
-    debugPrint('[DailySched][debug] finalScheduled=$scheduledTz finalDeltaSec=${scheduledTz.difference(tz.TZDateTime.now(tz.local)).inSeconds} catchUp=$scheduleCatchUpOneOff rollTomorrow=$rollToTomorrow');
+    debugPrint(
+        '[DailySched][debug] finalScheduled=$scheduledTz finalDeltaSec=${scheduledTz.difference(tz.TZDateTime.now(tz.local)).inSeconds} catchUp=$scheduleCatchUpOneOff rollTomorrow=$rollToTomorrow');
 
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      _channelId, _channelName,
+      _channelId,
+      _channelName,
       channelDescription: _channelDesc,
       importance: Importance.max,
       priority: Priority.max,
@@ -496,7 +606,11 @@ class NotificationService {
     try {
       final mode = strictExactMode ? AndroidScheduleMode.alarmClock : AndroidScheduleMode.exactAllowWhileIdle;
       await _plugin.zonedSchedule(
-        id, title, body, scheduledTz, details,
+        id,
+        title,
+        body,
+        scheduledTz,
+        details,
         uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
         matchDateTimeComponents: DateTimeComponents.time,
         androidScheduleMode: mode,
@@ -512,13 +626,19 @@ class NotificationService {
       debugPrint('[NotificationService] daily exact failed: $e');
       try {
         await _plugin.zonedSchedule(
-          id, title, body, scheduledTz, details,
+          id,
+          title,
+          body,
+          scheduledTz,
+          details,
           uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
           matchDateTimeComponents: DateTimeComponents.time,
           androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
         );
         debugPrint('[NotificationService] scheduled daily (inexactAllowWhileIdle fallback) id=$id');
-      } catch (e2) { debugPrint('[NotificationService] scheduleDailyNotification failed both modes: $e2'); }
+      } catch (e2) {
+        debugPrint('[NotificationService] scheduleDailyNotification failed both modes: $e2');
+      }
     }
   }
 
@@ -528,11 +648,19 @@ class NotificationService {
     try {
       final before = await canScheduleExactNotifications();
       debugPrint('[NotificationService] ensureExactAlarms before=$before');
-      if (!before) { await requestExactAlarmsPermission(); }
+      if (!before) {
+        await requestExactAlarmsPermission();
+      }
       final after = await canScheduleExactNotifications();
       debugPrint('[NotificationService] ensureExactAlarms after=$after');
-      if (after) { await rescheduler(); } else { debugPrint('[NotificationService] exact alarms still not permitted; using inexact'); }
-    } catch (e) { debugPrint('[NotificationService] ensureExactAlarms error: $e'); }
+      if (after) {
+        await rescheduler();
+      } else {
+        debugPrint('[NotificationService] exact alarms still not permitted; using inexact');
+      }
+    } catch (e) {
+      debugPrint('[NotificationService] ensureExactAlarms error: $e');
+    }
   }
 
   // Public helper: returns current notification capabilities useful for UI or logs
@@ -556,11 +684,40 @@ class NotificationService {
   }
 
   static Future<void> cancel(int id) => _plugin.cancel(id);
+
+  /// Cancels all notification IDs used by the hybrid scheduler for a given reminder.
+  /// Safe to call even if those IDs were never scheduled.
+  static Future<void> cancelHybridIds(int baseId) async {
+    try {
+      await init(requestPermission: false);
+    } catch (_) {
+      // Even if init fails, attempt cancels below (best effort)
+    }
+    final ids = <int>[
+      baseId,
+      baseId + 600000000,
+      baseId + 610000000,
+      baseId + 620000000,
+      baseId + 630000000,
+    ];
+    for (final id in ids) {
+      try {
+        await _plugin.cancel(id);
+      } catch (_) {}
+    }
+  }
+
   static Future<void> cancelAll() => _plugin.cancelAll();
   static Future<void> cancelAllPending() => cancelAll();
 
   static Future<List<PendingNotificationRequest>> pending() async {
-    try { await init(); if (!Platform.isAndroid) return <PendingNotificationRequest>[]; return _plugin.pendingNotificationRequests(); } catch (_) { return <PendingNotificationRequest>[]; }
+    try {
+      await init();
+      if (!Platform.isAndroid) return <PendingNotificationRequest>[];
+      return _plugin.pendingNotificationRequests();
+    } catch (_) {
+      return <PendingNotificationRequest>[];
+    }
   }
 
   static Future<bool> requestExactAlarmsPermission() async {
@@ -571,7 +728,9 @@ class NotificationService {
       final res = await androidImpl.requestExactAlarmsPermission();
       debugPrint('[NotificationService] requestExactAlarmsPermission result=$res');
       if (res is bool) return res;
-    } catch (e) { debugPrint('[NotificationService] requestExactAlarmsPermission error: $e'); }
+    } catch (e) {
+      debugPrint('[NotificationService] requestExactAlarmsPermission error: $e');
+    }
     return false;
   }
 
@@ -631,7 +790,8 @@ class NotificationService {
   static Future<void> showNow({required int id, required String title, required String body}) async {
     await init();
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      _channelId, _channelName,
+      _channelId,
+      _channelName,
       channelDescription: _channelDesc,
       importance: Importance.max,
       priority: Priority.max,
@@ -645,11 +805,12 @@ class NotificationService {
     _notifyFireObservers(id);
   }
 
-
   static Future<void> debugDumpPending() async {
     final list = await pending();
     debugPrint('[NotificationService][debugDumpPending] count=${list.length}');
-    for (final p in list) { debugPrint('  -> id=${p.id} title=${p.title}'); }
+    for (final p in list) {
+      debugPrint('  -> id=${p.id} title=${p.title}');
+    }
   }
 
   static Future<void> watchdogRescheduleDailyIfMissing() async {
@@ -662,7 +823,10 @@ class NotificationService {
     final now = tz.TZDateTime.now(tz.local);
     var scheduled = tz.TZDateTime(tz.local, now.year, now.month, now.day, hour, minute);
     var dayWord = 'Today';
-    if (!scheduled.isAfter(now)) { scheduled = scheduled.add(const Duration(days: 1)); dayWord = 'Tomorrow'; }
+    if (!scheduled.isAfter(now)) {
+      scheduled = scheduled.add(const Duration(days: 1));
+      dayWord = 'Tomorrow';
+    }
     final hh = scheduled.hour.toString().padLeft(2, '0');
     final mm = scheduled.minute.toString().padLeft(2, '0');
     return '$dayWord $hh:$mm';
@@ -672,10 +836,12 @@ class NotificationService {
     // Stub: AlarmManager removed; return empty list for legacy UI.
     return <String>[];
   }
+
   static Future<void> clearAmLog() async {
     // Stub no-op.
   }
-  static Future<bool> forceAlarmManagerInSeconds({required int id, required int seconds, required String title, required String body}) async {
+  static Future<bool> forceAlarmManagerInSeconds(
+      {required int id, required int seconds, required String title, required String body}) async {
     // Stub: schedule via plugin instead and report 'false' to indicate AM not used.
     await scheduleInSeconds(id: id, seconds: seconds, title: title, body: body);
     return false; // indicates AlarmManager path not taken
