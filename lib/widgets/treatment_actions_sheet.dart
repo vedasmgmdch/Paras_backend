@@ -32,50 +32,65 @@ Future<void> showTreatmentActionsSheet(BuildContext context) async {
                   title: Text('Choose an action', style: TextStyle(fontWeight: FontWeight.bold)),
                 ),
                 ListTile(
-              leading: const Icon(Icons.check_circle, color: Colors.green),
-              title: const Text('Mark Treatment Completed'),
-              subtitle: const Text('Locks current treatment and starts a new episode'),
-              onTap: () async {
-                Navigator.of(ctx).pop();
-                final confirm = await showDialog<bool>(
-                  context: context,
-                  builder: (dCtx) => AlertDialog(
-                    title: const Text('Confirm completion'),
-                    content: const Text('Are you sure you want to mark the current treatment as completed? This will lock it and start a new episode.'),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.of(dCtx).pop(false), child: const Text('Cancel')),
-                      ElevatedButton(onPressed: () => Navigator.of(dCtx).pop(true), child: const Text('Mark Complete')),
-                    ],
-                  ),
-                );
-                if (confirm != true) return;
-                final success = await ApiService.markEpisodeComplete();
-                if (!context.mounted) return;
-                if (!success) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Failed to mark previous treatment as complete.')),
-                  );
-                  return;
-                }
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Treatment marked complete. A new episode has been started.')),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.medical_services, color: Colors.blue),
-              title: const Text('Select/Change Treatment'),
-              subtitle: const Text('Pick a treatment and date/time without marking complete'),
-              onTap: () async {
-                Navigator.of(ctx).pop();
-                await Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => TreatmentScreenMain(userName: userName),
-                  ),
-                );
-              },
-            ),
-            const SizedBox(height: 8),
+                  leading: const Icon(Icons.check_circle, color: Colors.green),
+                  title: const Text('Mark Treatment Completed'),
+                  subtitle: const Text('Locks current treatment and starts a new episode'),
+                  onTap: () async {
+                    Navigator.of(ctx).pop();
+                    final confirm = await showDialog<bool>(
+                      context: context,
+                      builder: (dCtx) => AlertDialog(
+                        title: const Text('Confirm completion'),
+                        content: const Text(
+                            'Are you sure you want to mark the current treatment as completed? This will lock it and start a new episode.'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.of(dCtx).pop(false), child: const Text('Cancel')),
+                          ElevatedButton(
+                              onPressed: () => Navigator.of(dCtx).pop(true), child: const Text('Mark Complete')),
+                        ],
+                      ),
+                    );
+                    if (confirm != true) return;
+                    final success = await ApiService.markEpisodeComplete();
+                    if (!context.mounted) return;
+                    if (!success) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Failed to mark previous treatment as complete.')),
+                      );
+                      return;
+                    }
+
+                    // Backend has started a fresh open episode; clear local state so UI doesn't
+                    // keep showing the previous treatment.
+                    await appState.startNewEpisodeLocally(username: appState.username);
+
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Treatment marked complete. A new episode has been started.')),
+                    );
+
+                    // Take user to select the next treatment for the new episode.
+                    if (!context.mounted) return;
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => TreatmentScreenMain(userName: userName),
+                      ),
+                    );
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.medical_services, color: Colors.blue),
+                  title: const Text('Select/Change Treatment'),
+                  subtitle: const Text('Pick a treatment and date/time without marking complete'),
+                  onTap: () async {
+                    Navigator.of(ctx).pop();
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => TreatmentScreenMain(userName: userName),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 8),
               ],
             ),
           ),
@@ -101,11 +116,14 @@ Future<void> completeThenSelectNewTreatment(
     );
     return;
   }
+
+  final appState = Provider.of<AppState>(context, listen: false);
+  await appState.startNewEpisodeLocally(username: appState.username);
+  if (!context.mounted) return;
+
   ScaffoldMessenger.of(context).showSnackBar(
     const SnackBar(content: Text('Previous treatment completed. Starting a new one...')),
   );
-
-  final appState = Provider.of<AppState>(context, listen: false);
   final userName = appState.username ?? 'User';
   final route = MaterialPageRoute(
     builder: (_) => TreatmentScreenMain(userName: userName),

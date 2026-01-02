@@ -34,11 +34,7 @@ class AppState extends ChangeNotifier {
   String _canonicalGroup(String? value) => (value ?? '').trim().toLowerCase();
 
   String _canonicalInstructionText(String? value) {
-    return (value ?? '')
-        .trim()
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .replaceAll('–', '-')
-        .replaceAll('—', '-');
+    return (value ?? '').trim().replaceAll(RegExp(r'\s+'), ' ').replaceAll('–', '-').replaceAll('—', '-');
   }
 
   /// Format a DateTime (local) to canonical yyyy-MM-dd string
@@ -461,12 +457,7 @@ class AppState extends ChangeNotifier {
 
   // --- Quarantine / allowlist for known-bad legacy data ---
   static String _normAllowlistText(String s) {
-    return s
-        .trim()
-        .toLowerCase()
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .replaceAll('–', '-')
-        .replaceAll('—', '-');
+    return s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ').replaceAll('–', '-').replaceAll('—', '-');
   }
 
   static final Set<String> _pfdFixedAllowedGeneral = {
@@ -646,8 +637,7 @@ class AppState extends ChangeNotifier {
                   'ever_followed': row['ever_followed'] == true || row['ever_followed']?.toString() == 'true',
                   'treatment': row['treatment'] ?? '',
                   'subtype': row['subtype'],
-                  'instruction_index':
-                      row['instruction_index'] ??
+                  'instruction_index': row['instruction_index'] ??
                       stableInstructionIndex(
                         (row['group'] ?? '').toString(),
                         (row['instruction_text'] ?? '').toString(),
@@ -667,12 +657,7 @@ class AppState extends ChangeNotifier {
       String normType(String s) => s.trim().toLowerCase();
 
       String normText(String s) {
-        return s
-            .trim()
-            .toLowerCase()
-            .replaceAll(RegExp(r'\s+'), ' ')
-            .replaceAll('–', '-')
-            .replaceAll('—', '-');
+        return s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ').replaceAll('–', '-').replaceAll('—', '-');
       }
 
       int? asInt(dynamic v) {
@@ -800,7 +785,8 @@ class AppState extends ChangeNotifier {
       final String typeCanon = _canonicalGroup(type);
       final instruction = _canonicalInstructionText(note);
       final idx = instructionIndex ?? stableInstructionIndex(typeCanon, instruction);
-      final quarantined = !_isAllowedForPfdFixed(treatment: treat, subtype: sub, group: typeCanon, instruction: instruction);
+      final quarantined =
+          !_isAllowedForPfdFixed(treatment: treat, subtype: sub, group: typeCanon, instruction: instruction);
       if (quarantined) {
         treat = '';
         sub = '';
@@ -1129,6 +1115,23 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Clears current treatment selection and related fields locally.
+  ///
+  /// Use this after the backend has started a new open episode (e.g. after
+  /// marking the previous treatment as completed) so the UI does not keep
+  /// showing stale treatment details.
+  Future<void> startNewEpisodeLocally({String? username}) async {
+    _treatment = null;
+    _treatmentSubtype = null;
+    _implantStage = null;
+    procedureDate = null;
+    procedureTime = null;
+    _procedureCompleted = false;
+    await resetLocalStateForTreatmentReplacement(username: username);
+    _saveUserDetails();
+    notifyListeners();
+  }
+
   List<bool> getChecklistForDate(DateTime date) {
     final key = _dateKey(date);
     final n = currentDos.length;
@@ -1195,8 +1198,7 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  static String _dateKey(DateTime date) =>
-      "${date.year.toString().padLeft(4, '0')}-"
+  static String _dateKey(DateTime date) => "${date.year.toString().padLeft(4, '0')}-"
       "${date.month.toString().padLeft(2, '0')}-"
       "${date.day.toString().padLeft(2, '0')}";
 

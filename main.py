@@ -435,10 +435,28 @@ async def _internal_send_adherence_nudges(db: AsyncSession) -> dict[str, Any]:
     if not enabled:
         return {"enabled": False, "evaluated": 0, "nudged": 0, "skipped": 0}
 
-    try:
-        target_hour = int(os.getenv("ADHERENCE_NUDGE_LOCAL_HOUR", "20"))
-    except Exception:
-        target_hour = 20
+    # Allow a range of hours (e.g. "8,9") for morning windows.
+    # Back-compat: if ADHERENCE_NUDGE_LOCAL_HOURS not set, use ADHERENCE_NUDGE_LOCAL_HOUR.
+    hours_raw = os.getenv("ADHERENCE_NUDGE_LOCAL_HOURS")
+    allowed_hours: set[int]
+    if hours_raw:
+        allowed_hours = set()
+        for part in hours_raw.split(','):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                allowed_hours.add(int(part))
+            except Exception:
+                pass
+        if not allowed_hours:
+            allowed_hours = {8}
+    else:
+        try:
+            target_hour = int(os.getenv("ADHERENCE_NUDGE_LOCAL_HOUR", "20"))
+        except Exception:
+            target_hour = 20
+        allowed_hours = {target_hour}
     try:
         minute_window = int(os.getenv("ADHERENCE_NUDGE_MINUTE_WINDOW", "30"))
     except Exception:
@@ -513,7 +531,7 @@ async def _internal_send_adherence_nudges(db: AsyncSession) -> dict[str, Any]:
             tz_name = "UTC"
 
         now_local = now_utc.replace(tzinfo=pytz.UTC).astimezone(tz)
-        if now_local.hour != target_hour:
+        if now_local.hour not in allowed_hours:
             skipped += 1
             continue
         if now_local.minute >= minute_window:
@@ -540,7 +558,11 @@ async def _internal_send_adherence_nudges(db: AsyncSession) -> dict[str, Any]:
             ratio_val = followed / float(total)
 
         needs_attention = (total == 0) or (ratio_val is not None and ratio_val < threshold)
-        if not needs_attention:
+        ok_enabled = os.getenv("ADHERENCE_ALRIGHT_ENABLED")
+        if ok_enabled is None:
+            ok_enabled = os.getenv("ADHERENCE_OK_ENABLED", "0")
+        ok_enabled = str(ok_enabled).lower() in {"1", "true", "yes", "on"}
+        if (not needs_attention) and (not ok_enabled):
             skipped += 1
             continue
 
@@ -580,9 +602,18 @@ async def _internal_send_adherence_nudges(db: AsyncSession) -> dict[str, Any]:
             nudged += 1
             continue
 
-        title = os.getenv("ADHERENCE_NUDGE_TITLE", "Instruction Reminder")
-        body = os.getenv("ADHERENCE_NUDGE_BODY", "Please follow your instructions today.")
-        data = {"type": "adherence_nudge", "local_date": local_day.isoformat()}
+        if needs_attention:
+            title = os.getenv("ADHERENCE_NUDGE_TITLE", "Instruction Reminder")
+            body = os.getenv("ADHERENCE_NUDGE_BODY", "Please follow your instructions today.")
+            kind = "adherence_nudge"
+        else:
+            title = os.getenv("ADHERENCE_ALRIGHT_TITLE") or os.getenv("ADHERENCE_OK_TITLE", "All right")
+            body = os.getenv("ADHERENCE_ALRIGHT_BODY") or os.getenv(
+                "ADHERENCE_OK_BODY",
+                "You're doing well. Please continue following your doctor's instructions.",
+            )
+            kind = "adherence_ok"
+        data = {"type": kind, "local_date": local_day.isoformat()}
 
         attempted = 0
         sent_tokens = 0
@@ -604,13 +635,276 @@ async def _internal_send_adherence_nudges(db: AsyncSession) -> dict[str, Any]:
 
         object.__setattr__(nudge_row, "tokens_attempted", attempted)
         object.__setattr__(nudge_row, "tokens_sent", sent_tokens)
-        object.__setattr__(nudge_row, "status", "sent" if sent_tokens > 0 else "failed")
+        if sent_tokens > 0:
+            object.__setattr__(nudge_row, "status", "sent_ok" if not needs_attention else "sent_attention")
+        else:
+            object.__setattr__(nudge_row, "status", "failed")
         db.add(nudge_row)
         await db.commit()
 
         nudged += 1
 
     return {"enabled": True, "evaluated": evaluated, "nudged": nudged, "skipped": skipped}
+
+
+async def _internal_preview_adherence_nudges(
+    db: AsyncSession,
+    *,
+    max_patients: int = 200,
+    sample: int = 50,
+) -> dict[str, Any]:
+    """Dry-run preview for adherence nudges.
+
+    This does NOT send push notifications and does NOT write to AdherenceNudge.
+    Intended for ops/debug to verify config + eligibility quickly.
+    """
+    now_utc = datetime.utcnow()
+
+    enabled = os.getenv("ADHERENCE_NUDGE_ENABLED", "1").lower() in {"1", "true", "yes", "on"}
+
+    # Allow a range of hours (e.g. "8,9") for morning windows.
+    hours_raw = os.getenv("ADHERENCE_NUDGE_LOCAL_HOURS")
+    allowed_hours: set[int]
+    if hours_raw:
+        allowed_hours = set()
+        for part in hours_raw.split(','):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                allowed_hours.add(int(part))
+            except Exception:
+                pass
+        if not allowed_hours:
+            allowed_hours = {8}
+    else:
+        try:
+            target_hour = int(os.getenv("ADHERENCE_NUDGE_LOCAL_HOUR", "20"))
+        except Exception:
+            target_hour = 20
+        allowed_hours = {target_hour}
+
+    try:
+        minute_window = int(os.getenv("ADHERENCE_NUDGE_MINUTE_WINDOW", "30"))
+    except Exception:
+        minute_window = 30
+    if minute_window < 1:
+        minute_window = 1
+    if minute_window > 60:
+        minute_window = 60
+
+    try:
+        threshold = float(os.getenv("ADHERENCE_NUDGE_THRESHOLD", "0.6"))
+    except Exception:
+        threshold = 0.6
+
+    try:
+        max_days_after = int(os.getenv("ADHERENCE_MAX_DAYS_AFTER_PROCEDURE", "60"))
+    except Exception:
+        max_days_after = 60
+
+    default_tz = os.getenv("ADHERENCE_DEFAULT_TZ", "Asia/Kolkata")
+
+    ok_enabled_raw = os.getenv("ADHERENCE_ALRIGHT_ENABLED")
+    if ok_enabled_raw is None:
+        ok_enabled_raw = os.getenv("ADHERENCE_OK_ENABLED", "0")
+    ok_enabled = str(ok_enabled_raw).lower() in {"1", "true", "yes", "on"}
+
+    async def _get_patient_timezone(patient_id: int) -> str:
+        try:
+            tz_res = await db.execute(
+                select(models.Reminder.timezone)
+                .where(models.Reminder.patient_id == patient_id)
+                .order_by(models.Reminder.updated_at.desc())
+                .limit(1)
+            )
+            tz_name = tz_res.scalar_one_or_none()
+            if tz_name:
+                return str(tz_name)
+        except Exception:
+            pass
+        return default_tz
+
+    max_patients = int(max_patients)
+    sample = int(sample)
+    if max_patients < 1:
+        max_patients = 1
+    if max_patients > 5000:
+        max_patients = 5000
+    if sample < 0:
+        sample = 0
+    if sample > max_patients:
+        sample = max_patients
+
+    evaluated = 0
+    would_send_attention = 0
+    would_send_ok = 0
+    skipped = 0
+    reason_counts: dict[str, int] = {}
+    samples: list[dict[str, Any]] = []
+
+    pat_res = await db.execute(
+        select(models.Patient)
+        .join(models.DeviceToken, models.DeviceToken.patient_id == models.Patient.id)
+        .where(models.DeviceToken.active == True)
+        .where(or_(models.Patient.procedure_completed == False, models.Patient.procedure_completed.is_(None)))
+        .distinct()
+        .limit(max_patients)
+    )
+    patients = pat_res.scalars().all()
+
+    for p in patients:
+        evaluated += 1
+        pid = int(object.__getattribute__(p, "id"))
+        proc_date = getattr(p, "procedure_date")
+
+        reason: str | None = None
+        tz_name = await _get_patient_timezone(pid)
+        tz_fallback = False
+        try:
+            tz = pytz.timezone(tz_name)
+        except Exception:
+            tz = pytz.UTC
+            tz_name = "UTC"
+            tz_fallback = True
+
+        now_local = now_utc.replace(tzinfo=pytz.UTC).astimezone(tz)
+        local_day = now_local.date()
+
+        if not proc_date:
+            reason = "no_procedure_date"
+        elif now_local.hour not in allowed_hours:
+            reason = "outside_allowed_hour"
+        elif now_local.minute >= minute_window:
+            reason = "outside_minute_window"
+        else:
+            day_delta = (local_day - proc_date).days
+            if day_delta < 0 or (max_days_after >= 0 and day_delta > max_days_after):
+                reason = "procedure_day_out_of_range"
+            else:
+                # Adherence for today (local day)
+                sres = await db.execute(
+                    select(models.InstructionStatus.followed)
+                    .where(models.InstructionStatus.patient_id == pid)
+                    .where(models.InstructionStatus.date == local_day)
+                )
+                flags = [bool(row[0]) for row in sres.all()]
+                total = len(flags)
+                followed = sum(1 for f in flags if f)
+                ratio_val: float | None = None
+                if total > 0:
+                    ratio_val = followed / float(total)
+
+                needs_attention = (total == 0) or (ratio_val is not None and ratio_val < threshold)
+
+                # Would we send at all?
+                if (not needs_attention) and (not ok_enabled):
+                    reason = "ok_disabled"
+                else:
+                    # Would it be suppressed as already sent today?
+                    prev = await db.execute(
+                        select(models.AdherenceNudge.id)
+                        .where(models.AdherenceNudge.patient_id == pid)
+                        .where(models.AdherenceNudge.local_date == local_day)
+                        .limit(1)
+                    )
+                    already = prev.scalar_one_or_none() is not None
+                    if already:
+                        reason = "already_nudged_today"
+                    else:
+                        if needs_attention:
+                            would_send_attention += 1
+                        else:
+                            would_send_ok += 1
+
+                # Emit sample row when useful
+                if len(samples) < sample:
+                    samples.append(
+                        {
+                            "patient_id": pid,
+                            "timezone": tz_name,
+                            "tz_fallback": tz_fallback,
+                            "now_local": now_local.isoformat(),
+                            "local_day": local_day.isoformat(),
+                            "procedure_date": proc_date.isoformat() if proc_date else None,
+                            "adherence_total": total,
+                            "adherence_followed": followed,
+                            "adherence_ratio": ratio_val,
+                            "needs_attention": needs_attention,
+                            "would_send": None if reason else ("attention" if needs_attention else "ok"),
+                            "skip_reason": reason,
+                        }
+                    )
+
+        if reason:
+            skipped += 1
+            reason_counts[reason] = reason_counts.get(reason, 0) + 1
+
+    return {
+        "enabled": enabled,
+        "now_utc": now_utc.isoformat() + "Z",
+        "config": {
+            "allowed_hours": sorted(list(allowed_hours)),
+            "minute_window": minute_window,
+            "threshold": threshold,
+            "max_days_after_procedure": max_days_after,
+            "default_tz": default_tz,
+            "ok_enabled": ok_enabled,
+            "max_patients": max_patients,
+            "sample": sample,
+        },
+        "counts": {
+            "evaluated": evaluated,
+            "would_send_attention": would_send_attention,
+            "would_send_ok": would_send_ok,
+            "skipped": skipped,
+        },
+        "skip_reasons": reason_counts,
+        "samples": samples,
+    }
+
+
+def _require_task_token(request: Request) -> None:
+    """Lightweight protection for cron/ops task endpoints.
+
+    Set TASK_TOKEN in the environment and call endpoints with either:
+      - Header: X-Task-Token: <token>
+      - Query:  ?token=<token>
+    """
+    expected = os.getenv("TASK_TOKEN")
+    if not expected:
+        raise HTTPException(status_code=503, detail="TASK_TOKEN not configured")
+    provided = request.headers.get("X-Task-Token") or request.query_params.get("token")
+    if not provided or provided != expected:
+        raise HTTPException(status_code=401, detail="Invalid task token")
+
+
+@app.post("/tasks/adherence/run")
+async def task_run_adherence(request: Request, db: AsyncSession = Depends(get_db)):
+    """Trigger adherence nudges immediately.
+
+    Useful for external cron/wake-ups on hosts that may sleep background schedulers.
+    Protected by TASK_TOKEN.
+    """
+    _require_task_token(request)
+    res = await _internal_send_adherence_nudges(db)
+    return res
+
+
+@app.get("/tasks/adherence/preview")
+async def task_preview_adherence(
+    request: Request,
+    max_patients: int = 200,
+    sample: int = 50,
+    db: AsyncSession = Depends(get_db),
+):
+    """Dry-run preview of adherence nudges.
+
+    Protected by TASK_TOKEN.
+    Does not send notifications and does not write AdherenceNudge.
+    """
+    _require_task_token(request)
+    return await _internal_preview_adherence_nudges(db, max_patients=max_patients, sample=sample)
 
 async def get_bearer_token(request: Request) -> str:
     token = _extract_bearer_from_request(request)

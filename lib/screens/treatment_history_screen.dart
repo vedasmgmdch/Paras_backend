@@ -124,7 +124,28 @@ class _TreatmentHistoryScreenState extends State<TreatmentHistoryScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
-            return const Center(child: Text('Failed to load treatment history.'));
+            final msg = snapshot.error?.toString() ?? 'Unknown error';
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'Failed to load treatment history.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      msg,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.black54),
+                    ),
+                  ],
+                ),
+              ),
+            );
           }
           final treatments = snapshot.data;
           if (treatments == null || treatments.isEmpty) {

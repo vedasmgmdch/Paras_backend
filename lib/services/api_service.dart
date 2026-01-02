@@ -388,13 +388,11 @@ class ApiService {
   static Future<String?> login(String username, String password) async {
     try {
       final normalizedUsername = username.trim();
-      final response = await http
-          .post(
-            Uri.parse('$baseUrl/login'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'username': normalizedUsername, 'password': password},
-          )
-          .timeout(_slowEndpointTimeout);
+      final response = await http.post(
+        Uri.parse('$baseUrl/login'),
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: {'username': normalizedUsername, 'password': password},
+      ).timeout(_slowEndpointTimeout);
 
       if (response.statusCode == 200) {
         final resBody = jsonDecode(response.body);
@@ -521,7 +519,8 @@ class ApiService {
   static Future<Map<String, dynamic>?> getUserDetails() async {
     try {
       final headers = await getAuthHeaders();
-      final response = await http.get(Uri.parse('$baseUrl/patients/me'), headers: headers).timeout(_slowEndpointTimeout);
+      final response =
+          await http.get(Uri.parse('$baseUrl/patients/me'), headers: headers).timeout(_slowEndpointTimeout);
 
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
@@ -579,7 +578,7 @@ class ApiService {
         'active': active,
         'grace_minutes': graceMinutes,
       });
-        final res = await http
+      final res = await http
           .post(Uri.parse('$baseUrl/reminders'), headers: headers, body: payload)
           .timeout(_slowEndpointTimeout);
       if (res.statusCode == 200) {
@@ -600,7 +599,7 @@ class ApiService {
       // ignore: avoid_print
       print('[ApiService] updateReminder(id=$id) keys=${patch.keys.toList()}');
       final headers = await getAuthHeaders();
-        final res = await http
+      final res = await http
           .patch(Uri.parse('$baseUrl/reminders/$id'), headers: headers, body: jsonEncode(patch))
           .timeout(_slowEndpointTimeout);
       if (res.statusCode == 200) {
@@ -623,7 +622,8 @@ class ApiService {
       // ignore: avoid_print
       print('[ApiService] deleteReminder(id=$id)');
       final headers = await getAuthHeaders();
-      final res = await http.delete(Uri.parse('$baseUrl/reminders/$id'), headers: headers).timeout(_slowEndpointTimeout);
+      final res =
+          await http.delete(Uri.parse('$baseUrl/reminders/$id'), headers: headers).timeout(_slowEndpointTimeout);
       if (res.statusCode == 200) return true;
       print('deleteReminder failed: ${res.statusCode} → ${res.body}');
     } catch (e) {
@@ -717,9 +717,8 @@ class ApiService {
   static Future<bool> rotateIfDue() async {
     try {
       final headers = await getAuthHeaders();
-      final response = await http
-          .post(Uri.parse('$baseUrl/episodes/rotate-if-due'), headers: headers)
-          .timeout(_slowEndpointTimeout);
+      final response =
+          await http.post(Uri.parse('$baseUrl/episodes/rotate-if-due'), headers: headers).timeout(_slowEndpointTimeout);
       if (response.statusCode == 200) {
         final body = jsonDecode(response.body);
         return body['rotated'] == true;
@@ -789,22 +788,19 @@ class ApiService {
   }
 
   static Future<List<dynamic>?> getEpisodeHistory() async {
-    try {
-      final headers = await getAuthHeaders();
-      final response = await http.get(Uri.parse('$baseUrl/episodes/history'), headers: headers).timeout(_slowEndpointTimeout);
-      if (response.statusCode == 200) {
-        final decoded = await _decodeJson(response.body);
-        if (decoded is List) return decoded;
-        print('Get episode history unexpected payload: ${decoded.runtimeType}');
-        return null;
-      } else {
-        print('Get episode history failed: ${response.statusCode} → ${response.body}');
-        return null;
-      }
-    } catch (e) {
-      print('Get episode history error: $e');
-      return null;
+    final headers = await getAuthHeaders();
+    final response =
+        await http.get(Uri.parse('$baseUrl/episodes/history'), headers: headers).timeout(_slowEndpointTimeout);
+    if (response.statusCode == 200) {
+      final decoded = await _decodeJson(response.body);
+      if (decoded is List) return decoded;
+      throw FormatException('Get episode history unexpected payload: ${decoded.runtimeType}');
     }
+
+    // Surface auth/server errors to the caller so the UI can display them (e.g. 401 Unauthorized).
+    final body = response.body;
+    final snippet = body.length > 300 ? body.substring(0, 300) : body;
+    throw HttpException('Get episode history failed: ${response.statusCode} → $snippet');
   }
 
   // ---------------------------
@@ -909,13 +905,11 @@ class ApiService {
   // --------------------------
   static Future<String?> doctorLogin(String username, String password) async {
     try {
-      final response = await http
-          .post(
-            Uri.parse('$baseUrl/doctor-login'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'username': username.trim(), 'password': password},
-          )
-          .timeout(_slowEndpointTimeout);
+      final response = await http.post(
+        Uri.parse('$baseUrl/doctor-login'),
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: {'username': username.trim(), 'password': password},
+      ).timeout(_slowEndpointTimeout);
       if (response.statusCode == 200) {
         final resBody = jsonDecode(response.body);
         final token = resBody['access_token'];
