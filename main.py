@@ -1134,11 +1134,6 @@ async def signup(patient: schemas.PatientCreate, db: AsyncSession = Depends(get_
     ep = await _get_or_create_open_episode(db, object.__getattribute__(db_patient, 'id'))
     await _mirror_episode_to_patient(db, db_patient, ep)
 
-    try:
-        send_registration_email(db_patient.email, db_patient.name)
-    except Exception as e:
-        print(f"Email sending failed: {e}")
-
     access_token = create_access_token(data={"sub": db_patient.username})
     return {"access_token": access_token, "token_type": "bearer"}
 

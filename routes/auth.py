@@ -60,14 +60,28 @@ async def request_signup_otp(data: RequestResetSchema, db: AsyncSession = Depend
             user = result.scalars().first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
+
+    user_display_name = (
+        getattr(user, "name", None)
+        or getattr(user, "username", None)
+        or "User"
+    )
     otp = str(random.randint(100000, 999999))
     otp_store[target] = otp
     try:
         if data.email:
             from utils import send_email
-            send_email(data.email, "Your Signup OTP", f"Your signup OTP code is {otp}")
+            subject = "MGM Hospital App - Sign up OTP"
+            body = (
+                f"Hey {user_display_name}, thank you for registering in MGM Hospital's app.\n\n"
+                f"Your sign up OTP code IS {otp}"
+            )
+            send_email(data.email, subject, body)
         else:
-            print(f"Send SMS to {data.phone}: Signup OTP code is {otp}")
+            print(
+                f"Send SMS to {data.phone}: Hey {user_display_name}, thank you for registering in MGM Hospital's app. "
+                f"Your sign up OTP code IS {otp}"
+            )
     except Exception as e:
         print(f"Failed to send signup OTP: {e}")
         raise HTTPException(status_code=500, detail="Failed to send OTP. Please try again later.")
@@ -104,13 +118,6 @@ async def verify_signup_otp(data: SignupOtpSchema, db: AsyncSession = Depends(ge
         raise HTTPException(status_code=404, detail="User not found.")
     setattr(user, "is_verified", True)
     await db.commit()
-    # Send registration email after successful verification
-    try:
-        if data.email:
-            from utils import send_registration_email
-            send_registration_email(data.email, getattr(user, 'name', 'User'))
-    except Exception as e:
-        print("Error sending registration email:", e)
     try:
         del otp_store[target]
     except Exception as e:
