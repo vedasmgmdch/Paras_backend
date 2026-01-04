@@ -968,6 +968,29 @@ class ApiService {
     return const [];
   }
 
+  static Future<List<Map<String, dynamic>>> getPatientEpisodesByDoctor(String doctor) async {
+    try {
+      final uri = Uri.parse('$baseUrl/patients/by-doctor-episodes').replace(queryParameters: {'doctor': doctor});
+      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+      print('[Api] ← ${response.statusCode} (${response.body.length} bytes) for /patients/by-doctor-episodes');
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is List) {
+          return decoded.cast<Map<String, dynamic>>();
+        }
+        return [];
+      }
+      print('[Api][error] getPatientEpisodesByDoctor failed: ${response.statusCode} → ${response.body}');
+      return [];
+    } on TimeoutException {
+      print('[Api][timeout] getPatientEpisodesByDoctor >10s');
+      return [];
+    } catch (e) {
+      print('[Api][net] getPatientEpisodesByDoctor network error: $e');
+      return [];
+    }
+  }
+
   // --------------------------
   // ✅ Get Patient Instruction Progress
   // --------------------------

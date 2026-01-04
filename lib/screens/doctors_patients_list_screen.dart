@@ -24,9 +24,7 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
   bool _loading = false;
   String? _error;
 
-  final TextEditingController _dateFromCtrl = TextEditingController();
-  final TextEditingController _dateToCtrl = TextEditingController();
-  String? _dateFilterError;
+  DateTime? _treatmentStartDateFilter;
 
   @override
   void initState() {
@@ -44,8 +42,6 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
 
   @override
   void dispose() {
-    _dateFromCtrl.dispose();
-    _dateToCtrl.dispose();
     super.dispose();
   }
 
@@ -63,32 +59,106 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
     return '${dt.year.toString().padLeft(4, '0')}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
   }
 
-  List<Map<String, dynamic>> _applyDateFilters(List<Map<String, dynamic>> src) {
-    final from = _parseDateOnly(_dateFromCtrl.text);
-    final to = _parseDateOnly(_dateToCtrl.text);
+  String _formatDMY(DateTime dt) {
+    return '${dt.day.toString().padLeft(2, '0')}-${dt.month.toString().padLeft(2, '0')}-${dt.year.toString().padLeft(4, '0')}';
+  }
 
-    // If user typed something but parsing failed, show a lightweight error and don't filter.
-    if ((_dateFromCtrl.text.trim().isNotEmpty && from == null) || (_dateToCtrl.text.trim().isNotEmpty && to == null)) {
-      _dateFilterError = 'Use YYYY-MM-DD (e.g. 2026-01-04)';
-      return src;
-    }
-
-    if (from != null && to != null && to.isBefore(from)) {
-      _dateFilterError = 'To date must be after From date';
-      return src;
-    }
-
-    _dateFilterError = null;
-    if (from == null && to == null) return src;
-
+  List<Map<String, dynamic>> _applyTreatmentStartDateFilter(List<Map<String, dynamic>> src) {
+    final selected = _treatmentStartDateFilter;
+    if (selected == null) return src;
+    final selectedYmd = _formatYMD(selected);
     return src.where((p) {
       final raw = (p['procedure_date'] ?? '').toString();
       final pd = _parseDateOnly(raw);
       if (pd == null) return false;
-      if (from != null && pd.isBefore(from)) return false;
-      if (to != null && pd.isAfter(to)) return false;
-      return true;
+      return _formatYMD(pd) == selectedYmd;
     }).toList();
+  }
+
+  Future<void> _openTreatmentStartDateFilterCard() async {
+    final initial = _treatmentStartDateFilter ?? DateTime.now();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) {
+        DateTime? temp = _treatmentStartDateFilter;
+        return SafeArea(
+          child: DraggableScrollableSheet(
+            expand: false,
+            initialChildSize: 0.72,
+            minChildSize: 0.45,
+            maxChildSize: 0.92,
+            builder: (ctx, scrollController) {
+              return StatefulBuilder(
+                builder: (ctx, setModalState) {
+                  return SingleChildScrollView(
+                    controller: scrollController,
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text(
+                          'Filter by treatment start date',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          temp == null ? 'No date selected' : 'Selected: ${_formatDMY(temp!)}',
+                          style: const TextStyle(fontSize: 13, color: Colors.black54),
+                        ),
+                        const SizedBox(height: 12),
+                        Card(
+                          child: CalendarDatePicker(
+                            initialDate: temp ?? initial,
+                            firstDate: DateTime(2000, 1, 1),
+                            lastDate: DateTime(2100, 12, 31),
+                            onDateChanged: (picked) {
+                              setModalState(() {
+                                temp = DateTime(picked.year, picked.month, picked.day);
+                              });
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            TextButton(
+                              onPressed: () {
+                                setState(() {
+                                  _treatmentStartDateFilter = null;
+                                });
+                                Navigator.of(ctx).pop();
+                              },
+                              child: const Text('Clear'),
+                            ),
+                            const Spacer(),
+                            TextButton(
+                              onPressed: () => Navigator.of(ctx).pop(),
+                              child: const Text('Cancel'),
+                            ),
+                            const SizedBox(width: 8),
+                            ElevatedButton(
+                              onPressed: () {
+                                setState(() {
+                                  _treatmentStartDateFilter = temp;
+                                });
+                                Navigator.of(ctx).pop();
+                              },
+                              child: const Text('Apply'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        );
+      },
+    );
   }
 
   List<String> get _doctorList {
@@ -142,7 +212,7 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final filteredPatients = _applyDateFilters(_patients);
+    final filteredPatients = _applyTreatmentStartDateFilter(_patients);
     return PopScope(
       canPop: true,
       onPopInvokedWithResult: (didPop, result) {
@@ -169,7 +239,11 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
                       if (username.isEmpty) return;
                       Navigator.of(
                         context,
-                      ).push(NoAnimationPageRoute(builder: (_) => DoctorPatientFullProgressScreen(username: username)));
+                      ).push(
+                        NoAnimationPageRoute(
+                          builder: (_) => DoctorPatientFullProgressScreen(username: username),
+                        ),
+                      );
                     },
             ),
             IconButton(
@@ -250,9 +324,40 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
             else
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
-                child: SafeText(
-                  '$_selectedDepartment • $_selectedDoctor',
-                  style: const TextStyle(fontSize: 13, color: Colors.black54),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: SafeText(
+                        '$_selectedDepartment • $_selectedDoctor',
+                        style: const TextStyle(fontSize: 13, color: Colors.black54),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Filter by treatment start date',
+                      onPressed: (_selectedDoctor == null || _loading) ? null : _openTreatmentStartDateFilterCard,
+                      icon: Icon(_treatmentStartDateFilter == null ? Icons.filter_alt_outlined : Icons.filter_alt),
+                    ),
+                  ],
+                ),
+              ),
+
+            if (!widget.lockSelection && _selectedDoctor != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 2, 20, 6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: SafeText(
+                        '$_selectedDepartment • $_selectedDoctor',
+                        style: const TextStyle(fontSize: 13, color: Colors.black54),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Filter by treatment start date',
+                      onPressed: _loading ? null : _openTreatmentStartDateFilterCard,
+                      icon: Icon(_treatmentStartDateFilter == null ? Icons.filter_alt_outlined : Icons.filter_alt),
+                    ),
+                  ],
                 ),
               ),
             Padding(
@@ -268,85 +373,6 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
                 style: const TextStyle(fontSize: 13, color: Colors.grey),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _dateFromCtrl,
-                          enabled: !_loading,
-                          decoration: const InputDecoration(
-                            labelText: 'Treatment start from (YYYY-MM-DD)',
-                            border: OutlineInputBorder(),
-                            isDense: true,
-                          ),
-                          onChanged: (_) => setState(() {}),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: _dateToCtrl,
-                          enabled: !_loading,
-                          decoration: const InputDecoration(
-                            labelText: 'Treatment start to (YYYY-MM-DD)',
-                            border: OutlineInputBorder(),
-                            isDense: true,
-                          ),
-                          onChanged: (_) => setState(() {}),
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'Clear date filter',
-                        onPressed: _loading
-                            ? null
-                            : () {
-                                _dateFromCtrl.clear();
-                                _dateToCtrl.clear();
-                                setState(() {
-                                  _dateFilterError = null;
-                                });
-                              },
-                        icon: const Icon(Icons.filter_alt_off),
-                      ),
-                    ],
-                  ),
-                  if (_dateFilterError != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: Text(
-                        _dateFilterError!,
-                        style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.error),
-                      ),
-                    ),
-                  if (_dateFilterError == null &&
-                      (_dateFromCtrl.text.trim().isNotEmpty || _dateToCtrl.text.trim().isNotEmpty))
-                    const Padding(
-                      padding: EdgeInsets.only(top: 6),
-                      child: Text(
-                        'Tip: for exact date search, set both fields to the same date.',
-                        style: TextStyle(fontSize: 12, color: Colors.black54),
-                      ),
-                    ),
-                  if (_dateFilterError == null &&
-                      (_dateFromCtrl.text.trim().isNotEmpty || _dateToCtrl.text.trim().isNotEmpty) &&
-                      filteredPatients.isEmpty &&
-                      !_loading)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 6),
-                      child: Text(
-                        'No patients match the selected treatment start date filter.',
-                        style: TextStyle(fontSize: 12, color: Colors.black54),
-                      ),
-                    ),
-                ],
               ),
             ),
             const Divider(height: 1),
@@ -368,11 +394,11 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
                                 final subtype = (p['treatment_subtype'] ?? '').toString().trim();
                                 final rawDate = (p['procedure_date'] ?? '').toString();
                                 final pd = _parseDateOnly(rawDate);
-                                final dateLabel = pd == null ? '-' : _formatYMD(pd);
+                                final dateLabel = pd == null ? '-' : _formatDMY(pd);
                                 final tLabel = subtype.isNotEmpty ? '$treatment ($subtype)' : '$treatment';
                                 return ListTile(
                                   title: SafeText(name),
-                                  subtitle: SafeText('$username • $tLabel • Start: $dateLabel'),
+                                  subtitle: SafeText('$username • $tLabel • $dateLabel', maxLines: 2),
                                   trailing: const Icon(Icons.chevron_right),
                                   onTap: () {
                                     if (username.isEmpty) return;
@@ -490,7 +516,23 @@ class _PatientSearchDelegate extends SearchDelegate<_PatientPick?> {
     return patients.where((p) {
       final name = (p['name'] ?? '').toString().toLowerCase();
       final username = (p['username'] ?? '').toString().toLowerCase();
-      return name.contains(q) || username.contains(q);
+      final rawDate = (p['procedure_date'] ?? '').toString();
+      String dateYmd = '';
+      String dateDmy = '';
+      if (rawDate.trim().isNotEmpty) {
+        final normalized = rawDate.contains('T') ? rawDate.split('T').first : rawDate;
+        final dt = DateTime.tryParse(normalized);
+        if (dt != null) {
+          dateYmd =
+              '${dt.year.toString().padLeft(4, '0')}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
+          dateDmy =
+              '${dt.day.toString().padLeft(2, '0')}-${dt.month.toString().padLeft(2, '0')}-${dt.year.toString().padLeft(4, '0')}';
+        }
+      }
+      return name.contains(q) ||
+          username.contains(q) ||
+          (dateYmd.isNotEmpty && dateYmd.contains(q)) ||
+          (dateDmy.isNotEmpty && dateDmy.contains(q));
     }).toList();
   }
 
@@ -525,6 +567,10 @@ class _ResultsList extends StatelessWidget {
     return '${dt.year.toString().padLeft(4, '0')}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
   }
 
+  String _formatDMY(DateTime dt) {
+    return '${dt.day.toString().padLeft(2, '0')}-${dt.month.toString().padLeft(2, '0')}-${dt.year.toString().padLeft(4, '0')}';
+  }
+
   @override
   Widget build(BuildContext context) {
     if (list.isEmpty) {
@@ -541,10 +587,10 @@ class _ResultsList extends StatelessWidget {
         final subtype = (p['treatment_subtype'] ?? '').toString().trim();
         final rawDate = (p['procedure_date'] ?? '').toString();
         final pd = _parseDateOnly(rawDate);
-        final dateLabel = pd == null ? '' : _formatYMD(pd);
+        final dateLabel = pd == null ? '' : _formatDMY(pd);
         final tLabel = subtype.isNotEmpty ? '$treatment ($subtype)' : treatment;
         final base = tLabel.isEmpty ? username : '$username • $tLabel';
-        final subtitle = dateLabel.isEmpty ? base : '$base • Start: $dateLabel';
+        final subtitle = dateLabel.isEmpty ? base : '$base • $dateLabel';
         return ListTile(
           title: SafeText(name),
           subtitle: SafeText(subtitle, maxLines: 2),

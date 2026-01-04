@@ -324,3 +324,18 @@ class ReminderResponse(ReminderBase):
     created_at: datetime
     updated_at: datetime
     model_config = ConfigDict(from_attributes=True)
+
+
+class PatientEpisodePublic(BaseModel):
+    patient_id: int
+    episode_id: int
+    username: str
+    name: str
+    department: Optional[str] = None
+    doctor: Optional[str] = None
+    treatment: Optional[str] = None
+    treatment_subtype: Optional[str] = None
+    procedure_date: Optional[date] = None
+    procedure_time: Optional[time] = None
+    procedure_completed: Optional[bool] = None
+    locked: Optional[bool] = None

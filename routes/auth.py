@@ -71,16 +71,18 @@ async def request_signup_otp(data: RequestResetSchema, db: AsyncSession = Depend
     try:
         if data.email:
             from utils import send_email
-            subject = "MGM Hospital App - Sign up OTP"
+            subject = "MGM Hospital App - Sign-up Verification Code"
             body = (
-                f"Hey {user_display_name}, thank you for registering in MGM Hospital's app.\n\n"
-                f"Your sign up OTP code IS {otp}"
+                f"Hello {user_display_name},\n\n"
+                "Thank you for registering with the MGM Hospital app. "
+                f"Your sign-up verification code (OTP) is: {otp}\n\n"
+                "Please do not share this code with anyone."
             )
             send_email(data.email, subject, body)
         else:
             print(
-                f"Send SMS to {data.phone}: Hey {user_display_name}, thank you for registering in MGM Hospital's app. "
-                f"Your sign up OTP code IS {otp}"
+                f"Send SMS to {data.phone}: MGM Hospital - Your sign-up verification code is {otp}. "
+                "Do not share this code with anyone."
             )
     except Exception as e:
         print(f"Failed to send signup OTP: {e}")
@@ -158,9 +160,13 @@ async def request_reset(data: RequestResetSchema, db: AsyncSession = Depends(get
     try:
         if data.email:
             from utils import send_email
-            send_email(data.email, "Your OTP", f"Your OTP code is {otp}")
+            send_email(
+                data.email,
+                "MGM Hospital App - OTP Verification Code",
+                f"Your OTP verification code is: {otp}\n\nIf you did not request this, you can ignore this message.",
+            )
         else:
-            print(f"Send SMS to {data.phone}: OTP code is {otp}")
+            print(f"Send SMS to {data.phone}: MGM Hospital - Your OTP verification code is {otp}.")
     except Exception as e:
         print(f"Failed to send OTP: {e}")
         raise HTTPException(status_code=500, detail="Failed to send OTP. Please try again later.")

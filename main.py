@@ -1259,6 +1259,63 @@ async def list_patients_by_doctor(doctor: str, db: AsyncSession = Depends(get_db
         print(f"[patients/by-doctor][error] doctor='{doctor}' error={e}")
         raise
 
+
+@app.get("/patients/by-doctor-episodes", response_model=List[schemas.PatientEpisodePublic])
+async def list_patient_episodes_by_doctor(doctor: str, db: AsyncSession = Depends(get_db)):
+    """Doctor dashboard feed that includes completed treatments as separate entries.
+
+    Returns one row per treatment episode that belongs to the doctor.
+    Filters out episodes that don't have a treatment set yet.
+    """
+    start = datetime.utcnow()
+    print(f"[patients/by-doctor-episodes] inbound doctor='{doctor}' @ {start.isoformat()}Z")
+    try:
+        ep = models.TreatmentEpisode
+        pt = models.Patient
+        stmt = (
+            select(ep, pt)
+            .join(pt, ep.patient_id == pt.id)
+            .where(ep.doctor == doctor)
+            .where(ep.treatment.is_not(None))
+            .where(ep.treatment != "")
+            .order_by(pt.name.asc(), ep.procedure_date.desc().nullslast(), ep.created_at.desc())
+        )
+
+        async def _run():
+            res = await db.execute(stmt)
+            return res.all()
+
+        rows = await asyncio.wait_for(_run(), timeout=5.0)
+        out: List[schemas.PatientEpisodePublic] = []
+        for ep_row, pt_row in rows:
+            out.append(
+                schemas.PatientEpisodePublic(
+                    patient_id=object.__getattribute__(pt_row, "id"),
+                    episode_id=object.__getattribute__(ep_row, "id"),
+                    username=object.__getattribute__(pt_row, "username"),
+                    name=object.__getattribute__(pt_row, "name"),
+                    department=getattr(ep_row, "department", None) or getattr(pt_row, "department", None),
+                    doctor=getattr(ep_row, "doctor", None) or getattr(pt_row, "doctor", None),
+                    treatment=getattr(ep_row, "treatment", None),
+                    treatment_subtype=getattr(ep_row, "subtype", None),
+                    procedure_date=getattr(ep_row, "procedure_date", None),
+                    procedure_time=getattr(ep_row, "procedure_time", None),
+                    procedure_completed=getattr(ep_row, "procedure_completed", None),
+                    locked=getattr(ep_row, "locked", None),
+                )
+            )
+
+        elapsed = (datetime.utcnow() - start).total_seconds() * 1000
+        print(f"[patients/by-doctor-episodes] doctor='{doctor}' count={len(out)} elapsed_ms={elapsed:.1f}")
+        return out
+    except asyncio.TimeoutError:
+        elapsed = (datetime.utcnow() - start).total_seconds() * 1000
+        print(f"[patients/by-doctor-episodes][timeout] doctor='{doctor}' after {elapsed:.1f}ms")
+        raise HTTPException(status_code=504, detail="DB timeout fetching patient episodes")
+    except Exception as e:
+        print(f"[patients/by-doctor-episodes][error] doctor='{doctor}' error={e}")
+        raise
+
 @app.get("/patients/by-doctor-debug")
 async def list_patients_by_doctor_debug(doctor: str, db: AsyncSession = Depends(get_db)):
     """Debug variant: returns minimal patient identifiers and uses case-insensitive & prefix-less matching.

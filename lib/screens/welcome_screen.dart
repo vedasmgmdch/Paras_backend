@@ -553,9 +553,19 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
             onSaved: (_) {},
           ),
           const SizedBox(height: 8),
-          const Text(
-            "Please remember your username and password — you'll need them to log in.",
-            style: TextStyle(fontSize: 12, color: Colors.black54),
+          const Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: 'Note:- ',
+                  style: TextStyle(fontSize: 12, color: Colors.red),
+                ),
+                TextSpan(
+                  text: "Please remember your username and password — you'll need them to log in.",
+                  style: TextStyle(fontSize: 12, color: Colors.black54),
+                ),
+              ],
+            ),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 16),
