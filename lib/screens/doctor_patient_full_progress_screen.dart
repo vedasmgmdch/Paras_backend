@@ -37,7 +37,10 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
   String _selectedDateForInstructionsLog = '';
   String? _debugStatusMessage; // diagnostics when empty
   DateTime? _lastRefreshed;
-  Map<String, dynamic>? _patientInfo; // patient meta incl procedure_date
+  Map<String, dynamic>? _patientInfo; // view meta (may be for selected episode)
+  Map<String, dynamic>? _chatInfo; // current patient meta (for chat lock/banner)
+  List<Map<String, dynamic>> _episodes = [];
+  int? _selectedEpisodeId;
   bool _lastUsedSubtypeFallback = false; // track if fallback applied for current selection (for rebuild messages)
   // NOTE: This screen now enforces STRICT parity with the patient ProgressScreen:
   // - Only "followed" instruction logs are displayed for the selected day
@@ -212,24 +215,73 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
       // Legacy behavior: skip auth requirement, attempt patient info; if not available just continue.
       final info = await ApiService.doctorGetPatientInfo(widget.username); // may be null if backend now requires auth
       if (!mounted) return;
-      _patientInfo = info; // can be null -> will show procedure date missing message
-      final treatment = info?['treatment']?.toString();
-      final subtype = info?['subtype']?.toString();
+      _chatInfo = info;
+
+      // Load episode history so doctor can view completed treatments even after a new one starts.
+      final episodes = await ApiService.doctorGetPatientEpisodes(widget.username);
+      if (!mounted) return;
+      _episodes = episodes;
+
+      Map<String, dynamic>? selectedEp;
+      if (_episodes.isNotEmpty) {
+        // Keep previously selected episode when possible.
+        if (_selectedEpisodeId != null) {
+          for (final e in _episodes) {
+            if (e['id'] == _selectedEpisodeId) {
+              selectedEp = e;
+              break;
+            }
+          }
+        }
+        // Default: latest episode with a treatment set (handles "new open episode started but empty").
+        selectedEp ??= _episodes.firstWhere(
+          (e) => (e['treatment'] ?? '').toString().trim().isNotEmpty,
+          orElse: () => _episodes.first,
+        );
+        _selectedEpisodeId =
+            (selectedEp?['id'] is int) ? selectedEp!['id'] as int : int.tryParse('${selectedEp?['id'] ?? ''}');
+      }
+
+      // Build view metadata: base patient info + override with selected episode fields.
+      final view = <String, dynamic>{...?(info ?? const {})};
+      if (selectedEp != null) {
+        view['treatment'] = selectedEp['treatment'];
+        view['subtype'] = selectedEp['subtype'];
+        view['procedure_date'] = selectedEp['procedure_date'];
+        view['procedure_time'] = selectedEp['procedure_time'];
+        view['procedure_completed'] = selectedEp['procedure_completed'];
+        view['locked'] = selectedEp['locked'];
+      }
+      _patientInfo = view.isEmpty ? null : view;
+
+      final treatment = (_patientInfo?['treatment'] ?? '').toString();
+      final subtype = (_patientInfo?['subtype'] ?? '').toString();
       // Use the simpler FULL endpoint (no placeholders) -> followed filtering happens in build.
       int dynamicDays = 30;
-      if ((info?['procedure_date'] ?? '').toString().isNotEmpty) {
+      String? dateFrom;
+      String? dateTo;
+      final procStr = (_patientInfo?['procedure_date'] ?? '').toString();
+      if (procStr.isNotEmpty) {
         try {
-          final pd = DateTime.parse(info!['procedure_date']);
-          final diff = DateTime.now().difference(DateTime(pd.year, pd.month, pd.day)).inDays + 1;
-          // Doctor instruction status should cover only the first 14 days from procedure start.
+          final pd = DateTime.parse(procStr);
+          final from = DateTime(pd.year, pd.month, pd.day);
+          final today = DateTime.now();
+          final todayOnly = DateTime(today.year, today.month, today.day);
+          final maxTo = from.add(const Duration(days: 13));
+          final effectiveTo = maxTo.isBefore(todayOnly) ? maxTo : todayOnly;
+          dateFrom = _formatYMD(from);
+          dateTo = _formatYMD(effectiveTo);
+          final diff = effectiveTo.difference(from).inDays + 1;
           dynamicDays = diff.clamp(1, 14);
         } catch (_) {}
       }
       Map<String, dynamic>? full = await ApiService.doctorGetPatientInstructionStatusFull(
         widget.username,
         days: dynamicDays,
-        treatment: treatment,
-        subtype: subtype,
+        treatment: treatment.trim().isEmpty ? null : treatment,
+        subtype: subtype.trim().isEmpty ? null : subtype,
+        dateFrom: dateFrom,
+        dateTo: dateTo,
       );
       if (!mounted) return;
       List<Map<String, dynamic>> status = [];
@@ -468,9 +520,8 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
     }
     // Ensure selection remains valid if underlying list changed
     if (_selectedDateForInstructionsLog.isNotEmpty && !allDates.contains(_selectedDateForInstructionsLog)) {
-      _selectedDateForInstructionsLog = allDates.isNotEmpty
-          ? (allDates.contains(_todayStr()) ? _todayStr() : allDates.last)
-          : '';
+      _selectedDateForInstructionsLog =
+          allDates.isNotEmpty ? (allDates.contains(_todayStr()) ? _todayStr() : allDates.last) : '';
     }
 
     // Parity: Show latest per instruction for selected date (dedupe).
@@ -529,6 +580,7 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
                               style: const TextStyle(fontSize: 12, color: Colors.black54),
                             ),
                           ),
+                        _episodePickerSection(),
                         _recoveryDashboardSection(),
                         _recoveryProgressHeadingCard(),
                         _summaryCard(),
@@ -562,9 +614,10 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
                                         builder: (_) => ChatScreen(
                                           patientUsername: widget.username,
                                           asDoctor: true,
-                                          patientDisplayName: (_patientInfo?['name'] ?? '').toString(),
-                                          readOnly: (_patientInfo?['procedure_completed'] == true),
-                                          bannerText: (_patientInfo?['procedure_completed'] == true)
+                                          patientDisplayName:
+                                              (_chatInfo?['name'] ?? _patientInfo?['name'] ?? '').toString(),
+                                          readOnly: (_chatInfo?['procedure_completed'] == true),
+                                          bannerText: (_chatInfo?['procedure_completed'] == true)
                                               ? 'Treatment completed'
                                               : null,
                                         ),
@@ -584,6 +637,83 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
   }
 
   // --- UI subsections mirroring patient screen ---
+  Widget _episodePickerSection() {
+    if (_episodes.isEmpty) return const SizedBox.shrink();
+
+    int? normalizeId(dynamic v) {
+      if (v is int) return v;
+      return int.tryParse(v?.toString() ?? '');
+    }
+
+    String labelFor(Map<String, dynamic> e) {
+      final locked = e['locked'] == true || e['locked']?.toString() == 'true';
+      final status = locked ? 'Completed' : 'Ongoing';
+      final t = (e['treatment'] ?? '').toString().trim();
+      final st = (e['subtype'] ?? '').toString().trim();
+      final pd = (e['procedure_date'] ?? '').toString().trim();
+      final proc = t.isEmpty ? status : (st.isNotEmpty ? '$status: $t ($st)' : '$status: $t');
+      return pd.isNotEmpty ? '$proc • $pd' : proc;
+    }
+
+    final items = <DropdownMenuItem<int>>[];
+    for (final raw in _episodes) {
+      final id = normalizeId(raw['id']);
+      if (id == null) continue;
+      items.add(
+        DropdownMenuItem<int>(
+          value: id,
+          child: Text(labelFor(raw), maxLines: 1, overflow: TextOverflow.ellipsis),
+        ),
+      );
+    }
+    if (items.isEmpty) return const SizedBox.shrink();
+
+    final currentValue = (_selectedEpisodeId != null && items.any((it) => it.value == _selectedEpisodeId))
+        ? _selectedEpisodeId
+        : items.first.value;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFF),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.blueGrey.shade100),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.history, color: Colors.black54),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text(
+              'Treatment history',
+              style: TextStyle(fontWeight: FontWeight.w600, color: Colors.black87),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            flex: 2,
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<int>(
+                isExpanded: true,
+                value: currentValue,
+                items: items,
+                onChanged: (val) {
+                  if (val == null) return;
+                  setState(() {
+                    _selectedEpisodeId = val;
+                    _selectedDateForInstructionsLog = '';
+                  });
+                  _loadAll();
+                },
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _recoveryDashboardSection() {
     final dayOfRecovery = _dayOfRecovery ?? 0;
     final progressPercent = _progressPercent ?? 0;
@@ -850,13 +980,12 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
                 child: Builder(
                   builder: (_) {
                     // Provide debug info about available dates when empty to help diagnose mismatches.
-                    final uniqueDates =
-                        _instructionStatus
-                            .map((e) => e['date']?.toString() ?? '')
-                            .where((d) => d.isNotEmpty)
-                            .toSet()
-                            .toList()
-                          ..sort();
+                    final uniqueDates = _instructionStatus
+                        .map((e) => e['date']?.toString() ?? '')
+                        .where((d) => d.isNotEmpty)
+                        .toSet()
+                        .toList()
+                      ..sort();
                     return Text(
                       'No instructions recorded for this day. (Have ${_instructionStatus.length} rows total across ${uniqueDates.length} dates)',
                       style: const TextStyle(color: Colors.black54, fontSize: 15),
@@ -887,8 +1016,8 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
               final Color? baseColor = type == 'general'
                   ? Colors.green[100]
                   : type == 'specific'
-                  ? Colors.red[100]
-                  : Colors.blue[100];
+                      ? Colors.red[100]
+                      : Colors.blue[100];
               final color = followed ? baseColor : Colors.grey[200];
               return Container(
                 margin: const EdgeInsets.only(bottom: 8),
@@ -1017,11 +1146,11 @@ class _Legend extends StatelessWidget {
   const _Legend({required this.color, required this.label});
   @override
   Widget build(BuildContext context) => Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Container(width: 14, height: 14, color: color),
-      const SizedBox(width: 4),
-      Text(label, style: const TextStyle(fontSize: 13)),
-    ],
-  );
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(width: 14, height: 14, color: color),
+          const SizedBox(width: 4),
+          Text(label, style: const TextStyle(fontSize: 13)),
+        ],
+      );
 }

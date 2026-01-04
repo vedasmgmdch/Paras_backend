@@ -699,6 +699,8 @@ class NotificationService {
       baseId + 610000000,
       baseId + 620000000,
       baseId + 630000000,
+      // Legacy catch-up one-off used by older scheduler variant
+      baseId + 800000000,
     ];
     for (final id in ids) {
       try {

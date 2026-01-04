@@ -1407,6 +1407,8 @@ async def doctor_list_instruction_status(
 async def doctor_instruction_status_full(
     username: str,
     days: int = 14,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
     filter_treatment: Optional[str] = None,
     filter_subtype: Optional[str] = None,
     db: AsyncSession = Depends(get_db)
@@ -1423,9 +1425,27 @@ async def doctor_instruction_status_full(
     patient = res.scalars().first()
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
-    date_to = _date.today()
-    date_from = date_to - _td(days=days-1)
-    q = select(models.InstructionStatus).where(models.InstructionStatus.patient_id == patient.id, models.InstructionStatus.date >= date_from, models.InstructionStatus.date <= date_to)
+
+    # Default window: last N days up to today (legacy behavior).
+    # If date_from/date_to are provided, they override days.
+    if date_from is None and date_to is None:
+        date_to = _date.today()
+        date_from = date_to - _td(days=days - 1)
+    else:
+        if date_from is None or date_to is None:
+            raise HTTPException(status_code=400, detail="Both date_from and date_to must be provided")
+        if date_from > date_to:
+            raise HTTPException(status_code=400, detail="date_from must be <= date_to")
+        # Explicit doctor queries are capped to the 14-day recovery window.
+        if (date_to - date_from).days + 1 > 14:
+            date_to = date_from + _td(days=13)
+        days = (date_to - date_from).days + 1
+        days = max(1, min(days, 14))
+    q = select(models.InstructionStatus).where(
+        models.InstructionStatus.patient_id == patient.id,
+        models.InstructionStatus.date >= date_from,
+        models.InstructionStatus.date <= date_to,
+    )
     if filter_treatment:
         q = q.where(models.InstructionStatus.treatment == filter_treatment)
     if filter_subtype:
@@ -1491,6 +1511,31 @@ async def doctor_instruction_status_full(
         ],
         "daily_summary": daily_summary,
     }
+
+
+@app.get("/doctor/patients/{username}/episodes", response_model=List[schemas.EpisodeResponse])
+async def doctor_get_patient_episodes(
+    username: str,
+    db: AsyncSession = Depends(get_db),
+    current_doctor: models.Doctor = Depends(get_current_doctor),
+):
+    """Return treatment episode history for a patient (doctor view).
+
+    Episodes are persisted as rows in treatment_episodes. Completed treatments are represented
+    as locked=true episodes.
+    """
+    res = await db.execute(select(models.Patient).where(models.Patient.username == username))
+    patient = res.scalars().first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    stmt = (
+        select(models.TreatmentEpisode)
+        .where(models.TreatmentEpisode.patient_id == patient.id)
+        .order_by(models.TreatmentEpisode.id.desc())
+    )
+    ep_res = await db.execute(stmt)
+    episodes = ep_res.scalars().all()
+    return [schemas.EpisodeResponse.model_validate(e, from_attributes=True) for e in episodes]
 
 @app.get("/doctor/patients/{username}/instruction-status/enhanced", response_model=schemas.InstructionStatusEnhancedResponse)
 async def doctor_instruction_status_enhanced(
@@ -2028,8 +2073,9 @@ async def mark_episode_complete(payload: schemas.MarkCompleteRequest, db: AsyncS
     # Immediately create a new open episode for the patient to start a fresh treatment
     new_ep = models.TreatmentEpisode(
         patient_id=object.__getattribute__(current_user, 'id'),
-        department=None,
-        doctor=None,
+        # Preserve assignment to keep /patients/by-doctor stable after completion.
+        department=getattr(ep, 'department', None) or getattr(current_user, 'department', None),
+        doctor=getattr(ep, 'doctor', None) or getattr(current_user, 'doctor', None),
         treatment=None,
         subtype=None,
         procedure_completed=False,

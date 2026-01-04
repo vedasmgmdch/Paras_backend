@@ -1096,6 +1096,28 @@ class ApiService {
   }
 
   // --------------------------
+  // ✅ Doctor: Get Patient Episode History
+  // --------------------------
+  static Future<List<Map<String, dynamic>>> doctorGetPatientEpisodes(String username) async {
+    try {
+      final headers = await getDoctorAuthHeaders();
+      final uri = Uri.parse('$baseUrl/doctor/patients/$username/episodes');
+      final res = await http.get(uri, headers: headers).timeout(_slowEndpointTimeout);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (data is List) {
+          return data.cast<Map<String, dynamic>>();
+        }
+      } else {
+        debugPrint('doctorGetPatientEpisodes failed: ${res.statusCode} → ${res.body}');
+      }
+    } catch (e) {
+      debugPrint('doctorGetPatientEpisodes error: $e');
+    }
+    return const [];
+  }
+
+  // --------------------------
   // ✅ Doctor: Combined full instruction status (raw + summary)
   // --------------------------
   static Future<Map<String, dynamic>?> doctorGetPatientInstructionStatusFull(
@@ -1103,22 +1125,26 @@ class ApiService {
     int days = 14,
     String? treatment,
     String? subtype,
+    String? dateFrom,
+    String? dateTo,
   }) async {
     try {
       final headers = await getDoctorAuthHeaders();
       final qp = <String, String>{'days': days.toString()};
-      if (treatment != null && treatment.isNotEmpty) qp['filter_treatment'] = treatment;
-      if (subtype != null && subtype.isNotEmpty) qp['filter_subtype'] = subtype;
+      if (treatment != null && treatment.trim().isNotEmpty) qp['filter_treatment'] = treatment;
+      if (subtype != null && subtype.trim().isNotEmpty) qp['filter_subtype'] = subtype;
+      if (dateFrom != null && dateFrom.trim().isNotEmpty) qp['date_from'] = dateFrom;
+      if (dateTo != null && dateTo.trim().isNotEmpty) qp['date_to'] = dateTo;
       final uri = Uri.parse('$baseUrl/doctor/patients/$username/instruction-status/full').replace(queryParameters: qp);
-      final res = await http.get(uri, headers: headers).timeout(const Duration(seconds: 10));
+      final res = await http.get(uri, headers: headers).timeout(_slowEndpointTimeout);
       if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        if (data is Map<String, dynamic>) return data;
+        final decoded = await _decodeJson(res.body);
+        if (decoded is Map<String, dynamic>) return decoded;
+        // ignore: avoid_print
+        print('doctorGetPatientInstructionStatusFull unexpected payload: ${decoded.runtimeType}');
       } else {
         debugPrint('doctorGetPatientInstructionStatusFull failed: ${res.statusCode} → ${res.body}');
       }
-    } on TimeoutException catch (_) {
-      debugPrint('[Api][timeout] doctorGetPatientInstructionStatusFull >10s');
     } catch (e) {
       debugPrint('doctorGetPatientInstructionStatusFull error: $e');
     }
