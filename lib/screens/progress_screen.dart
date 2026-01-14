@@ -223,69 +223,133 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
       _selectedDateForInstructionsLog = allDates.contains(todayStr) ? todayStr : allDates.last;
     }
 
-    final logsForSelectedDate =
-        latestLogs.where((log) => log['date']?.toString() == _selectedDateForInstructionsLog).toList();
-
-    // If nothing exists for the selected day, treat missing rows as "Not Followed".
-    // We can only infer expected instructions from what we've observed in this recovery window.
-    // This avoids "No records" hiding unfollowed instructions.
+    // Always materialize the selected day against the expected instruction catalog.
+    // This prevents duplicates and ensures "Not Followed" never exceeds the real checklist size.
     List<Map<String, dynamic>> materializedForSelectedDate() {
-      if (logsForSelectedDate.isNotEmpty) {
-        return logsForSelectedDate.cast<Map<String, dynamic>>();
+      String canonText(String s) => s.trim().replaceAll(RegExp(r'\s+'), ' ').replaceAll('–', '-').replaceAll('—', '-');
+
+      int? asInt(dynamic v) {
+        if (v == null) return null;
+        if (v is int) return v;
+        return int.tryParse(v.toString());
       }
 
-      String normText(String s) =>
-          s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ').replaceAll('–', '-').replaceAll('—', '-');
+      DateTime? parseUpdatedAt(Map<String, dynamic> raw) {
+        final candidates = [
+          raw['updated_at'],
+          raw['updatedAt'],
+          raw['timestamp'],
+          raw['created_at'],
+          raw['createdAt'],
+        ];
+        for (final c in candidates) {
+          if (c == null) continue;
+          final dt = DateTime.tryParse(c.toString());
+          if (dt != null) return dt;
+        }
+        return null;
+      }
 
-      // Prefer the current treatment's instruction catalog so we can materialize
-      // missing rows even if there are zero saved logs.
-      final Map<String, Map<String, dynamic>> expected = {};
-      final generalCatalog = [...appState.currentDos, ...appState.currentDonts]
-          .map((e) => e.toString().trim())
-          .where((e) => e.isNotEmpty)
-          .toList();
+      // IMPORTANT: Only include items that are actually *logged* by the instruction screens.
+      // Most screens show "don'ts" as text without checkboxes and they are not saved to logs.
+      final generalCatalog = appState.currentDos.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
       final specificCatalog =
           appState.currentSpecificSteps.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
 
+      // Build ordered expected list (deduped by stable identity).
+      final List<Map<String, dynamic>> expectedOrdered = [];
+      final Map<String, Map<String, dynamic>> expectedByKey = {};
+
       void addExpectedFromCatalog(String type, List<String> items) {
         for (final instruction in items) {
-          final idx = appState.stableInstructionIndex(type, instruction);
+          final canonical = canonText(instruction);
+          if (canonical.isEmpty) continue;
+          final idx = appState.stableInstructionIndex(type, canonical);
           final key = '$type|#${idx.toString()}';
-          expected.putIfAbsent(key, () {
-            return {
-              'type': type,
-              'instruction_index': idx,
-              'instruction': instruction,
-            };
-          });
+          if (expectedByKey.containsKey(key)) continue;
+          final row = {
+            'type': type,
+            'instruction_index': idx,
+            'instruction': canonical,
+          };
+          expectedByKey[key] = row;
+          expectedOrdered.add(row);
         }
       }
 
       addExpectedFromCatalog('general', generalCatalog);
       addExpectedFromCatalog('specific', specificCatalog);
 
-      // Fallback: if no catalog is available, infer expected instructions from
-      // what we've observed in this recovery window.
-      if (expected.isEmpty) {
-        for (final raw in filteredLogs) {
+      // Fallback: infer expected instructions from what we've observed in this recovery window.
+      if (expectedOrdered.isEmpty) {
+        for (final rawAny in filteredLogs) {
+          final raw = Map<String, dynamic>.from(rawAny);
           final type = (raw['type']?.toString() ?? '').trim().toLowerCase();
-          final idx = raw['instruction_index'];
-          final idxStr = (idx == null) ? '' : idx.toString();
+          if (type.isEmpty) continue;
           final instruction = (raw['instruction'] ?? raw['note'] ?? '').toString();
-          final key = idxStr.isNotEmpty ? '$type|#${idxStr}' : '$type|${normText(instruction)}';
-          expected.putIfAbsent(key, () {
-            return {
-              'type': type,
-              'instruction_index': idx,
-              'instruction': instruction,
-            };
-          });
+          final canonical = canonText(instruction);
+          final idx = asInt(raw['instruction_index']) ??
+              (canonical.isEmpty ? null : appState.stableInstructionIndex(type, canonical));
+          final key = idx != null ? '$type|#${idx.toString()}' : '$type|${canonical.toLowerCase()}';
+          if (expectedByKey.containsKey(key)) continue;
+          final row = {
+            'type': type,
+            'instruction_index': idx,
+            'instruction': canonical,
+          };
+          expectedByKey[key] = row;
+          expectedOrdered.add(row);
         }
       }
 
-      if (expected.isEmpty) return const [];
+      // Build latest per-day logs, de-duped by stable identity.
+      final List<Map<String, dynamic>> rawForDate = filteredLogs
+          .where((l) => (l['date']?.toString() ?? '') == _selectedDateForInstructionsLog)
+          .map((l) => Map<String, dynamic>.from(l))
+          .toList();
 
-      return expected.values.map((e) {
+      final Map<String, Map<String, dynamic>> latestByKey = {};
+      for (final raw in rawForDate) {
+        final type = (raw['type']?.toString() ?? '').trim().toLowerCase();
+        if (type.isEmpty) continue;
+        final instruction = (raw['instruction'] ?? raw['note'] ?? '').toString();
+        final canonical = canonText(instruction);
+        final stableIdx =
+            canonical.isNotEmpty ? appState.stableInstructionIndex(type, canonical) : asInt(raw['instruction_index']);
+        final key = stableIdx != null ? '$type|#${stableIdx.toString()}' : '$type|${canonical.toLowerCase()}';
+
+        // Normalize the stored index to the stable one so old inconsistent indices don't create duplicates.
+        raw['instruction_index'] = stableIdx;
+        raw['instruction'] = canonical.isNotEmpty ? canonical : instruction;
+
+        final existing = latestByKey[key];
+        if (existing == null) {
+          latestByKey[key] = raw;
+          continue;
+        }
+        final a = parseUpdatedAt(existing);
+        final b = parseUpdatedAt(raw);
+        if (a == null || b == null) {
+          // Fall back to last-write-wins if we can't compare timestamps.
+          latestByKey[key] = raw;
+        } else if (b.isAfter(a)) {
+          latestByKey[key] = raw;
+        }
+      }
+
+      if (expectedOrdered.isEmpty) {
+        // Nothing to materialize; just show de-duped day logs.
+        return latestByKey.values.toList();
+      }
+
+      // Merge: for each expected item, show real log if present; otherwise synthetic Not Followed.
+      return expectedOrdered.map((e) {
+        final type = (e['type'] ?? '').toString().trim().toLowerCase();
+        final idx = e['instruction_index'];
+        final key =
+            idx != null ? '$type|#${idx.toString()}' : '$type|${(e['instruction'] ?? '').toString().toLowerCase()}';
+        final log = latestByKey[key];
+        if (log != null) return log;
         return {
           ...e,
           'date': _selectedDateForInstructionsLog,
@@ -477,20 +541,33 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
     String normText(String s) =>
         s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ').replaceAll('–', '-').replaceAll('—', '-');
 
-    final generalCatalog = [...appState.currentDos, ...appState.currentDonts]
-        .map((e) => e.toString().trim())
-        .where((e) => e.isNotEmpty)
-        .toList();
+    String canonText(String s) => s.trim().replaceAll(RegExp(r'\s+'), ' ').replaceAll('–', '-').replaceAll('—', '-');
+
+    int? asInt(dynamic v) {
+      if (v == null) return null;
+      if (v is int) return v;
+      return int.tryParse(v.toString());
+    }
+
+    // IMPORTANT: Only include items that are actually logged by instruction screens (checkboxed).
+    // "Don'ts" are generally shown as text without checkboxes and are not stored, so they must
+    // NOT be counted as expected items.
+    final generalCatalog = appState.currentDos.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
     final specificCatalog =
         appState.currentSpecificSteps.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
 
-    final List<Map<String, dynamic>> expected = [];
+    final Map<String, Map<String, dynamic>> expectedByKey = {};
     void addExpected(String type, List<String> items) {
       for (final instruction in items) {
-        expected.add({
-          'type': type,
-          'instruction_index': appState.stableInstructionIndex(type, instruction),
-          'instruction': instruction,
+        final canonical = canonText(instruction);
+        if (canonical.isEmpty) continue;
+        final idx = appState.stableInstructionIndex(type, canonical);
+        expectedByKey.putIfAbsent('$type|#${idx.toString()}', () {
+          return {
+            'type': type,
+            'instruction_index': idx,
+            'instruction': canonical,
+          };
         });
       }
     }
@@ -498,20 +575,24 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
     addExpected('general', generalCatalog);
     addExpected('specific', specificCatalog);
 
+    final List<Map<String, dynamic>> expected = expectedByKey.values.toList();
+
     if (expected.isEmpty) {
       // Fallback to observed union.
       final Map<String, Map<String, dynamic>> byKey = {};
       for (final raw in filteredLogs) {
         final type = (raw['type']?.toString() ?? '').trim().toLowerCase();
-        final idx = raw['instruction_index'];
-        final idxStr = (idx == null) ? '' : idx.toString();
         final instruction = (raw['instruction'] ?? raw['note'] ?? '').toString();
-        final key = idxStr.isNotEmpty ? '$type|#${idxStr}' : '$type|${normText(instruction)}';
+        final canonical = canonText(instruction);
+        final idx = asInt(raw['instruction_index']) ??
+            (canonical.isEmpty ? null : appState.stableInstructionIndex(type, canonical));
+        final idxStr = (idx == null) ? '' : idx.toString();
+        final key = idxStr.isNotEmpty ? '$type|#${idxStr}' : '$type|${normText(canonical)}';
         byKey.putIfAbsent(key, () {
           return {
             'type': type,
             'instruction_index': idx,
-            'instruction': instruction,
+            'instruction': canonical,
           };
         });
       }

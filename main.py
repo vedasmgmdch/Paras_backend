@@ -1656,22 +1656,42 @@ async def doctor_instruction_status_enhanced(
     def _canon_group(g: Optional[str]) -> str:
         return (g or "").strip().lower()
 
+    def _canon_text(t: Optional[str]) -> str:
+        return instruction_catalog.canonical_instruction_text(t)
+
+    def _stable_idx(grp: str, text: str, fallback: int) -> int:
+        # Some historical rows may have used unstable indices; normalize to stable identity.
+        # If we can't compute from text, fall back to stored index.
+        try:
+            if grp and text:
+                return int(instruction_catalog.stable_instruction_index(grp, text))
+        except Exception:
+            pass
+        return int(fallback)
+
     # Build base structures
-    # Observed instruction identities across window (keyed by (group, instruction_index))
+    # Observed instruction identities across window (keyed by (group, stable_instruction_index))
     observed_keys: dict[tuple, dict] = {}
-    rows_by_date: dict[str, list] = {}
+    rows_by_date: dict[str, list[dict]] = {}
     for r in rows:
         ds = r.date.isoformat()
-        rows_by_date.setdefault(ds, []).append(r)
-
         grp = _canon_group(getattr(r, "group", None))
-        key = (grp, r.instruction_index)
-        # Keep first seen meta; instruction_text may vary historically, but identity is by index.
+        text = _canon_text(getattr(r, "instruction_text", None))
+        idx = _stable_idx(grp, text, getattr(r, "instruction_index", 0) or 0)
+        rows_by_date.setdefault(ds, []).append({
+            "row": r,
+            "group": grp,
+            "instruction_index": idx,
+            "instruction_text": text,
+        })
+
+        key = (grp, idx)
+        # Keep first seen meta; instruction_text may vary historically.
         if key not in observed_keys:
             observed_keys[key] = {
                 "group": grp,
-                "instruction_index": r.instruction_index,
-                "instruction_text": r.instruction_text,
+                "instruction_index": idx,
+                "instruction_text": text,
                 "treatment": r.treatment,
                 "subtype": r.subtype,
             }
@@ -1691,15 +1711,32 @@ async def doctor_instruction_status_enhanced(
         d = date_from + _td(days=i)
         ds = d.isoformat()
         real_rows = rows_by_date.get(ds, [])
-        real_map = {(_canon_group(getattr(r, "group", None)), r.instruction_index): r for r in real_rows}
+        # De-dupe any accidental duplicates for the same identity; prefer newest updated_at, else highest id.
+        real_map: dict[tuple, dict] = {}
+        for item in real_rows:
+            key = (item["group"], item["instruction_index"])
+            existing = real_map.get(key)
+            if existing is None:
+                real_map[key] = item
+                continue
+            r_new = item["row"]
+            r_old = existing["row"]
+            ua_new = getattr(r_new, "updated_at", None)
+            ua_old = getattr(r_old, "updated_at", None)
+            if ua_new is not None and ua_old is not None:
+                if ua_new > ua_old:
+                    real_map[key] = item
+            else:
+                if getattr(r_new, "id", 0) > getattr(r_old, "id", 0):
+                    real_map[key] = item
         materialized = []
         followed_ct = 0
         unfollowed_ct = 0
         if include_unfollowed_placeholders and baseline_keys:
             # Use catalog when available; else fallback to union-of-observed.
             for key, meta in baseline_keys.items():
-                r = real_map.get(key)
-                if r is None:
+                item = real_map.get(key)
+                if item is None:
                     # Placeholder synthetic entry (did not appear this day)
                     materialized.append({
                         "id": 0,
@@ -1715,15 +1752,16 @@ async def doctor_instruction_status_enhanced(
                     })
                     unfollowed_ct += 1
                 else:
+                    r = item["row"]
                     materialized.append({
                         "id": r.id,
                         "patient_id": r.patient_id,
                         "date": r.date,
                         "treatment": r.treatment,
                         "subtype": r.subtype,
-                        "group": _canon_group(getattr(r, "group", None)),
-                        "instruction_index": r.instruction_index,
-                        "instruction_text": r.instruction_text,
+                        "group": item["group"],
+                        "instruction_index": item["instruction_index"],
+                        "instruction_text": item["instruction_text"],
                         "followed": r.followed,
                         "synthetic": False,
                     })
@@ -1732,16 +1770,17 @@ async def doctor_instruction_status_enhanced(
                     else:
                         unfollowed_ct += 1
         else:
-            for r in real_rows:
+            for item in real_rows:
+                r = item["row"]
                 materialized.append({
                     "id": r.id,
                     "patient_id": r.patient_id,
                     "date": r.date,
                     "treatment": r.treatment,
                     "subtype": r.subtype,
-                    "group": _canon_group(getattr(r, "group", None)),
-                    "instruction_index": r.instruction_index,
-                    "instruction_text": r.instruction_text,
+                    "group": item["group"],
+                    "instruction_index": item["instruction_index"],
+                    "instruction_text": item["instruction_text"],
                     "followed": r.followed,
                     "synthetic": False,
                 })

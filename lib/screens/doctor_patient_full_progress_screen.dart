@@ -407,6 +407,9 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
     final date = (log['date'] ?? '').toString();
     final type = _normType((log['type'] ?? '').toString());
     final instruction = (log['instruction'] ?? log['note'] ?? '').toString();
+    final idx = log['instruction_index'];
+    final idxStr = (idx == null) ? '' : idx.toString();
+    if (idxStr.isNotEmpty) return '$date|$type|#${idxStr}';
     final n = _normText(instruction);
     return '$date|$type|$n';
   }
