@@ -20,6 +20,15 @@ class ProfileScreen extends StatelessWidget {
 
   // --- Fixed sign out method ---
   Future<void> _signOut(BuildContext context) async {
+    final rootNav = Navigator.of(context, rootNavigator: true);
+
+    // Show a blocking loader so the UI doesn't look stuck.
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
     final appState = Provider.of<AppState>(context, listen: false);
 
     // Stop future pushes for this user/device.
@@ -38,14 +47,11 @@ class ProfileScreen extends StatelessWidget {
     await ApiService.clearToken();
     await appState.reset();
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(
-          builder: (_) => WelcomeScreen(),
-        ),
-        (route) => false,
-      );
-    });
+    // Replace the full stack (also removes the loading dialog route).
+    rootNav.pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => WelcomeScreen()),
+      (route) => false,
+    );
   }
 
   @override

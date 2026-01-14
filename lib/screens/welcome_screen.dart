@@ -127,12 +127,12 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     final appState = Provider.of<AppState>(context, listen: false);
 
     // Always clear all state before loading new user!
-    appState.clearUserData();
+    await appState.clearUserData();
 
     // Ensure token is in AppState
     final savedToken = await ApiService.getSavedToken();
     if (savedToken != null) {
-      appState.setToken(savedToken);
+      await appState.setToken(savedToken);
     }
 
     // Register device token now that we're authenticated (triggers backend catch-up)
@@ -160,6 +160,15 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         appState.procedureDate = DateTime.tryParse((userDetails['procedure_date'] ?? '').toString());
         appState.procedureTime = _parseTimeOfDay(userDetails['procedure_time']);
       appState.procedureCompleted = userDetails['procedure_completed'] == true;
+
+      // Hydrate locally persisted data for this user so past days don't appear as "Not Followed"
+      // after a backend redeploy/reset or a sign-out/login cycle.
+      await appState.loadAllChecklists(username: appState.username);
+      await appState.loadInstructionLogs(username: appState.username, force: true);
+
+      // Best-effort: if backend lost rows during deploy, re-upload local truth.
+      // Non-blocking to keep login fast.
+      unawaited(appState.forceResyncInstructionLogs());
 
       // Pull server-side instruction ticks (non-blocking) so a new device matches the account.
       unawaited(appState.pullInstructionStatusChanges());
@@ -326,15 +335,15 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       // Normalize inputs
       _loginUsername = _loginUsername.trim();
       setState(() => _isLoading = true);
+      bool didSucceed = false;
       try {
         final loginFunction = widget.onLogin ?? _defaultLogin;
         final error = await loginFunction(context, _loginUsername.trim(), _loginPassword);
         if (error == null) {
-          _loginFormKey.currentState?.reset();
-          setState(() {
-            _loginUsername = '';
-            _loginPassword = '';
-          });
+          // Important: don't clear/reset the form here.
+          // Navigation typically happens immediately or on the next frame.
+          // Clearing first causes a brief "empty login" flash before routing.
+          didSucceed = true;
           return null;
         } else {
           _showErrorDialog("Login Failed", error);
@@ -344,7 +353,9 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         _showErrorDialog("Error", "An unexpected error occurred. Please try again.");
         return "Unknown Error";
       } finally {
-        setState(() => _isLoading = false);
+        if (!didSucceed && mounted) {
+          setState(() => _isLoading = false);
+        }
       }
     }
     return null;
@@ -429,14 +440,14 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFF),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32.0),
-          child: SingleChildScrollView(
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32.0),
             child: Column(
-              mainAxisSize: MainAxisSize.min,
               children: [
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -484,16 +495,26 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 24),
-                _isLoading
-                    ? const Padding(padding: EdgeInsets.symmetric(vertical: 32.0), child: CircularProgressIndicator())
-                    : _showSignUp
-                    ? _buildSignUpForm()
-                    : _buildLoginForm(context),
-                const SizedBox(height: 12),
-                TextButton(
-                  onPressed: _toggleForm,
-                  child: Text(_showSignUp ? "Already have an account? Login" : "Don't have an account? Sign up"),
+                Expanded(
+                  child: SingleChildScrollView(
+                    child: _isLoading
+                        ? const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 32.0),
+                            child: Center(child: CircularProgressIndicator()),
+                          )
+                        : (_showSignUp ? _buildSignUpForm() : _buildLoginForm(context)),
+                  ),
                 ),
+                if (_showSignUp) ...[
+                  const SizedBox(height: 12),
+                  Padding(
+                    padding: EdgeInsets.only(bottom: bottomInset > 0 ? 8 : 0),
+                    child: TextButton(
+                      onPressed: _isLoading ? null : _toggleForm,
+                      child: const Text("Already have an account? Login"),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -722,6 +743,14 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
           // Centered Login Button (below)
           Center(
             child: ElevatedButton(onPressed: _isLoading ? null : () => _handleLogin(), child: const Text("Login")),
+          ),
+          const SizedBox(height: 12),
+          TextButton(
+            onPressed: _isLoading ? null : _toggleForm,
+            child: const Text(
+              "Don't have an account? Sign up",
+              style: TextStyle(decoration: TextDecoration.underline),
+            ),
           ),
         ],
       ),

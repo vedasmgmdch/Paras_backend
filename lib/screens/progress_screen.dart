@@ -80,6 +80,28 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
     String norm(String s) =>
         s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ').replaceAll('–', '-').replaceAll('—', '-');
 
+    // Compatibility: older app versions stored instruction logs without treatment/subtype.
+    // To avoid mixing treatments, only treat empty treatment/subtype as wildcard when:
+    // - the current episode has a procedureDate, and
+    // - the log date is within the first 14 recovery days.
+    final appState = Provider.of<AppState>(context, listen: false);
+    final procedureDate = appState.procedureDate;
+    final DateTime? windowStart = procedureDate != null
+        ? DateTime(procedureDate.year, procedureDate.month, procedureDate.day)
+        : null;
+    final DateTime? windowEnd = windowStart?.add(const Duration(days: 13));
+
+    bool _isWithinRecoveryWindow(String dateStr) {
+      if (windowStart == null || windowEnd == null) return false;
+      try {
+        final d = DateTime.parse(dateStr);
+        final day = DateTime(d.year, d.month, d.day);
+        return !day.isBefore(windowStart) && !day.isAfter(windowEnd);
+      } catch (_) {
+        return false;
+      }
+    }
+
     final bool isPfdFixed = (treatment == 'Prosthesis Fitted' && subtype == 'Fixed Dentures');
     final Set<String> allowedPfdGeneral = {
       norm('Whenever local anesthesia is used, avoid chewing on your teeth until the numbness has worn off.'),
@@ -114,16 +136,27 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
 
     return logs.where((log) {
       if ((log['username'] ?? log['user'] ?? "default") != username) return false;
+      final logDate = (log['date'] ?? '').toString();
+      final inWindow = _isWithinRecoveryWindow(logDate);
       final logTreatment = (log['treatment'] ?? '').toString();
       if (treatment != null && treatment.isNotEmpty) {
-        // Accuracy > compatibility: don't treat empty treatment as wildcard,
-        // otherwise instructions from other treatments leak into the current treatment's log.
-        if (logTreatment != treatment) return false;
+        // If the log has an explicit treatment, require an exact match.
+        // If it's missing (legacy data), accept it only for this episode's recovery window.
+        if (logTreatment.isNotEmpty) {
+          if (logTreatment != treatment) return false;
+        } else {
+          if (!inWindow) return false;
+        }
       }
       final logSubtype = (log['subtype'] ?? '').toString();
       if (subtype != null && subtype.isNotEmpty) {
-        // Accuracy > compatibility: require exact subtype match to avoid cross-subtype mixing.
-        if (logSubtype != subtype) return false;
+        if (logSubtype.isNotEmpty) {
+          // Accuracy: require exact subtype match when present.
+          if (logSubtype != subtype) return false;
+        } else {
+          // Legacy subtype missing: only accept inside recovery window.
+          if (!inWindow) return false;
+        }
       }
 
       if (isPfdFixed) {
@@ -139,50 +172,6 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
 
       return true;
     }).toList();
-  }
-
-  List<Map<String, dynamic>> _getLatestInstructionLogs(List<dynamic> instructionLogs) {
-    final Map<String, Map<String, dynamic>> latestLogs = {};
-    for (var log in instructionLogs) {
-      final date = log['date']?.toString() ?? '';
-      final type = (log['type']?.toString() ?? '').trim().toLowerCase();
-      final instruction = log['instruction']?.toString() ?? log['note']?.toString() ?? '';
-      final idx = log['instruction_index'];
-      final idxStr = (idx == null) ? '' : idx.toString();
-      final key = idxStr.isNotEmpty ? '$date|$type|#${idxStr}' : '$date|$type|$instruction';
-      latestLogs[key] = log;
-    }
-    return latestLogs.values.toList();
-  }
-
-  Map<String, int> _getInstructionStats(List<dynamic> instructionLogs) {
-    int generalFollowed = 0;
-    int specificFollowed = 0;
-    int notFollowedGeneral = 0;
-    int notFollowedSpecific = 0;
-    for (var log in _getLatestInstructionLogs(instructionLogs)) {
-      final type = log['type']?.toString().toLowerCase() ?? '';
-      final followed = log['followed'] == true || log['followed']?.toString() == 'true';
-      if (type == 'general') {
-        if (followed) {
-          generalFollowed++;
-        } else {
-          notFollowedGeneral++;
-        }
-      } else if (type == 'specific') {
-        if (followed) {
-          specificFollowed++;
-        } else {
-          notFollowedSpecific++;
-        }
-      }
-    }
-    return {
-      'GeneralFollowed': generalFollowed,
-      'SpecificFollowed': specificFollowed,
-      'GeneralNotFollowed': notFollowedGeneral,
-      'SpecificNotFollowed': notFollowedSpecific,
-    };
   }
 
   Widget _buildInstructionsFollowedBox(List<dynamic> instructionLogs) {
@@ -201,8 +190,6 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
       treatment: _treatment,
       subtype: _subtype,
     );
-    // Show ALL latest instruction rows (followed and not) so earlier days aren't hidden.
-    final latestLogs = _getLatestInstructionLogs(filteredLogs);
 
     final nowLocal = appState.effectiveLocalNow();
     // Instructions log date dropdown must be limited to the first 14 days from procedure date.
@@ -227,6 +214,9 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
     // This prevents duplicates and ensures "Not Followed" never exceeds the real checklist size.
     List<Map<String, dynamic>> materializedForSelectedDate() {
       String canonText(String s) => s.trim().replaceAll(RegExp(r'\s+'), ' ').replaceAll('–', '-').replaceAll('—', '-');
+
+      String normText(String s) =>
+          s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ').replaceAll('–', '-').replaceAll('—', '-');
 
       int? asInt(dynamic v) {
         if (v == null) return null;
@@ -309,6 +299,7 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
           .toList();
 
       final Map<String, Map<String, dynamic>> latestByKey = {};
+      final Map<String, Map<String, dynamic>> latestByText = {};
       for (final raw in rawForDate) {
         final type = (raw['type']?.toString() ?? '').trim().toLowerCase();
         if (type.isEmpty) continue;
@@ -325,15 +316,30 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
         final existing = latestByKey[key];
         if (existing == null) {
           latestByKey[key] = raw;
-          continue;
+        } else {
+          final a = parseUpdatedAt(existing);
+          final b = parseUpdatedAt(raw);
+          if (a == null || b == null) {
+            // Fall back to last-write-wins if we can't compare timestamps.
+            latestByKey[key] = raw;
+          } else if (b.isAfter(a)) {
+            latestByKey[key] = raw;
+          }
         }
-        final a = parseUpdatedAt(existing);
-        final b = parseUpdatedAt(raw);
-        if (a == null || b == null) {
-          // Fall back to last-write-wins if we can't compare timestamps.
-          latestByKey[key] = raw;
-        } else if (b.isAfter(a)) {
-          latestByKey[key] = raw;
+
+        // Also keep a text-keyed view so we can match expected items even if indices drift.
+        final tKey = '$type|${normText(raw['instruction']?.toString() ?? '')}';
+        final existingT = latestByText[tKey];
+        if (existingT == null) {
+          latestByText[tKey] = raw;
+        } else {
+          final a2 = parseUpdatedAt(existingT);
+          final b2 = parseUpdatedAt(raw);
+          if (a2 == null || b2 == null) {
+            latestByText[tKey] = raw;
+          } else if (b2.isAfter(a2)) {
+            latestByText[tKey] = raw;
+          }
         }
       }
 
@@ -346,9 +352,9 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
       return expectedOrdered.map((e) {
         final type = (e['type'] ?? '').toString().trim().toLowerCase();
         final idx = e['instruction_index'];
-        final key =
-            idx != null ? '$type|#${idx.toString()}' : '$type|${(e['instruction'] ?? '').toString().toLowerCase()}';
-        final log = latestByKey[key];
+        final key = idx != null ? '$type|#${idx.toString()}' : null;
+        final tKey = '$type|${normText((e['instruction'] ?? '').toString())}';
+        final log = (key != null ? latestByKey[key] : null) ?? latestByText[tKey];
         if (log != null) return log;
         return {
           ...e,

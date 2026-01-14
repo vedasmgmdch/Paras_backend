@@ -1468,7 +1468,7 @@ class AppState extends ChangeNotifier {
   }
 
   // Properly use setters for private fields (fixes direct assignment error)
-  void clearUserData() async {
+  Future<void> clearUserData() async {
     username = null;
     patientId = null;
     fullName = null;

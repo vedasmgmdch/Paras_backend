@@ -8,6 +8,7 @@ import 'category_screen.dart';
 import 'home_screen.dart';
 import 'treatment_screen.dart';
 import '../services/push_service.dart';
+import 'welcome_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -324,36 +325,46 @@ class _LoginScreenState extends State<LoginScreen> {
                     onSaved: (v) => _password = (v ?? ''),
                   ),
                   const SizedBox(height: 24),
-                  const SizedBox(height: 24),
+                  // Forgot Password (right aligned)
                   SizedBox(
                     width: double.infinity,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        ElevatedButton(
-                          onPressed: _loading ? null : _handleLogin,
-                          child: _loading
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                                )
-                              : const Text("Login"),
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: _loading ? null : _showForgotPasswordDialog,
+                        child: const Text(
+                          "Forgot Password?",
+                          style: TextStyle(color: Color(0xFF6C63FF), fontWeight: FontWeight.w500),
                         ),
-                        const SizedBox(width: 16),
-                        TextButton(
-                          onPressed: _showForgotPasswordDialog,
-                          child: const Text(
-                            "Forgot Password?",
-                            style: TextStyle(color: Color(0xFF6C63FF), fontWeight: FontWeight.w500),
-                          ),
-                        ),
-                      ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  // Login button
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _loading ? null : _handleLogin,
+                      child: _loading
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Text("Login"),
                     ),
                   ),
                   const SizedBox(height: 12),
-                  GestureDetector(
-                    onTap: () {},
+                  // Sign up link directly below Login
+                  TextButton(
+                    onPressed: _loading
+                        ? null
+                        : () {
+                            Navigator.pushReplacement(
+                              context,
+                              MaterialPageRoute(builder: (_) => const WelcomeScreen()),
+                            );
+                          },
                     child: const Text(
                       "Don't have an account? Sign up",
                       style: TextStyle(color: Color(0xFF6C63FF), decoration: TextDecoration.underline),

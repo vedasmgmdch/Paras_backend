@@ -199,6 +199,13 @@ class _CategoryScreenState extends State<CategoryScreen> {
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () async {
+              final rootNav = Navigator.of(context, rootNavigator: true);
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (_) => const Center(child: CircularProgressIndicator()),
+              );
+
               // Stop future pushes for this user/device.
               try {
                 await ApiService.unregisterAllDeviceTokens();
@@ -216,9 +223,10 @@ class _CategoryScreenState extends State<CategoryScreen> {
               await prefs.remove('token');
               // Clear all in-memory user/account state
               final appState = Provider.of<AppState>(context, listen: false);
-              appState.clearUserData();
+              await appState.clearUserData();
               if (!mounted) return;
-              Navigator.of(context).pushAndRemoveUntil(
+              // Replace the full stack (also removes the loading dialog route).
+              rootNav.pushAndRemoveUntil(
                 MaterialPageRoute(builder: (_) => const WelcomeScreen()),
                 (route) => false,
               );
