@@ -7,7 +7,16 @@ from sqlalchemy.orm import declarative_base
 from dotenv import load_dotenv
 
 # ✅ Load environment variables from .env file
-load_dotenv()
+# Render mounts Secret Files at /etc/secrets/<filename> (commonly /etc/secrets/.env).
+# Prefer an explicit DOTENV_PATH if provided, otherwise try Render's default location,
+# and finally fall back to the local .env discovery behavior.
+dotenv_path = os.getenv("DOTENV_PATH")
+if dotenv_path and os.path.exists(dotenv_path):
+    load_dotenv(dotenv_path)
+elif os.path.exists("/etc/secrets/.env"):
+    load_dotenv("/etc/secrets/.env")
+else:
+    load_dotenv()
 
 def _normalize_asyncpg_url(url: str) -> str:
     # Neon and many providers provide postgres:// or postgresql://
