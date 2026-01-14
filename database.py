@@ -1,7 +1,7 @@
 import os
 import ssl
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, urlsplit, urlunsplit, parse_qsl, urlencode
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 from dotenv import load_dotenv
@@ -44,6 +44,24 @@ def _should_require_ssl(url: str) -> bool:
         pass
     return False
 
+def _strip_asyncpg_unsupported_query_params(url: str) -> str:
+    """asyncpg does not accept libpq-style parameters like sslmode/channel_binding.
+
+    If these are present in DATABASE_URL, SQLAlchemy's asyncpg dialect will forward
+    them into asyncpg.connect(...), causing a TypeError.
+    """
+    try:
+        parts = urlsplit(url)
+        if not parts.query:
+            return url
+        pairs = parse_qsl(parts.query, keep_blank_values=True)
+        blocked = {"sslmode", "channel_binding"}
+        filtered = [(k, v) for (k, v) in pairs if k.lower() not in blocked]
+        new_query = urlencode(filtered, doseq=True)
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, parts.fragment))
+    except Exception:
+        return url
+
 # ✅ Read database connection details from environment (PostgreSQL)
 DATABASE_URL_ENV = os.getenv("DATABASE_URL") or os.getenv("NEON_DATABASE_URL")
 
@@ -57,8 +75,10 @@ DB_PASSWORD = os.getenv("DB_PASSWORD")
 connect_args = None
 
 if DATABASE_URL_ENV:
-    DATABASE_URL = _normalize_asyncpg_url(DATABASE_URL_ENV)
-    if _should_require_ssl(DATABASE_URL):
+    raw_url = _normalize_asyncpg_url(DATABASE_URL_ENV)
+    requires_ssl = _should_require_ssl(raw_url)
+    DATABASE_URL = _strip_asyncpg_unsupported_query_params(raw_url)
+    if requires_ssl:
         connect_args = {"ssl": ssl.create_default_context()}
     print("[DB] Using PostgreSQL via asyncpg (DATABASE_URL detected)")
 else:

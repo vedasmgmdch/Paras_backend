@@ -78,7 +78,7 @@ async def schedule_existing_unverified_cleanup() -> None:
 async def healthz():
     # Cheap DB probe (optional, ignore errors to still return ok if DB transiently slow)
     try:
-        async with get_db() as db:  # type: ignore
+        async with AsyncSessionLocal() as db:
             await db.execute(select(1))
         db_ok = True
     except Exception:
