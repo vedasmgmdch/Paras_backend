@@ -13,7 +13,16 @@ def _canonical_treatment(value: Optional[str]) -> str:
     # Back-compat aliases (mirrors Flutter AppState._canonicalTreatment)
     if s == "prosthesis":
         return "Prosthesis Fitted"
-    return raw
+    # Case-insensitive normalization for known treatments in this catalog
+    known = {
+        "braces": "Braces",
+        "tooth taken out": "Tooth Taken Out",
+        "root canal/filling": "Root Canal/Filling",
+        "implant": "Implant",
+        "tooth fracture": "Tooth Fracture",
+        "prosthesis fitted": "Prosthesis Fitted",
+    }
+    return known.get(s, raw)
 
 
 def _canonical_subtype(treatment: Optional[str], value: Optional[str]) -> str:
@@ -29,6 +38,23 @@ def _canonical_subtype(treatment: Optional[str], value: Optional[str]) -> str:
             return "Fixed Dentures"
         if s in {"removable", "removable denture", "removable dentures"}:
             return "Removable Dentures"
+
+    if t == "Implant":
+        if s in {"first stage"}:
+            return "First Stage"
+        if s in {"second stage"}:
+            return "Second Stage"
+
+    if t == "Tooth Fracture":
+        # Common variants
+        if s in {"teeth cleaning", "cleaning"}:
+            return "Teeth Cleaning"
+        if s in {"teeth whitening", "whitening"}:
+            return "Teeth Whitening"
+        if s in {"gum surgery"}:
+            return "Gum Surgery"
+        if s in {"veneers", "laminates", "veneers/laminates", "veneers laminates"}:
+            return "Veneers/Laminates"
 
     return raw
 

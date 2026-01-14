@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'services/api_service.dart';
 import 'package:intl/intl.dart';
+import 'instruction_catalog.dart';
 
 class AppState extends ChangeNotifier {
   // Reusable date formatter (yyyy-MM-dd) to standardize instruction log dates
@@ -1202,23 +1203,25 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  // Treatment instructions
-  final Map<String, List<String>> _treatmentInstructions = {};
-
-  List<String> get currentTreatmentInstructions {
-    if (_treatment == null) return [];
-    final baseInstructions = _treatmentInstructions[_treatment!] ?? [];
-    if (_treatmentSubtype != null && _treatmentSubtype!.isNotEmpty) {
-      final subtypeKey = '$_treatment:$_treatmentSubtype';
-      final subtypeInstructions = _treatmentInstructions[subtypeKey] ?? [];
-      return [...baseInstructions, ...subtypeInstructions];
-    }
-    return baseInstructions;
+  // Treatment instructions (expected/loggable)
+  // NOTE: The older _treatmentInstructions + fixed slicing (4 dos/2 donts/rest specific)
+  // was incorrect for several treatments and was never populated in this codebase.
+  // We now use a centralized catalog of the *logged/checkable* instructions.
+  Map<String, List<String>> _currentExpectedByGroup() {
+    final expected = InstructionCatalog.getExpected(treatment: _treatment, subtype: _treatmentSubtype);
+    if (expected == null) return const {};
+    return expected;
   }
 
-  List<String> get currentDos => currentTreatmentInstructions.take(4).toList();
-  List<String> get currentDonts => currentTreatmentInstructions.skip(4).take(2).toList();
-  List<String> get currentSpecificSteps => currentTreatmentInstructions.skip(6).toList();
+  List<String> get currentDos => List<String>.from(
+      (_currentExpectedByGroup()['general'] ?? const []).map(_canonicalInstructionText).where((e) => e.isNotEmpty));
+
+  // "Don'ts" are informational in most screens and are not logged as checklist items.
+  // Keep this empty so Progress screens don't count them as expected.
+  List<String> get currentDonts => const [];
+
+  List<String> get currentSpecificSteps => List<String>.from(
+      (_currentExpectedByGroup()['specific'] ?? const []).map(_canonicalInstructionText).where((e) => e.isNotEmpty));
 
   void setUserDetails({
     int? patientId,
