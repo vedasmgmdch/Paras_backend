@@ -286,6 +286,7 @@ class NotificationService {
       visibility: NotificationVisibility.public,
       playSound: true,
       enableVibration: true,
+      autoCancel: false,
     );
     const NotificationDetails details = NotificationDetails(android: androidDetails, iOS: DarwinNotificationDetails());
     try {
@@ -341,6 +342,7 @@ class NotificationService {
       visibility: NotificationVisibility.public,
       playSound: true,
       enableVibration: true,
+      autoCancel: false,
     );
     const NotificationDetails details = NotificationDetails(android: androidDetails, iOS: DarwinNotificationDetails());
     try {
@@ -404,6 +406,7 @@ class NotificationService {
       visibility: NotificationVisibility.public,
       playSound: true,
       enableVibration: true,
+      autoCancel: false,
     );
     const NotificationDetails details = NotificationDetails(android: androidDetails, iOS: DarwinNotificationDetails());
     try {
@@ -600,6 +603,7 @@ class NotificationService {
       visibility: NotificationVisibility.public,
       playSound: true,
       enableVibration: true,
+      autoCancel: false,
     );
     const NotificationDetails details = NotificationDetails(android: androidDetails, iOS: DarwinNotificationDetails());
 
@@ -801,6 +805,7 @@ class NotificationService {
       visibility: NotificationVisibility.public,
       playSound: true,
       enableVibration: true,
+      autoCancel: false,
     );
     const NotificationDetails details = NotificationDetails(android: androidDetails, iOS: DarwinNotificationDetails());
     await _plugin.show(id, title, body, details);

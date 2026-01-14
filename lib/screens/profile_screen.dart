@@ -2,14 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../services/api_service.dart';
+import '../services/notification_service.dart';
+import '../services/push_service.dart';
 import 'welcome_screen.dart'; // <-- Adjust this path if needed!
 import 'calendar_screen.dart';
 import '../widgets/ui_safety.dart';
 
-
 class ProfileScreen extends StatelessWidget {
   final VoidCallback? onCheckRecoveryCalendar; // For Calendar tab switch
-  final VoidCallback? onViewCareInstructions;  // For Instructions tab switch
+  final VoidCallback? onViewCareInstructions; // For Instructions tab switch
 
   const ProfileScreen({
     super.key,
@@ -20,6 +21,20 @@ class ProfileScreen extends StatelessWidget {
   // --- Fixed sign out method ---
   Future<void> _signOut(BuildContext context) async {
     final appState = Provider.of<AppState>(context, listen: false);
+
+    // Stop future pushes for this user/device.
+    try {
+      await ApiService.unregisterAllDeviceTokens();
+    } catch (_) {}
+
+    // Best-effort local cleanup.
+    try {
+      await NotificationService.cancelAllPending();
+    } catch (_) {}
+    try {
+      await PushService.onLogout();
+    } catch (_) {}
+
     await ApiService.clearToken();
     await appState.reset();
 
@@ -28,20 +43,18 @@ class ProfileScreen extends StatelessWidget {
         MaterialPageRoute(
           builder: (_) => WelcomeScreen(),
         ),
-            (route) => false,
+        (route) => false,
       );
     });
   }
 
-
   @override
   Widget build(BuildContext context) {
     final appState = Provider.of<AppState>(context);
-    final patientId = "#1";
+    final patientId = appState.patientId != null ? "#${appState.patientId}" : "Not specified";
     final fullName = appState.fullName ?? "Not specified";
-    final dob = appState.dob != null
-        ? "${appState.dob!.day}/${appState.dob!.month}/${appState.dob!.year}"
-        : "Not specified";
+    final dob =
+        appState.dob != null ? "${appState.dob!.day}/${appState.dob!.month}/${appState.dob!.year}" : "Not specified";
     final gender = appState.gender ?? "Not specified";
     final username = appState.username ?? "Not specified";
     final phone = appState.phone ?? "Not specified";
@@ -49,10 +62,7 @@ class ProfileScreen extends StatelessWidget {
     final procedureDate = appState.procedureDate;
     final today = DateTime.now();
     final recoveryDay = procedureDate != null
-        ? (today
-        .difference(DateTime(procedureDate.year, procedureDate.month, procedureDate.day))
-        .inDays +
-        1)
+        ? (today.difference(DateTime(procedureDate.year, procedureDate.month, procedureDate.day)).inDays + 1)
         : 0;
 
     final dosList = [
@@ -70,135 +80,129 @@ class ProfileScreen extends StatelessWidget {
       body: SafeArea(
         child: SingleChildScrollView(
           child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 440),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 20.0, horizontal: 8.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  // --- Sign Out Button at top right ---
-                  Align(
-                    alignment: Alignment.topRight,
-                    child: Padding(
-                      padding: const EdgeInsets.only(bottom: 10.0),
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8)),
-                          padding: const EdgeInsets.symmetric(
-                              vertical: 10, horizontal: 18),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 440),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 20.0, horizontal: 8.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    // --- Sign Out Button at top right ---
+                    Align(
+                      alignment: Alignment.topRight,
+                      child: Padding(
+                        padding: const EdgeInsets.only(bottom: 10.0),
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 18),
+                          ),
+                          icon: const Icon(Icons.exit_to_app),
+                          label: const Text(
+                            "Sign Out",
+                            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                          ),
+                          onPressed: () => _signOut(context),
                         ),
-                        icon: const Icon(Icons.exit_to_app),
-                        label: const Text(
-                          "Sign Out",
-                          style: TextStyle(
-                              fontSize: 15, fontWeight: FontWeight.bold),
-                        ),
-                        onPressed: () => _signOut(context),
                       ),
                     ),
-                  ),
-                  // Header
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 20),
-                    padding: const EdgeInsets.all(22),
-                    width: double.infinity,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF2196F3),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: const [
-                        Text(
-                          'Patient Profile',
-                          style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
-                        ),
-                        SizedBox(height: 6),
-                        Text(
-                          "Your recovery information",
-                          style: TextStyle(fontSize: 15, color: Colors.white),
-                        ),
-                      ],
-                    ),
-                  ),
-                  // Personal Information Card
-                  Card(
-                    margin: const EdgeInsets.only(bottom: 20),
-                    elevation: 2,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    child: Padding(
-                      padding: const EdgeInsets.all(18.0),
+                    // Header
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 20),
+                      padding: const EdgeInsets.all(22),
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF2196F3),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Row(
-                                children: const [
-                                  Icon(Icons.person_outline, color: Color(0xFF2196F3)),
-                                  SizedBox(width: 8),
-                                  Text('Personal Information',
-                                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
-                                ],
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.edit, color: Colors.blue),
-                                onPressed: () {
-                                  _showEditBottomSheet(context, appState);
-                                },
-                              ),
-                            ],
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          Text(
+                            'Patient Profile',
+                            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
                           ),
-                          const SizedBox(height: 10),
-                          const Icon(Icons.account_circle, size: 54, color: Colors.blueGrey),
-                          const SizedBox(height: 8),
-                          Text(fullName,
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 22)),
-                          Text('Patient ID: $patientId',
-                              style: const TextStyle(color: Colors.grey, fontSize: 15)),
-                          const SizedBox(height: 16),
-
-                          _infoTile(Icons.badge, 'Full Name', fullName, Colors.blue[50]!),
-                          _infoTile(Icons.cake, 'Date of Birth', dob, Colors.blue[50]!),
-                          _infoTile(Icons.person, 'Gender', gender, Colors.blue[50]!),
-                          _infoTile(Icons.account_circle, 'Username', username, Colors.blue[50]!),
-                          _infoTile(Icons.phone, 'Phone', phone, Colors.blue[50]!),
-                          _infoTile(Icons.email, 'Email', email, Colors.blue[50]!, isEmail: true),
-                          const SizedBox(height: 16),
-                          _infoTile(
-                            Icons.calendar_today,
-                            'Procedure Date',
-                            procedureDate != null
-                                ? "${procedureDate.day}/${procedureDate.month}/${procedureDate.year}"
-                                : "-",
-                            const Color(0xFFE8F0FE),
-                          ),
-                          _infoTile(
-                            Icons.bar_chart,
-                            'Recovery Day',
-                            "Day $recoveryDay",
-                            const Color(0xFFFFF6E5),
+                          SizedBox(height: 6),
+                          Text(
+                            "Your recovery information",
+                            style: TextStyle(fontSize: 15, color: Colors.white),
                           ),
                         ],
                       ),
                     ),
-                  ),
-                  // Emergency Contact
-                  _buildEmergencyContact(),
-                  // Today's Checklist
-                  _buildChecklist(dosList, checks),
-                  // Quick Actions
-                  _buildQuickActions(context),
-                  const SizedBox(height: 24),
-                ],
+                    // Personal Information Card
+                    Card(
+                      margin: const EdgeInsets.only(bottom: 20),
+                      elevation: 2,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      child: Padding(
+                        padding: const EdgeInsets.all(18.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Row(
+                                  children: const [
+                                    Icon(Icons.person_outline, color: Color(0xFF2196F3)),
+                                    SizedBox(width: 8),
+                                    Text('Personal Information',
+                                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
+                                  ],
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.edit, color: Colors.blue),
+                                  onPressed: () {
+                                    _showEditBottomSheet(context, appState);
+                                  },
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            const Icon(Icons.account_circle, size: 54, color: Colors.blueGrey),
+                            const SizedBox(height: 8),
+                            Text(fullName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 22)),
+                            Text('Patient ID: $patientId', style: const TextStyle(color: Colors.grey, fontSize: 15)),
+                            const SizedBox(height: 16),
+                            _infoTile(Icons.badge, 'Full Name', fullName, Colors.blue[50]!),
+                            _infoTile(Icons.cake, 'Date of Birth', dob, Colors.blue[50]!),
+                            _infoTile(Icons.person, 'Gender', gender, Colors.blue[50]!),
+                            _infoTile(Icons.account_circle, 'Username', username, Colors.blue[50]!),
+                            _infoTile(Icons.phone, 'Phone', phone, Colors.blue[50]!),
+                            _infoTile(Icons.email, 'Email', email, Colors.blue[50]!, isEmail: true),
+                            const SizedBox(height: 16),
+                            _infoTile(
+                              Icons.calendar_today,
+                              'Procedure Date',
+                              procedureDate != null
+                                  ? "${procedureDate.day}/${procedureDate.month}/${procedureDate.year}"
+                                  : "-",
+                              const Color(0xFFE8F0FE),
+                            ),
+                            _infoTile(
+                              Icons.bar_chart,
+                              'Recovery Day',
+                              "Day $recoveryDay",
+                              const Color(0xFFFFF6E5),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    // Emergency Contact
+                    _buildEmergencyContact(),
+                    // Today's Checklist
+                    _buildChecklist(dosList, checks),
+                    // Quick Actions
+                    _buildQuickActions(context),
+                    const SizedBox(height: 24),
+                  ],
+                ),
               ),
             ),
-          ),
           ),
         ),
       ),
@@ -344,8 +348,7 @@ class ProfileScreen extends StatelessWidget {
               children: const [
                 Icon(Icons.local_phone, color: Colors.redAccent),
                 SizedBox(width: 8),
-                Text("Emergency Contact",
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
+                Text("Emergency Contact", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
               ],
             ),
             const SizedBox(height: 12),
@@ -360,10 +363,7 @@ class ProfileScreen extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text("Dental Office",
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.redAccent,
-                          fontSize: 16)),
+                      style: TextStyle(fontWeight: FontWeight.bold, color: Colors.redAccent, fontSize: 16)),
                   const SizedBox(height: 4),
                   Row(
                     children: const [
@@ -393,9 +393,9 @@ class ProfileScreen extends StatelessWidget {
             const SizedBox(height: 4),
             const Text(
               "• Severe pain not relieved by medication\n"
-                  "• Excessive bleeding after 24 hours\n"
-                  "• Signs of infection (fever, pus, severe swelling)\n"
-                  "• Numbness lasting more than 24 hours",
+              "• Excessive bleeding after 24 hours\n"
+              "• Signs of infection (fever, pus, severe swelling)\n"
+              "• Numbness lasting more than 24 hours",
               style: TextStyle(fontSize: 15),
             ),
           ],
@@ -417,8 +417,7 @@ class ProfileScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text("Today's Checklist",
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
+            const Text("Today's Checklist", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
             const SizedBox(height: 14),
             ...List.generate(dosList.length, (i) {
               final checked = i < checks.length ? checks[i] : false;
@@ -488,8 +487,7 @@ class ProfileScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text("Quick Actions",
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
+            const Text("Quick Actions", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
             const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
@@ -508,8 +506,8 @@ class ProfileScreen extends StatelessWidget {
                     // (replace with your instructions screen navigation if needed)
                   }
                 },
-                child: const Text("View Care Instructions",
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                child:
+                    const Text("View Care Instructions", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               ),
             ),
             const SizedBox(height: 10),
@@ -531,8 +529,8 @@ class ProfileScreen extends StatelessWidget {
                     );
                   }
                 },
-                child: const Text("Check Recovery Calendar",
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                child:
+                    const Text("Check Recovery Calendar", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               ),
             ),
           ],

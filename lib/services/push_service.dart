@@ -7,17 +7,41 @@ import 'api_service.dart';
 import 'notification_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+String _formatLateLabel({required DateTime nowUtc, required DateTime scheduledUtc}) {
+  final diff = nowUtc.difference(scheduledUtc);
+  if (diff.inSeconds <= 30) return 'Just now';
+  if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
+  if (diff.inHours < 24) return '${diff.inHours} hr ago';
+  return '${diff.inDays} day(s) ago';
+}
+
+String _applyLateSuffix(String body, String? lateLabel) {
+  if (lateLabel == null || lateLabel.trim().isEmpty) return body;
+  // Keep it simple and readable on Android notification UI.
+  return '$body\n$lateLabel';
+}
+
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // NOTE: This runs in a background Dart isolate.
   // Keep it minimal and avoid UI/navigation work.
   if (!Platform.isAndroid) return;
+
+  // If the user is logged out, do not surface reminder pushes.
+  // (Backend token cleanup on logout should prevent most pushes, but this
+  // guards against stale tokens or race windows.)
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final loggedIn = prefs.containsKey('token');
+    if (!loggedIn) return;
+  } catch (_) {}
+
   try {
     await Firebase.initializeApp();
   } catch (_) {}
 
-  // If the message contains a notification payload, Android will display it automatically
-  // while the app is backgrounded. Avoid duplicates.
+  // We rely on *data-only* reminder pushes so we can render "X min ago" when delivered late.
+  // If a notification payload is present, Android may display it automatically and we skip to avoid duplicates.
   if (message.notification != null) return;
 
   final data = message.data;
@@ -27,6 +51,16 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   final title = data['title']?.toString();
   final body = data['body']?.toString();
   if (title == null || body == null) return;
+
+  String? lateLabel;
+  try {
+    final scheduledStr = data['scheduled_utc']?.toString();
+    final scheduledUtc = scheduledStr == null ? null : DateTime.tryParse(scheduledStr);
+    if (scheduledUtc != null) {
+      lateLabel = _formatLateLabel(nowUtc: DateTime.now().toUtc(), scheduledUtc: scheduledUtc.toUtc());
+    }
+  } catch (_) {}
+  final displayBody = _applyLateSuffix(body, lateLabel);
 
   int id = DateTime.now().millisecondsSinceEpoch.remainder(2147483647);
   final rid = data['reminder_id']?.toString();
@@ -63,9 +97,10 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
         priority: Priority.max,
         playSound: true,
         enableVibration: true,
+        autoCancel: false,
       ),
     );
-    await plugin.show(id, title, body, details);
+    await plugin.show(id, title, displayBody, details);
   } catch (_) {}
 }
 
@@ -153,13 +188,30 @@ class PushService {
     // Suppress foreground popups to avoid burst notifications on app reopen.
     // Background notifications (system handled) will still appear if the message carries a notification payload.
     FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
+      // If logged out, suppress all foreground reminder popups.
+      // (Should be rare because token registration is tied to auth.)
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final loggedIn = prefs.containsKey('token');
+        if (!loggedIn) return;
+      } catch (_) {}
+
       final kind = (message.data['kind'] ?? message.data['type'])?.toString();
-      final title = message.notification?.title;
-      final body = message.notification?.body;
+      final title = message.notification?.title ?? message.data['title']?.toString();
+      final body = message.notification?.body ?? message.data['body']?.toString();
 
       // Important: Android does NOT display FCM notification messages while the app is in the foreground.
       // We only surface reminders here to avoid "burst" popups for other message types.
       if (kind == 'reminder' && title != null && body != null) {
+        String? lateLabel;
+        try {
+          final scheduledStr = message.data['scheduled_utc']?.toString();
+          final scheduledUtc = scheduledStr == null ? null : DateTime.tryParse(scheduledStr);
+          if (scheduledUtc != null) {
+            lateLabel = _formatLateLabel(nowUtc: DateTime.now().toUtc(), scheduledUtc: scheduledUtc.toUtc());
+          }
+        } catch (_) {}
+        final displayBody = _applyLateSuffix(body, lateLabel);
         int id = DateTime.now().millisecondsSinceEpoch.remainder(2147483647);
         final rid = message.data['reminder_id']?.toString();
         if (rid != null) {
@@ -167,7 +219,7 @@ class PushService {
           if (parsed != null) id = parsed;
         }
         try {
-          await NotificationService.showNow(id: id, title: title, body: body);
+          await NotificationService.showNow(id: id, title: title, body: displayBody);
         } catch (e) {
           if (kDebugMode) {
             print('Foreground reminder local-notification error: $e');
@@ -175,10 +227,30 @@ class PushService {
         }
       } else {
         if (kDebugMode) {
-          print('FCM foreground message received (suppressed): title="${title ?? ''}" body="${body ?? ''}" data=${message.data}');
+          print(
+              'FCM foreground message received (suppressed): title="${title ?? ''}" body="${body ?? ''}" data=${message.data}');
         }
       }
     });
+  }
+
+  // Call on logout (best-effort). This prevents future pushes being delivered
+  // if the backend still has a stale token, and forces a new token on next login.
+  static Future<void> onLogout() async {
+    _pendingRegistration = false;
+    _registeredThisSession = false;
+    if (!Platform.isAndroid) return;
+    try {
+      if (!_initialized) {
+        try {
+          await Firebase.initializeApp();
+          _initialized = true;
+        } catch (_) {}
+      }
+      try {
+        await FirebaseMessaging.instance.deleteToken();
+      } catch (_) {}
+    } catch (_) {}
   }
 
   // Explicitly (re)register the current FCM token with the backend.
@@ -187,6 +259,15 @@ class PushService {
   static Future<void> registerNow() async {
     if (!Platform.isAndroid) return;
     try {
+      // In some flows registerNow can be called before initializeAndRegister.
+      // Ensure Firebase is initialized.
+      if (!_initialized) {
+        try {
+          await Firebase.initializeApp();
+          _initialized = true;
+        } catch (_) {}
+      }
+
       final loggedIn = await ApiService.checkIfLoggedIn();
       if (!loggedIn) {
         if (kDebugMode) print('registerNow: skipped (not logged in)');
@@ -198,7 +279,13 @@ class PushService {
         _pendingRegistration = false;
         return;
       }
-      final token = await FirebaseMessaging.instance.getToken();
+      String? token;
+      // After logout we may deleteToken(); allow a short window for a new token.
+      for (int attempt = 0; attempt < 3; attempt++) {
+        token = await FirebaseMessaging.instance.getToken();
+        if (token != null && token.isNotEmpty) break;
+        await Future<void>.delayed(const Duration(milliseconds: 600));
+      }
       if (kDebugMode) {
         print('PushService.registerNow() FCM token: $token');
       }
@@ -213,6 +300,9 @@ class PushService {
           _registeredThisSession = true;
         }
         _pendingRegistration = !ok;
+      } else {
+        // Token unavailable; try again later.
+        _pendingRegistration = true;
       }
     } catch (e) {
       if (kDebugMode) {

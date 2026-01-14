@@ -25,11 +25,10 @@ class _ISSInstructionsScreenState extends State<ISSInstructionsScreen>
     final appState = Provider.of<AppState>(context, listen: false);
     for (int i = 0; i < doList.length; i++) {
       appState.addInstructionLog(
-        doList[i][selectedLang] ?? '',
+        doList[i]['en'] ?? '',
         date: logDateStr,
         type: 'general',
         followed: _dosChecked.length > i ? _dosChecked[i] : false,
-        instructionIndex: i,
         username: appState.username,
         treatment: appState.treatment,
         subtype: appState.treatmentSubtype,
@@ -37,11 +36,10 @@ class _ISSInstructionsScreenState extends State<ISSInstructionsScreen>
     }
     for (int i = 0; i < specificInstructions.length; i++) {
       appState.addInstructionLog(
-        specificInstructions[i][selectedLang] ?? '',
+        specificInstructions[i]['en'] ?? '',
         date: logDateStr,
         type: 'specific',
         followed: _specificChecked.length > i ? _specificChecked[i] : false,
-        instructionIndex: i,
         username: appState.username,
         treatment: appState.treatment,
         subtype: appState.treatmentSubtype,
@@ -131,7 +129,7 @@ class _ISSInstructionsScreenState extends State<ISSInstructionsScreen>
           day: selectedDate,
           type: 'general',
           length: doList.length,
-          instructionTextForIndex: (i) => doList[i][selectedLang] ?? '',
+          instructionTextForIndex: (i) => doList[i]['en'] ?? '',
           username: appState.username,
           treatment: appState.treatment,
           subtype: appState.treatmentSubtype,
@@ -140,7 +138,7 @@ class _ISSInstructionsScreenState extends State<ISSInstructionsScreen>
           day: selectedDate,
           type: 'specific',
           length: specificInstructions.length,
-          instructionTextForIndex: (i) => specificInstructions[i][selectedLang] ?? '',
+          instructionTextForIndex: (i) => specificInstructions[i]['en'] ?? '',
           username: appState.username,
           treatment: appState.treatment,
           subtype: appState.treatmentSubtype,

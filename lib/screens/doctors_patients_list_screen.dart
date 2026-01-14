@@ -55,12 +55,12 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
     return DateTime(dt.year, dt.month, dt.day);
   }
 
-  String _formatYMD(DateTime dt) {
-    return '${dt.year.toString().padLeft(4, '0')}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
-  }
-
   String _formatDMY(DateTime dt) {
     return '${dt.day.toString().padLeft(2, '0')}-${dt.month.toString().padLeft(2, '0')}-${dt.year.toString().padLeft(4, '0')}';
+  }
+
+  String _formatYMD(DateTime dt) {
+    return '${dt.year.toString().padLeft(4, '0')}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
   }
 
   List<Map<String, dynamic>> _applyTreatmentStartDateFilter(List<Map<String, dynamic>> src) {
@@ -340,7 +340,6 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
                   ],
                 ),
               ),
-
             if (!widget.lockSelection && _selectedDoctor != null)
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 2, 20, 6),
@@ -561,10 +560,6 @@ class _ResultsList extends StatelessWidget {
     final dt = DateTime.tryParse(normalized);
     if (dt == null) return null;
     return DateTime(dt.year, dt.month, dt.day);
-  }
-
-  String _formatYMD(DateTime dt) {
-    return '${dt.year.toString().padLeft(4, '0')}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
   }
 
   String _formatDMY(DateTime dt) {

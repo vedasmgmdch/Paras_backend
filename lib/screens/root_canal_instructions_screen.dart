@@ -25,11 +25,10 @@ class _RootCanalInstructionsScreenState extends State<RootCanalInstructionsScree
     final appState = Provider.of<AppState>(context, listen: false);
     for (int i = 0; i < generalInstructions.length; i++) {
       appState.addInstructionLog(
-        generalInstructions[i][selectedLang] ?? '',
+        generalInstructions[i]['en'] ?? '',
         date: logDateStr,
         type: 'general',
         followed: _generalChecked.length > i ? _generalChecked[i] : false,
-        instructionIndex: i,
         username: appState.username,
         treatment: appState.treatment,
         subtype: appState.treatmentSubtype,
@@ -37,11 +36,10 @@ class _RootCanalInstructionsScreenState extends State<RootCanalInstructionsScree
     }
     for (int i = 0; i < specificInstructions.length; i++) {
       appState.addInstructionLog(
-        specificInstructions[i][selectedLang] ?? '',
+        specificInstructions[i]['en'] ?? '',
         date: logDateStr,
         type: 'specific',
         followed: _specificChecked.length > i ? _specificChecked[i] : false,
-        instructionIndex: i,
         username: appState.username,
         treatment: appState.treatment,
         subtype: appState.treatmentSubtype,
@@ -143,7 +141,7 @@ class _RootCanalInstructionsScreenState extends State<RootCanalInstructionsScree
           day: selectedDate,
           type: 'general',
           length: generalInstructions.length,
-          instructionTextForIndex: (i) => generalInstructions[i][selectedLang] ?? '',
+          instructionTextForIndex: (i) => generalInstructions[i]['en'] ?? '',
           username: appState.username,
           treatment: appState.treatment,
           subtype: appState.treatmentSubtype,
@@ -152,7 +150,7 @@ class _RootCanalInstructionsScreenState extends State<RootCanalInstructionsScree
           day: selectedDate,
           type: 'specific',
           length: specificInstructions.length,
-          instructionTextForIndex: (i) => specificInstructions[i][selectedLang] ?? '',
+          instructionTextForIndex: (i) => specificInstructions[i]['en'] ?? '',
           username: appState.username,
           treatment: appState.treatment,
           subtype: appState.treatmentSubtype,
@@ -227,14 +225,13 @@ class _RootCanalInstructionsScreenState extends State<RootCanalInstructionsScree
       return buffer.toString().trimRight();
     }
 
-    final String log =
-        """
+    final String log = """
 [Root Canal] $dateStr (Day $currentDay)
 ${buildSection("General Instructions", notFollowedGeneral)}
 
 ${buildSection("Specific Instructions", notFollowedSpecific)}
 """
-            .trim();
+        .trim();
 
     appState.addProgressFeedback("Instruction Log", log, date: dateStr);
   }

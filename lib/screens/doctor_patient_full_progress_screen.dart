@@ -49,6 +49,7 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
   DateTime? _lastRefreshed;
   Map<String, dynamic>? _patientInfo; // view meta (may be for selected episode)
   Map<String, dynamic>? _chatInfo; // current patient meta (for chat lock/banner)
+  List<Map<String, dynamic>> _episodes = [];
   bool _lastUsedSubtypeFallback = false; // track if fallback applied for current selection (for rebuild messages)
   // NOTE: This screen now enforces STRICT parity with the patient ProgressScreen:
   // - Only "followed" instruction logs are displayed for the selected day
@@ -226,28 +227,49 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
       _chatInfo = info;
 
       // Build view metadata: base patient info.
-      final view = <String, dynamic>{...?(info ?? const {})};
+      final view = <String, dynamic>{...info ?? const <String, dynamic>{}};
 
-      // If opened from a specific dashboard entry, use those values directly.
-      // We intentionally do NOT fetch episode history here (history is patient-only).
+      // If opened from a specific dashboard entry, load the matching historical entry
+      // by procedure_date (and treatment/subtype when available).
       final initialProcDate = (widget.initialProcedureDate ?? '').toString().trim();
       final initialTreatment = (widget.initialTreatment ?? '').toString().trim();
       final initialSubtype = (widget.initialSubtype ?? '').toString().trim();
       if (initialProcDate.isNotEmpty) {
-        view['procedure_date'] = initialProcDate;
-      }
-      if (initialTreatment.isNotEmpty) {
-        view['treatment'] = initialTreatment;
-      }
-      if (initialSubtype.isNotEmpty) {
-        view['subtype'] = initialSubtype;
+        final episodes = await ApiService.doctorGetPatientEpisodes(widget.username);
+        if (!mounted) return;
+        _episodes = episodes;
+
+        Map<String, dynamic>? selectedEp;
+        for (final e in _episodes) {
+          final pd = (e['procedure_date'] ?? '').toString().trim();
+          if (pd != initialProcDate) continue;
+          if (initialTreatment.isNotEmpty) {
+            final t = (e['treatment'] ?? '').toString().trim();
+            if (t != initialTreatment) continue;
+          }
+          if (initialSubtype.isNotEmpty) {
+            final st = (e['subtype'] ?? '').toString().trim();
+            if (st != initialSubtype) continue;
+          }
+          selectedEp = e;
+          break;
+        }
+
+        if (selectedEp != null) {
+          view['treatment'] = selectedEp['treatment'];
+          view['subtype'] = selectedEp['subtype'];
+          view['procedure_date'] = selectedEp['procedure_date'];
+          view['procedure_time'] = selectedEp['procedure_time'];
+          view['procedure_completed'] = selectedEp['procedure_completed'];
+          view['locked'] = selectedEp['locked'];
+        }
       }
 
       _patientInfo = view.isEmpty ? null : view;
 
       final treatment = (_patientInfo?['treatment'] ?? '').toString();
       final subtype = (_patientInfo?['subtype'] ?? '').toString();
-      // Use the simpler FULL endpoint (no placeholders) -> followed filtering happens in build.
+      // Use ENHANCED endpoint so missing-day rows become explicit "Not Followed" placeholders.
       int dynamicDays = 30;
       String? dateFrom;
       String? dateTo;
@@ -266,7 +288,7 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
           dynamicDays = diff.clamp(1, 14);
         } catch (_) {}
       }
-      Map<String, dynamic>? full = await ApiService.doctorGetPatientInstructionStatusFull(
+      Map<String, dynamic>? enhanced = await ApiService.doctorGetPatientInstructionStatusEnhanced(
         widget.username,
         days: dynamicDays,
         treatment: treatment.trim().isEmpty ? null : treatment,
@@ -276,30 +298,33 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
       );
       if (!mounted) return;
       List<Map<String, dynamic>> status = [];
-      if (full != null && full['instructions'] is List) {
-        final instr = (full['instructions'] as List).cast<Map<String, dynamic>>();
-        debugPrint('[DoctorProgress] full endpoint rows=${instr.length}');
-        status = instr.map((r) {
-          String rawDate = (r['date'] is String ? r['date'] : r['date']?.toString()) ?? '';
-          // Normalize date: handle possible timestamp like 2025-10-05T12:34:56 or trailing Z
-          if (rawDate.contains('T')) {
-            rawDate = rawDate.split('T').first;
+      if (enhanced != null && enhanced['days'] is List) {
+        final days = (enhanced['days'] as List).cast<Map<String, dynamic>>();
+        int rowCount = 0;
+        for (final d in days) {
+          final instr =
+              (d['instructions'] is List) ? (d['instructions'] as List).cast<Map<String, dynamic>>() : const [];
+          rowCount += instr.length;
+          for (final r in instr) {
+            String rawDate = (r['date'] is String ? r['date'] : r['date']?.toString()) ?? '';
+            if (rawDate.contains('T')) rawDate = rawDate.split('T').first;
+            final parts = rawDate.split('-');
+            if (parts.length >= 3) {
+              rawDate =
+                  '${parts[0].padLeft(4, '0')}-${parts[1].padLeft(2, '0')}-${parts[2].substring(0, 2).padLeft(2, '0')}';
+            }
+            status.add({
+              ...r,
+              'type': _normType((r['group'] ?? r['type'] ?? '').toString()),
+              'instruction': (r['instruction_text'] ?? r['instruction'] ?? r['note'] ?? '').toString(),
+              'followed': (r['followed'] == true || r['followed']?.toString() == 'true'),
+              'date': rawDate,
+              'instruction_index': _asInt(r['instruction_index'] ?? r['instructionIndex']),
+              'synthetic': (r['synthetic'] == true || r['synthetic']?.toString() == 'true'),
+            });
           }
-          // Ensure only YYYY-MM-DD
-          final parts = rawDate.split('-');
-          if (parts.length >= 3) {
-            rawDate =
-                '${parts[0].padLeft(4, '0')}-${parts[1].padLeft(2, '0')}-${parts[2].substring(0, 2).padLeft(2, '0')}';
-          }
-          return {
-            ...r,
-            'type': _normType((r['group'] ?? r['type'] ?? '').toString()),
-            'instruction': (r['instruction_text'] ?? r['instruction'] ?? r['note'] ?? '').toString(),
-            'followed': (r['followed'] == true || r['followed']?.toString() == 'true'),
-            'date': rawDate,
-            'instruction_index': _asInt(r['instruction_index'] ?? r['instructionIndex']),
-          };
-        }).toList();
+        }
+        debugPrint('[DoctorProgress] enhanced endpoint rows=$rowCount');
       } else {
         // Fallback to legacy basic endpoint
         final rawStatus = await ApiService.doctorGetPatientInstructionStatus(widget.username);
@@ -320,6 +345,7 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
             'followed': (r['followed'] == true || r['followed']?.toString() == 'true'),
             'date': rawDate,
             'instruction_index': _asInt(r['instruction_index'] ?? r['instructionIndex']),
+            'synthetic': (r['synthetic'] == true || r['synthetic']?.toString() == 'true'),
           };
         }).toList();
       }
@@ -958,7 +984,6 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
                 ),
               ),
             ...logsForSelectedDate.map((log) {
-              final date = (log['date'] ?? '').toString();
               final instruction = (log['instruction'] ?? log['note'] ?? '').toString();
               final type = (log['type'] ?? '').toString().toLowerCase();
               final followed = log['followed'] == true || log['followed']?.toString() == 'true';
@@ -968,6 +993,7 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
                       ? Colors.red[100]
                       : Colors.blue[100];
               final color = followed ? baseColor : Colors.grey[200];
+              final label = followed ? 'Followed' : 'Not Followed';
               return Container(
                 margin: const EdgeInsets.only(bottom: 8),
                 child: Row(
@@ -980,11 +1006,19 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: Icon(
+                        followed ? Icons.check_circle : Icons.cancel,
+                        size: 18,
+                        color: followed ? Colors.green : Colors.black38,
+                      ),
+                    ),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(8)),
                       child: Text(
-                        _formatDisplayDate(date),
+                        label,
                         style: const TextStyle(color: Colors.black54, fontWeight: FontWeight.w600, fontSize: 13),
                       ),
                     ),

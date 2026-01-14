@@ -83,6 +83,7 @@ class AppState extends ChangeNotifier {
   }
 
   // User details
+  int? patientId;
   String? fullName;
   DateTime? dob;
   String? gender;
@@ -320,6 +321,39 @@ class AppState extends ChangeNotifier {
   // Serialize instruction-log mutations because many screens fire multiple
   // addInstructionLog() calls without awaiting them (race condition -> duplicates).
   Future<void> _instructionLogOp = Future<void>.value();
+
+  Timer? _pendingUploadFlushTimer;
+  bool _pendingUploadFlushInProgress = false;
+  static const Duration _pendingUploadFlushInterval = Duration(seconds: 30);
+
+  void _startPendingUploadFlushLoop() {
+    _pendingUploadFlushTimer?.cancel();
+    _pendingUploadFlushTimer = null;
+
+    final user = (username ?? '').trim();
+    if (user.isEmpty) return;
+    if (token == null || token!.isEmpty) return;
+
+    _pendingUploadFlushTimer = Timer.periodic(_pendingUploadFlushInterval, (_) async {
+      if (_pendingUploadFlushInProgress) return;
+      if (token == null || token!.isEmpty) return;
+      final u = (username ?? '').trim();
+      if (u.isEmpty) return;
+
+      _pendingUploadFlushInProgress = true;
+      try {
+        await flushPendingInstructionUploads(username: u);
+      } finally {
+        _pendingUploadFlushInProgress = false;
+      }
+    });
+  }
+
+  void _stopPendingUploadFlushLoop() {
+    _pendingUploadFlushTimer?.cancel();
+    _pendingUploadFlushTimer = null;
+    _pendingUploadFlushInProgress = false;
+  }
 
   String? _instructionLogsLoadedForUser;
   bool _instructionLogsHydrated = false;
@@ -953,8 +987,12 @@ class AppState extends ChangeNotifier {
       if (map == null || map.isEmpty) continue;
       final items = map.values.toList();
       try {
-        await _postInstructionItems(items);
-        debugPrint('[InstructionBatch] Uploaded ${items.length} items for $k');
+        final ok = await _postInstructionItems(items);
+        if (ok) {
+          debugPrint('[InstructionBatch] Uploaded ${items.length} items for $k');
+        } else {
+          throw Exception('saveInstructionStatus returned false');
+        }
       } catch (e) {
         debugPrint('[InstructionBatch][error] $k -> $e');
         // Requeue on failure (optional with simple retry strategy)
@@ -965,14 +1003,104 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<void> _postInstructionItems(List<Map<String, dynamic>> items) async {
+  String _pendingInstructionUploadStorageKey(String user) => 'pending_instruction_uploads_${user}';
+
+  String _pendingUploadItemKey(Map<String, dynamic> e) {
+    final date = (e['date'] ?? '').toString();
+    final group = (e['group'] ?? e['type'] ?? '').toString();
+    final idx = _asInt(e['instruction_index'] ?? e['instructionIndex']) ?? 0;
+    final treatment = (e['treatment'] ?? '').toString();
+    final subtype = (e['subtype'] ?? '').toString();
+    return '$date|$group|#${idx.toString()}|$treatment|$subtype';
+  }
+
+  Future<void> _enqueuePendingInstructionUploads(List<Map<String, dynamic>> payloadItems, {String? username}) async {
+    final user = (username ?? this.username ?? '').trim();
+    if (user.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = _pendingInstructionUploadStorageKey(user);
+      final existingStr = prefs.getString(key);
+      final Map<String, Map<String, dynamic>> merged = {};
+      if (existingStr != null && existingStr.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(existingStr);
+          if (decoded is List) {
+            for (final it in decoded) {
+              if (it is Map) {
+                final m = Map<String, dynamic>.from(it);
+                merged[_pendingUploadItemKey(m)] = m;
+              }
+            }
+          }
+        } catch (_) {
+          // ignore corrupt queue
+        }
+      }
+      for (final it in payloadItems) {
+        merged[_pendingUploadItemKey(it)] = it;
+      }
+      await prefs.setString(key, jsonEncode(merged.values.toList()));
+    } catch (e) {
+      debugPrint('[PendingUpload] enqueue failed: $e');
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _loadPendingInstructionUploads({String? username}) async {
+    final user = (username ?? this.username ?? '').trim();
+    if (user.isEmpty) return const [];
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = _pendingInstructionUploadStorageKey(user);
+      final s = prefs.getString(key);
+      if (s == null || s.isEmpty) return const [];
+      final decoded = jsonDecode(s);
+      if (decoded is! List) return const [];
+      return decoded.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> _clearPendingInstructionUploads({String? username}) async {
+    final user = (username ?? this.username ?? '').trim();
+    if (user.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_pendingInstructionUploadStorageKey(user));
+    } catch (_) {}
+  }
+
+  Future<void> flushPendingInstructionUploads({String? username}) async {
+    final user = (username ?? this.username ?? '').trim();
+    if (user.isEmpty) return;
+    if (token == null || token!.isEmpty) return;
+    final pending = await _loadPendingInstructionUploads(username: user);
+    if (pending.isEmpty) return;
+
+    // Send in chunks to avoid huge payloads on slow networks.
+    const int chunkSize = 200;
+    int offset = 0;
+    while (offset < pending.length) {
+      final chunk = pending.sublist(offset, (offset + chunkSize).clamp(0, pending.length));
+      final ok = await ApiService.saveInstructionStatus(chunk);
+      if (!ok) {
+        // Keep queue for later retries.
+        return;
+      }
+      offset += chunk.length;
+    }
+    await _clearPendingInstructionUploads(username: user);
+  }
+
+  Future<bool> _postInstructionItems(List<Map<String, dynamic>> items) async {
     try {
       final filtered = items.where((e) {
         final q = e['quarantined'];
         return !(q == true || q?.toString() == 'true');
       }).toList();
 
-      if (filtered.isEmpty) return;
+      if (filtered.isEmpty) return true;
       // Map entry to backend expected shape. addInstructionLog already added instruction_index.
       final payloadItems = filtered
           .map(
@@ -988,9 +1116,37 @@ class AppState extends ChangeNotifier {
             },
           )
           .toList();
-      await ApiService.saveInstructionStatus(payloadItems);
+      final ok = await ApiService.saveInstructionStatus(payloadItems);
+      if (!ok) {
+        await _enqueuePendingInstructionUploads(payloadItems, username: username);
+      }
+      return ok;
     } catch (e) {
       debugPrint('Post instruction items failed: $e');
+      try {
+        // Best-effort: persist what we can so it eventually syncs.
+        final payloadItems = items
+            .where((e) {
+              final q = e['quarantined'];
+              return !(q == true || q?.toString() == 'true');
+            })
+            .map(
+              (e) => {
+                'date': e['date'],
+                'treatment': e['treatment'] ?? '',
+                'subtype': e['subtype'],
+                'group': e['type'] ?? e['group'] ?? '',
+                'instruction_index': e['instruction_index'] ?? 0,
+                'instruction_text': e['instruction'] ?? e['note'] ?? '',
+                'followed': e['followed'] ?? false,
+              },
+            )
+            .toList();
+        if (payloadItems.isNotEmpty) {
+          await _enqueuePendingInstructionUploads(payloadItems, username: username);
+        }
+      } catch (_) {}
+      return false;
     }
   }
 
@@ -1065,6 +1221,7 @@ class AppState extends ChangeNotifier {
   List<String> get currentSpecificSteps => currentTreatmentInstructions.skip(6).toList();
 
   void setUserDetails({
+    int? patientId,
     required String fullName,
     required DateTime dob,
     required String gender,
@@ -1073,6 +1230,7 @@ class AppState extends ChangeNotifier {
     required String phone,
     required String email,
   }) {
+    this.patientId = patientId;
     this.fullName = fullName;
     this.dob = dob;
     this.gender = gender;
@@ -1096,6 +1254,7 @@ class AppState extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('token', token);
     await _saveUserDetails();
+    _startPendingUploadFlushLoop();
     notifyListeners();
   }
 
@@ -1169,6 +1328,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> reset() async {
+    patientId = null;
     fullName = null;
     dob = null;
     gender = null;
@@ -1189,6 +1349,7 @@ class AppState extends ChangeNotifier {
     _persistedChecklists.clear();
     _progressFeedback.clear();
     _instructionLogs.clear();
+    _stopPendingUploadFlushLoop();
     SharedPreferences.getInstance().then((prefs) {
       prefs.remove('token');
       prefs.remove('user_details');
@@ -1224,6 +1385,7 @@ class AppState extends ChangeNotifier {
     await prefs.setString(
       'user_details',
       jsonEncode({
+        'patientId': patientId,
         'fullName': fullName,
         'dob': dob?.toIso8601String(),
         'gender': gender,
@@ -1253,6 +1415,8 @@ class AppState extends ChangeNotifier {
     String? loadedToken = prefs.getString('token');
     if (data != null) {
       final decoded = jsonDecode(data);
+      patientId =
+          decoded['patientId'] is int ? decoded['patientId'] : int.tryParse((decoded['patientId'] ?? '').toString());
       fullName = decoded['fullName'];
       dob = decoded['dob'] != null ? DateTime.parse(decoded['dob']) : null;
       gender = decoded['gender'];
@@ -1281,6 +1445,10 @@ class AppState extends ChangeNotifier {
     if (runBulkSync) {
       await maybeBulkSyncInstructionLogs();
     }
+
+    // Best-effort: flush any instruction-status uploads that were queued while offline.
+    await flushPendingInstructionUploads(username: username);
+    _startPendingUploadFlushLoop();
   }
 
   Future<void> maybeBulkSyncInstructionLogs() async {
@@ -1299,6 +1467,7 @@ class AppState extends ChangeNotifier {
   // Properly use setters for private fields (fixes direct assignment error)
   void clearUserData() async {
     username = null;
+    patientId = null;
     fullName = null;
     dob = null;
     gender = null;
@@ -1311,6 +1480,7 @@ class AppState extends ChangeNotifier {
     procedureDate = null;
     procedureTime = null;
     procedureCompleted = false;
+    _stopPendingUploadFlushLoop();
     notifyListeners();
 
     final prefs = await SharedPreferences.getInstance();

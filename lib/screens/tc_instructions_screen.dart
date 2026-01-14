@@ -19,19 +19,17 @@ class _TCInstructionsScreenState extends State<TCInstructionsScreen>
     with InstructionSnapshotHelper<TCInstructionsScreen> {
   void _saveAllLogsForDay() {
     // Always use the selected date (widget.date) for log saving
-    final procedureDate = widget.date != null
-        ? DateTime(widget.date!.year, widget.date!.month, widget.date!.day)
-        : DateTime.now();
+    final procedureDate =
+        widget.date != null ? DateTime(widget.date!.year, widget.date!.month, widget.date!.day) : DateTime.now();
     final logDate = procedureDate;
     final logDateStr = AppState.formatYMD(logDate);
     final appState = Provider.of<AppState>(context, listen: false);
     for (int i = 0; i < tcDos.length; i++) {
       appState.addInstructionLog(
-        tcDos[i][selectedLang] ?? '',
+        tcDos[i]['en'] ?? '',
         date: logDateStr,
         type: 'general',
         followed: _dosChecked.length > i ? _dosChecked[i] : false,
-        instructionIndex: i,
         username: appState.username,
         treatment: appState.treatment,
         subtype: appState.treatmentSubtype,
@@ -39,11 +37,10 @@ class _TCInstructionsScreenState extends State<TCInstructionsScreen>
     }
     for (int i = 0; i < tcSpecificInstructions.length; i++) {
       appState.addInstructionLog(
-        tcSpecificInstructions[i][selectedLang] ?? '',
+        tcSpecificInstructions[i]['en'] ?? '',
         date: logDateStr,
         type: 'specific',
         followed: _specificChecked.length > i ? _specificChecked[i] : false,
-        instructionIndex: i,
         username: appState.username,
         treatment: appState.treatment,
         subtype: appState.treatmentSubtype,
@@ -104,9 +101,8 @@ class _TCInstructionsScreenState extends State<TCInstructionsScreen>
     super.initState();
     final appState = Provider.of<AppState>(context, listen: false);
 
-    final selectedDate = (widget.date != null)
-        ? DateTime(widget.date!.year, widget.date!.month, widget.date!.day)
-        : DateTime.now();
+    final selectedDate =
+        (widget.date != null) ? DateTime(widget.date!.year, widget.date!.month, widget.date!.day) : DateTime.now();
     int day = appState.daysSinceProcedure(selectedDate);
     if (day < 1) day = 1;
     if (day > totalDays) day = totalDays;
@@ -137,7 +133,7 @@ class _TCInstructionsScreenState extends State<TCInstructionsScreen>
           day: selectedDate,
           type: 'general',
           length: tcDos.length,
-          instructionTextForIndex: (i) => tcDos[i][selectedLang] ?? '',
+          instructionTextForIndex: (i) => tcDos[i]['en'] ?? '',
           username: appState.username,
           treatment: appState.treatment,
           subtype: appState.treatmentSubtype,
@@ -146,7 +142,7 @@ class _TCInstructionsScreenState extends State<TCInstructionsScreen>
           day: selectedDate,
           type: 'specific',
           length: tcSpecificInstructions.length,
-          instructionTextForIndex: (i) => tcSpecificInstructions[i][selectedLang] ?? '',
+          instructionTextForIndex: (i) => tcSpecificInstructions[i]['en'] ?? '',
           username: appState.username,
           treatment: appState.treatment,
           subtype: appState.treatmentSubtype,
@@ -176,9 +172,8 @@ class _TCInstructionsScreenState extends State<TCInstructionsScreen>
     setState(() {
       _dosChecked[idx] = value ?? false;
     });
-    final selectedDate = (widget.date != null)
-        ? DateTime(widget.date!.year, widget.date!.month, widget.date!.day)
-        : DateTime.now();
+    final selectedDate =
+        (widget.date != null) ? DateTime(widget.date!.year, widget.date!.month, widget.date!.day) : DateTime.now();
     Provider.of<AppState>(context, listen: false).setChecklistForKey(_generalChecklistKey(selectedDate), _dosChecked);
     _saveAllLogsForDay();
   }
@@ -187,9 +182,8 @@ class _TCInstructionsScreenState extends State<TCInstructionsScreen>
     setState(() {
       _specificChecked[idx] = value;
     });
-    final selectedDate = (widget.date != null)
-        ? DateTime(widget.date!.year, widget.date!.month, widget.date!.day)
-        : DateTime.now();
+    final selectedDate =
+        (widget.date != null) ? DateTime(widget.date!.year, widget.date!.month, widget.date!.day) : DateTime.now();
     Provider.of<AppState>(
       context,
       listen: false,
@@ -222,14 +216,13 @@ class _TCInstructionsScreenState extends State<TCInstructionsScreen>
       return buffer.toString().trimRight();
     }
 
-    final String log =
-        """
+    final String log = """
 [Teeth Cleaning] $dateStr (Day $currentDay)
 ${buildSection("General Instructions", notFollowedGeneral)}
 
 ${buildSection("Specific Instructions", notFollowedSpecific)}
 """
-            .trim();
+        .trim();
 
     appState.addProgressFeedback("Instruction Log", log, date: dateStr);
   }

@@ -25,11 +25,10 @@ class _TTOInstructionsScreenState extends State<TTOInstructionsScreen>
     final appState = Provider.of<AppState>(context, listen: false);
     for (int i = 0; i < dosList.length; i++) {
       appState.addInstructionLog(
-        dosList[i][selectedLang] ?? '',
+        dosList[i]['en'] ?? '',
         date: logDateStr,
         type: 'general',
         followed: _dosChecked.length > i ? _dosChecked[i] : false,
-        instructionIndex: i,
         username: appState.username,
         treatment: appState.treatment,
         subtype: appState.treatmentSubtype,
@@ -37,11 +36,10 @@ class _TTOInstructionsScreenState extends State<TTOInstructionsScreen>
     }
     for (int i = 0; i < specificSteps.length; i++) {
       appState.addInstructionLog(
-        specificSteps[i][selectedLang] ?? '',
+        specificSteps[i]['en'] ?? '',
         date: logDateStr,
         type: 'specific',
         followed: _specificChecked.length > i ? _specificChecked[i] : false,
-        instructionIndex: i,
         username: appState.username,
         treatment: appState.treatment,
         subtype: appState.treatmentSubtype,
@@ -133,7 +131,7 @@ class _TTOInstructionsScreenState extends State<TTOInstructionsScreen>
           day: selectedDate,
           type: 'general',
           length: dosList.length,
-          instructionTextForIndex: (i) => dosList[i][selectedLang] ?? '',
+          instructionTextForIndex: (i) => dosList[i]['en'] ?? '',
           username: appState.username,
           treatment: appState.treatment,
           subtype: appState.treatmentSubtype,
@@ -142,7 +140,7 @@ class _TTOInstructionsScreenState extends State<TTOInstructionsScreen>
           day: selectedDate,
           type: 'specific',
           length: specificSteps.length,
-          instructionTextForIndex: (i) => specificSteps[i][selectedLang] ?? '',
+          instructionTextForIndex: (i) => specificSteps[i]['en'] ?? '',
           username: appState.username,
           treatment: appState.treatment,
           subtype: appState.treatmentSubtype,
@@ -214,14 +212,13 @@ class _TTOInstructionsScreenState extends State<TTOInstructionsScreen>
       return buffer.toString().trimRight();
     }
 
-    final String log =
-        """
+    final String log = """
 [Tooth Extraction] $dateStr (Day $currentDay)
 ${buildSection("General Instructions", notFollowedGeneral)}
 
 ${buildSection("Specific Instructions", notFollowedSpecific)}
 """
-            .trim();
+        .trim();
 
     appState.addProgressFeedback("Instruction Log", log, date: dateStr);
   }

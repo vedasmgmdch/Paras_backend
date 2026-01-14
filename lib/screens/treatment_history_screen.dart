@@ -214,7 +214,7 @@ class _TreatmentHistoryScreenState extends State<TreatmentHistoryScreen> {
               // Show ongoing treatment cards if any
               if (ongoingTreatments.isNotEmpty)
                 ...ongoingTreatments.map((t) {
-                  final m = (t is Map) ? Map<String, dynamic>.from(t as Map) : <String, dynamic>{};
+                  final m = (t is Map) ? Map<String, dynamic>.from(t) : <String, dynamic>{};
                   return buildTreatmentCard(m);
                 }),
               Padding(
@@ -231,7 +231,7 @@ class _TreatmentHistoryScreenState extends State<TreatmentHistoryScreen> {
               // Show completed treatment cards if any
               if (completedTreatments.isNotEmpty)
                 ...completedTreatments.map((t) {
-                  final m = (t is Map) ? Map<String, dynamic>.from(t as Map) : <String, dynamic>{};
+                  final m = (t is Map) ? Map<String, dynamic>.from(t) : <String, dynamic>{};
                   return buildTreatmentCard(m);
                 }),
             ],

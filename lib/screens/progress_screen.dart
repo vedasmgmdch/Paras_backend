@@ -209,9 +209,9 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
     // Range: procedureDate .. min(today, procedureDate + 13 days)
     final int days =
         (nowLocal.difference(DateTime(procedureDate.year, procedureDate.month, procedureDate.day)).inDays + 1).clamp(
-          1,
-          14,
-        );
+      1,
+      14,
+    );
     final List<String> allDates = List.generate(days, (i) {
       final d = procedureDate.add(Duration(days: i));
       return "${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}";
@@ -223,9 +223,79 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
       _selectedDateForInstructionsLog = allDates.contains(todayStr) ? todayStr : allDates.last;
     }
 
-    final logsForSelectedDate = latestLogs
-        .where((log) => log['date']?.toString() == _selectedDateForInstructionsLog)
-        .toList();
+    final logsForSelectedDate =
+        latestLogs.where((log) => log['date']?.toString() == _selectedDateForInstructionsLog).toList();
+
+    // If nothing exists for the selected day, treat missing rows as "Not Followed".
+    // We can only infer expected instructions from what we've observed in this recovery window.
+    // This avoids "No records" hiding unfollowed instructions.
+    List<Map<String, dynamic>> materializedForSelectedDate() {
+      if (logsForSelectedDate.isNotEmpty) {
+        return logsForSelectedDate.cast<Map<String, dynamic>>();
+      }
+
+      String normText(String s) =>
+          s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ').replaceAll('–', '-').replaceAll('—', '-');
+
+      // Prefer the current treatment's instruction catalog so we can materialize
+      // missing rows even if there are zero saved logs.
+      final Map<String, Map<String, dynamic>> expected = {};
+      final generalCatalog = [...appState.currentDos, ...appState.currentDonts]
+          .map((e) => e.toString().trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
+      final specificCatalog =
+          appState.currentSpecificSteps.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
+
+      void addExpectedFromCatalog(String type, List<String> items) {
+        for (final instruction in items) {
+          final idx = appState.stableInstructionIndex(type, instruction);
+          final key = '$type|#${idx.toString()}';
+          expected.putIfAbsent(key, () {
+            return {
+              'type': type,
+              'instruction_index': idx,
+              'instruction': instruction,
+            };
+          });
+        }
+      }
+
+      addExpectedFromCatalog('general', generalCatalog);
+      addExpectedFromCatalog('specific', specificCatalog);
+
+      // Fallback: if no catalog is available, infer expected instructions from
+      // what we've observed in this recovery window.
+      if (expected.isEmpty) {
+        for (final raw in filteredLogs) {
+          final type = (raw['type']?.toString() ?? '').trim().toLowerCase();
+          final idx = raw['instruction_index'];
+          final idxStr = (idx == null) ? '' : idx.toString();
+          final instruction = (raw['instruction'] ?? raw['note'] ?? '').toString();
+          final key = idxStr.isNotEmpty ? '$type|#${idxStr}' : '$type|${normText(instruction)}';
+          expected.putIfAbsent(key, () {
+            return {
+              'type': type,
+              'instruction_index': idx,
+              'instruction': instruction,
+            };
+          });
+        }
+      }
+
+      if (expected.isEmpty) return const [];
+
+      return expected.values.map((e) {
+        return {
+          ...e,
+          'date': _selectedDateForInstructionsLog,
+          'followed': false,
+          'synthetic': true,
+        };
+      }).toList();
+    }
+
+    final shownLogsForSelectedDate = materializedForSelectedDate();
 
     return Container(
       width: double.infinity,
@@ -308,7 +378,7 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
             },
           ),
           const SizedBox(height: 10),
-          if (logsForSelectedDate.isEmpty)
+          if (shownLogsForSelectedDate.isEmpty)
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(12),
@@ -319,16 +389,16 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
               ),
             )
           else
-            ...logsForSelectedDate.map((log) {
-              final date = log['date']?.toString() ?? '';
+            ...shownLogsForSelectedDate.map((log) {
               final instruction = log['instruction']?.toString() ?? log['note']?.toString() ?? '';
               final type = log['type']?.toString().toLowerCase();
               final followed = log['followed'] == true || log['followed']?.toString() == 'true';
+              final label = followed ? 'Followed' : 'Not Followed';
               final Color? baseColor = type == 'general'
                   ? Colors.green[100]
                   : type == 'specific'
-                  ? Colors.red[100]
-                  : Colors.blue[100];
+                      ? Colors.red[100]
+                      : Colors.blue[100];
               final bg = followed ? baseColor : Colors.grey[200];
               return Container(
                 margin: const EdgeInsets.only(bottom: 8),
@@ -354,7 +424,7 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(8)),
                       child: Text(
-                        _formatDisplayDate(date),
+                        label,
                         style: const TextStyle(color: Colors.black54, fontWeight: FontWeight.w600, fontSize: 13),
                       ),
                     ),
@@ -383,6 +453,7 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
   }
 
   Widget _buildPieChart(List<dynamic> instructionLogs) {
+    final appState = Provider.of<AppState>(context, listen: false);
     final filteredLogs = _filterInstructionLogs(
       instructionLogs,
       username: _username,
@@ -390,7 +461,115 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
       subtype: _subtype,
     );
 
-    final stats = _getInstructionStats(filteredLogs);
+    // Materialize missing-as-not-followed across the recovery window so counts
+    // remain accurate even with weak/offline usage.
+    final procedureDate = appState.procedureDate;
+    final nowLocal = appState.effectiveLocalNow();
+    final DateTime start = procedureDate != null
+        ? DateTime(procedureDate.year, procedureDate.month, procedureDate.day)
+        : DateTime(nowLocal.year, nowLocal.month, nowLocal.day);
+    final int days = (nowLocal.difference(start).inDays + 1).clamp(1, 14);
+    final List<String> allDates = List.generate(days, (i) {
+      final d = start.add(Duration(days: i));
+      return "${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}";
+    });
+
+    String normText(String s) =>
+        s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ').replaceAll('–', '-').replaceAll('—', '-');
+
+    final generalCatalog = [...appState.currentDos, ...appState.currentDonts]
+        .map((e) => e.toString().trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    final specificCatalog =
+        appState.currentSpecificSteps.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
+
+    final List<Map<String, dynamic>> expected = [];
+    void addExpected(String type, List<String> items) {
+      for (final instruction in items) {
+        expected.add({
+          'type': type,
+          'instruction_index': appState.stableInstructionIndex(type, instruction),
+          'instruction': instruction,
+        });
+      }
+    }
+
+    addExpected('general', generalCatalog);
+    addExpected('specific', specificCatalog);
+
+    if (expected.isEmpty) {
+      // Fallback to observed union.
+      final Map<String, Map<String, dynamic>> byKey = {};
+      for (final raw in filteredLogs) {
+        final type = (raw['type']?.toString() ?? '').trim().toLowerCase();
+        final idx = raw['instruction_index'];
+        final idxStr = (idx == null) ? '' : idx.toString();
+        final instruction = (raw['instruction'] ?? raw['note'] ?? '').toString();
+        final key = idxStr.isNotEmpty ? '$type|#${idxStr}' : '$type|${normText(instruction)}';
+        byKey.putIfAbsent(key, () {
+          return {
+            'type': type,
+            'instruction_index': idx,
+            'instruction': instruction,
+          };
+        });
+      }
+      expected.addAll(byKey.values);
+    }
+
+    final Map<String, Map<String, dynamic>> latestByIdx = {};
+    final Map<String, Map<String, dynamic>> latestByText = {};
+    for (final raw in filteredLogs) {
+      final date = (raw['date'] ?? '').toString();
+      final type = (raw['type']?.toString() ?? '').trim().toLowerCase();
+      final instruction = (raw['instruction'] ?? raw['note'] ?? '').toString();
+      final idx = raw['instruction_index'];
+      if (date.isEmpty || type.isEmpty) continue;
+      if (idx != null && idx.toString().isNotEmpty) {
+        latestByIdx['$date|$type|#${idx.toString()}'] = Map<String, dynamic>.from(raw);
+      }
+      if (instruction.trim().isNotEmpty) {
+        latestByText['$date|$type|${normText(instruction)}'] = Map<String, dynamic>.from(raw);
+      }
+    }
+
+    int generalFollowed = 0;
+    int specificFollowed = 0;
+    int notFollowedGeneral = 0;
+    int notFollowedSpecific = 0;
+
+    for (final date in allDates) {
+      for (final e in expected) {
+        final type = (e['type'] ?? '').toString().trim().toLowerCase();
+        if (type.isEmpty) continue;
+        final idx = e['instruction_index'];
+        final idxKey = (idx == null) ? null : '$date|$type|#${idx.toString()}';
+        final textKey = '$date|$type|${normText((e['instruction'] ?? '').toString())}';
+        final log = (idxKey != null ? latestByIdx[idxKey] : null) ?? latestByText[textKey];
+        final followed = log != null && (log['followed'] == true || log['followed']?.toString() == 'true');
+        if (type == 'general') {
+          if (followed) {
+            generalFollowed++;
+          } else {
+            notFollowedGeneral++;
+          }
+        } else if (type == 'specific') {
+          if (followed) {
+            specificFollowed++;
+          } else {
+            notFollowedSpecific++;
+          }
+        }
+      }
+    }
+
+    final stats = {
+      'GeneralFollowed': generalFollowed,
+      'SpecificFollowed': specificFollowed,
+      'GeneralNotFollowed': notFollowedGeneral,
+      'SpecificNotFollowed': notFollowedSpecific,
+    };
 
     final generalCount = stats['GeneralFollowed'] ?? 0;
     final specificCount = stats['SpecificFollowed'] ?? 0;
@@ -496,9 +675,9 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
     final nowLocal = appState.effectiveLocalNow();
     final int daysSinceProcedure =
         (nowLocal.difference(DateTime(procedureDate.year, procedureDate.month, procedureDate.day)).inDays + 1).clamp(
-          1,
-          10000,
-        );
+      1,
+      10000,
+    );
 
     final int totalRecoveryDays = 14;
     final int dayOfRecovery = daysSinceProcedure.clamp(1, totalRecoveryDays);

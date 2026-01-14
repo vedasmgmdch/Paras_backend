@@ -61,20 +61,20 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Text(
-                  "Enter your email or phone to receive an OTP",
+                  "Enter your email to receive an OTP",
                   style: TextStyle(fontSize: 18),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 24),
                 TextFormField(
                   decoration: const InputDecoration(
-                    labelText: "Email or Phone",
+                    labelText: "Email",
                     border: OutlineInputBorder(),
                   ),
                   keyboardType: TextInputType.emailAddress,
                   onSaved: (v) => _emailOrPhone = v?.trim() ?? '',
                   validator: (v) =>
-                  (v == null || v.trim().isEmpty) ? "Enter email or phone" : null,
+                  (v == null || v.trim().isEmpty) ? "Enter email" : null,
                 ),
                 const SizedBox(height: 24),
                 SizedBox(

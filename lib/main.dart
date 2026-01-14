@@ -69,7 +69,7 @@ Future<void> _postStartupInit(AppState appState) async {
   // Let the first frame render before doing heavy startup work.
   await Future<void>.delayed(Duration.zero);
   try {
-    // Server-only reminders: rely on backend pushes (works when app is closed + across devices)
+    // Server-only reminders: rely on backend pushes.
     NotificationService.serverOnlyMode = true;
     // AlarmManager initialization removed: we rely on plugin pre-scheduled daily notifications.
     await NotificationService.init();
@@ -95,7 +95,7 @@ Future<void> _postStartupInit(AppState appState) async {
     await PushService.registerNow();
     await PushService.flushPendingIfAny();
 
-    // Clear any legacy local schedules once; reminders are now server-push only.
+    // Clear any legacy local schedules once; reminders are server-push only.
     try {
       await NotificationService.cancelAllPending();
     } catch (e) {
@@ -280,8 +280,11 @@ class _AppEntryGateState extends State<AppEntryGate> {
       }
 
     appState.setUserDetails(
+      patientId: userDetails['id'] is int
+          ? userDetails['id']
+          : int.tryParse((userDetails['id'] ?? '').toString()),
       fullName: userDetails['name'],
-      dob: DateTime.parse(userDetails['dob']),
+      dob: DateTime.tryParse((userDetails['dob'] ?? '').toString()) ?? DateTime.now(),
       gender: userDetails['gender'],
       username: userDetails['username'],
       password: '', // Password not retrievable
@@ -294,9 +297,7 @@ class _AppEntryGateState extends State<AppEntryGate> {
     appState.setDepartment(userDetails['department']);
     appState.setDoctor(userDetails['doctor']);
     appState.setTreatment(userDetails['treatment'], subtype: userDetails['treatment_subtype']);
-    appState.procedureDate = userDetails['procedure_date'] != null
-        ? DateTime.parse(userDetails['procedure_date'])
-        : null;
+    appState.procedureDate = DateTime.tryParse((userDetails['procedure_date'] ?? '').toString());
     appState.procedureTime = parseTimeOfDay(userDetails['procedure_time']);
     appState.procedureCompleted = userDetails['procedure_completed'] == true;
 
@@ -421,8 +422,11 @@ class _AppEntryGateState extends State<AppEntryGate> {
 
           if (userDetails != null) {
             appState.setUserDetails(
+              patientId: userDetails['id'] is int
+                  ? userDetails['id']
+                  : int.tryParse((userDetails['id'] ?? '').toString()),
               fullName: userDetails['name'],
-              dob: DateTime.parse(userDetails['dob']),
+              dob: DateTime.tryParse((userDetails['dob'] ?? '').toString()) ?? DateTime.now(),
               gender: userDetails['gender'],
               username: userDetails['username'],
               password: password,
@@ -435,9 +439,7 @@ class _AppEntryGateState extends State<AppEntryGate> {
             appState.setDepartment(userDetails['department']);
             appState.setDoctor(userDetails['doctor']);
             appState.setTreatment(userDetails['treatment'], subtype: userDetails['treatment_subtype']);
-            appState.procedureDate = userDetails['procedure_date'] != null
-                ? DateTime.parse(userDetails['procedure_date'])
-                : null;
+            appState.procedureDate = DateTime.tryParse((userDetails['procedure_date'] ?? '').toString());
             appState.procedureTime = parseTimeOfDay(userDetails['procedure_time']);
             appState.procedureCompleted = userDetails['procedure_completed'] == true;
           }

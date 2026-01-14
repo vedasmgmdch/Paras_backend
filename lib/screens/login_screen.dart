@@ -96,6 +96,9 @@ class _LoginScreenState extends State<LoginScreen> {
     if (userDetails != null) {
       try {
         appState.setUserDetails(
+          patientId: userDetails['id'] is int
+              ? userDetails['id']
+              : int.tryParse((userDetails['id'] ?? '').toString()),
           fullName: userDetails['name'] ?? '',
           dob: DateTime.tryParse(userDetails['dob'] ?? '') ?? DateTime.now(),
           gender: userDetails['gender'] ?? '',
@@ -305,7 +308,11 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 40),
                   TextFormField(
-                    decoration: const InputDecoration(labelText: "Username", border: OutlineInputBorder()),
+                    decoration: const InputDecoration(
+                      labelText: "Username (not email/phone)",
+                      helperText: "Use the username you created during signup.",
+                      border: OutlineInputBorder(),
+                    ),
                     validator: (v) => v == null || v.trim().isEmpty ? "Enter username" : null,
                     onSaved: (v) => _username = (v ?? '').trim(),
                   ),

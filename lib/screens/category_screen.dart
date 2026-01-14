@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/api_service.dart';
+import '../services/notification_service.dart';
+import '../services/push_service.dart';
 import 'package:http/http.dart' as http;
 import '../app_state.dart';
 import 'treatment_screen.dart';
@@ -134,13 +137,12 @@ class _CategoryScreenState extends State<CategoryScreen> {
 
   bool get canContinue =>
       selectedDepartment != null &&
-          selectedDoctor != null &&
-          departmentDoctors[selectedDepartment!]!.contains(selectedDoctor);
+      selectedDoctor != null &&
+      departmentDoctors[selectedDepartment!]!.contains(selectedDoctor);
 
   // Calls your backend to store department and doctor!
-  Future<void> saveDepartmentDoctor(
-      String username, String department, String doctor) async {
-  final url = Uri.parse('https://paras-backend-0gwt.onrender.com/department-doctor');
+  Future<void> saveDepartmentDoctor(String username, String department, String doctor) async {
+    final url = Uri.parse('https://paras-backend-0gwt.onrender.com/department-doctor');
     SharedPreferences prefs = await SharedPreferences.getInstance();
     String? token = prefs.getString('token');
 
@@ -150,8 +152,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer $token',
       },
-      body:
-      '{"department": "$department", "doctor": "$doctor", "username": "$username"}',
+      body: '{"department": "$department", "doctor": "$doctor", "username": "$username"}',
     );
     if (response.statusCode != 200) {
       if (mounted) {
@@ -166,7 +167,6 @@ class _CategoryScreenState extends State<CategoryScreen> {
     final appState = Provider.of<AppState>(context, listen: false);
     appState.setDepartment(selectedDepartment);
     appState.setDoctor(selectedDoctor);
-
 
     // SAVE TO BACKEND
     final userName = appState.username ?? "User";
@@ -189,7 +189,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
 
   @override
   Widget build(BuildContext context) {
-  // Username not used directly in this widget; saved on continue.
+    // Username not used directly in this widget; saved on continue.
 
     return Scaffold(
       appBar: AppBar(
@@ -199,15 +199,28 @@ class _CategoryScreenState extends State<CategoryScreen> {
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () async {
+              // Stop future pushes for this user/device.
+              try {
+                await ApiService.unregisterAllDeviceTokens();
+              } catch (_) {}
+
+              // Best-effort local cleanup.
+              try {
+                await NotificationService.cancelAllPending();
+              } catch (_) {}
+              try {
+                await PushService.onLogout();
+              } catch (_) {}
+
               final prefs = await SharedPreferences.getInstance();
               await prefs.remove('token');
               // Clear all in-memory user/account state
               final appState = Provider.of<AppState>(context, listen: false);
-               appState.clearUserData();
+              appState.clearUserData();
               if (!mounted) return;
               Navigator.of(context).pushAndRemoveUntil(
                 MaterialPageRoute(builder: (_) => const WelcomeScreen()),
-                    (route) => false,
+                (route) => false,
               );
             },
           ),
@@ -266,23 +279,23 @@ class _CategoryScreenState extends State<CategoryScreen> {
       ),
       bottomNavigationBar: (showDoctors && canContinue)
           ? Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: ElevatedButton(
-          onPressed: _onContinue,
-          style: ElevatedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(vertical: 18),
-            backgroundColor: Colors.blue,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(18),
-            ),
-            textStyle: const TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 17,
-            ),
-          ),
-          child: const Text("Continue"),
-        ),
-      )
+              padding: const EdgeInsets.all(16.0),
+              child: ElevatedButton(
+                onPressed: _onContinue,
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  backgroundColor: Colors.blue,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  textStyle: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 17,
+                  ),
+                ),
+                child: const Text("Continue"),
+              ),
+            )
           : null,
     );
   }

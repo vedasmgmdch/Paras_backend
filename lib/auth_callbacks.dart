@@ -43,7 +43,7 @@ Future<String?> handleSignUp(
     }
     appState.setUserDetails(
       fullName: name,
-      dob: DateTime.parse(dob),
+      dob: DateTime.tryParse(dob) ?? DateTime.now(),
       gender: gender,
       username: username,
       password: password,
@@ -86,8 +86,11 @@ Future<String?> handleLogin(
 
     if (userDetails != null) {
       appState.setUserDetails(
+        patientId: userDetails['id'] is int
+            ? userDetails['id']
+            : int.tryParse((userDetails['id'] ?? '').toString()),
         fullName: userDetails['name'],
-        dob: DateTime.parse(userDetails['dob']),
+        dob: DateTime.tryParse((userDetails['dob'] ?? '').toString()) ?? DateTime.now(),
         gender: userDetails['gender'],
         username: userDetails['username'],
         password: password,
@@ -97,13 +100,8 @@ Future<String?> handleLogin(
       appState.setDepartment(userDetails['department']);
       appState.setDoctor(userDetails['doctor']);
       appState.setTreatment(userDetails['treatment'], subtype: userDetails['treatment_subtype']);
-      appState.procedureDate = userDetails['procedure_date'] != null
-          ? DateTime.parse(userDetails['procedure_date'])
-          : null;
-      appState.procedureTime = TimeOfDay(
-        hour: int.tryParse(userDetails['procedure_time']?.split(":")?[0] ?? "") ?? 0,
-        minute: int.tryParse(userDetails['procedure_time']?.split(":")?[1] ?? "") ?? 0,
-      );
+      appState.procedureDate = DateTime.tryParse((userDetails['procedure_date'] ?? '').toString());
+      appState.procedureTime = _safeParseTimeOfDay(userDetails['procedure_time']);
       appState.procedureCompleted = userDetails['procedure_completed'] == true;
     }
 
@@ -117,4 +115,15 @@ Future<String?> handleLogin(
 
     return null;
   }
+}
+
+TimeOfDay? _safeParseTimeOfDay(dynamic raw) {
+  if (raw == null) return null;
+  final s = raw.toString();
+  final parts = s.split(':');
+  if (parts.length < 2) return null;
+  final h = int.tryParse(parts[0]);
+  final m = int.tryParse(parts[1]);
+  if (h == null || m == null) return null;
+  return TimeOfDay(hour: h, minute: m);
 }

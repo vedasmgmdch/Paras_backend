@@ -19,6 +19,7 @@ from sqlalchemy.exc import IntegrityError
 
 import schemas
 from database import engine
+import instruction_catalog
 
 from utils import send_registration_email, send_fcm_notification, send_fcm_notification_ex
 import os
@@ -1357,61 +1358,69 @@ async def list_patients_by_doctor_debug(doctor: str, db: AsyncSession = Depends(
 # ------------------------------------------------------------------
 @app.get("/doctor/patients/{username}/instruction-progress")
 async def patient_instruction_progress(username: str, days: int = 14, db: AsyncSession = Depends(get_db)):
-    from datetime import date, timedelta
+    """Aggregate instruction adherence over the last N days.
+
+    Uses the enhanced materialization logic so "missing" instructions are counted as
+    unfollowed when we can infer the expected instruction set (union-of-observed in the window).
+    """
     days = max(1, min(days, 60))  # clamp range
-    result = await db.execute(select(models.Patient).where(models.Patient.username == username))
-    patient = result.scalars().first()
-    if not patient:
-        raise HTTPException(status_code=404, detail="Patient not found")
-    date_from = date.today() - timedelta(days=days - 1)
-    q = select(models.InstructionStatus).where(
-        models.InstructionStatus.patient_id == patient.id,
-        models.InstructionStatus.date >= date_from
+
+    enhanced = await doctor_instruction_status_enhanced(
+        username=username,
+        days=days,
+        date_from=None,
+        date_to=None,
+        filter_treatment=None,
+        filter_subtype=None,
+        include_unfollowed_placeholders=True,
+        db=db,
     )
-    res = await db.execute(q)
-    rows = res.scalars().all()
-    by_date: dict[str, dict[str, int]] = {}
+
+    patient_public = enhanced.get("patient") or {}
+    days_out = enhanced.get("days") or []
+
     total_followed = 0
     total_unfollowed = 0
-    for r in rows:
-        ds = r.date.isoformat()
-        if ds not in by_date:
-            by_date[ds] = {"followed": 0, "unfollowed": 0}
-        if getattr(r, "followed", False):
-            by_date[ds]["followed"] += 1
-            total_followed += 1
-        else:
-            by_date[ds]["unfollowed"] += 1
-            total_unfollowed += 1
-    # build sequence for each day even if zero
     daily = []
-    for i in range(days):
-        d = date_from + timedelta(days=i)
-        key = d.isoformat()
-        rec = by_date.get(key, {"followed": 0, "unfollowed": 0})
-        total = rec["followed"] + rec["unfollowed"]
-        pct = (rec["followed"] / total) if total else 0.0
-        daily.append({
-            "date": key,
-            "followed": rec["followed"],
-            "unfollowed": rec["unfollowed"],
-            "total": total,
-            "followed_ratio": round(pct, 3)
-        })
+    for d in days_out:
+        # d['date'] is a date object (from Pydantic model); coerce safely
+        dt = d.get("date")
+        ds = dt.isoformat() if hasattr(dt, "isoformat") else str(dt or "")
+        followed = int(d.get("followed_count") or 0)
+        unfollowed = int(d.get("unfollowed_count") or 0)
+        total = int(d.get("total") or (followed + unfollowed))
+        ratio = float(d.get("followed_ratio") or (followed / total if total else 0.0))
+        total_followed += followed
+        total_unfollowed += unfollowed
+        daily.append(
+            {
+                "date": ds,
+                "followed": followed,
+                "unfollowed": unfollowed,
+                "total": total,
+                "followed_ratio": round(ratio, 3),
+            }
+        )
+
+    total_all = total_followed + total_unfollowed
     return {
         "patient": {
-            "username": patient.username,
-            "department": patient.department,
-            "doctor": patient.doctor,
+            "username": patient_public.get("username"),
+            "department": patient_public.get("department"),
+            "doctor": patient_public.get("doctor"),
+            "treatment": patient_public.get("treatment"),
+            "subtype": patient_public.get("treatment_subtype"),
+            # keep old key too for compatibility with other clients
+            "treatment_subtype": patient_public.get("treatment_subtype"),
         },
         "summary": {
-            "days": days,
+            "days": len(daily),
             "followed": total_followed,
             "unfollowed": total_unfollowed,
-            "total": total_followed + total_unfollowed,
-            "followed_ratio": round((total_followed / (total_followed + total_unfollowed)) if (total_followed + total_unfollowed) else 0.0, 3)
+            "total": total_all,
+            "followed_ratio": round((total_followed / total_all) if total_all else 0.0, 3),
         },
-        "daily": daily
+        "daily": daily,
     }
 
 # ------------------------------------------------------------------
@@ -1593,6 +1602,8 @@ async def doctor_get_patient_episodes(
 async def doctor_instruction_status_enhanced(
     username: str,
     days: int = 14,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
     filter_treatment: Optional[str] = None,
     filter_subtype: Optional[str] = None,
     include_unfollowed_placeholders: bool = True,
@@ -1600,12 +1611,13 @@ async def doctor_instruction_status_enhanced(
 ):
     """Return fully materialized per-day instruction logs for last N days.
 
-    If include_unfollowed_placeholders is true, we attempt to ensure that if on a day the patient
-    submitted some instructions for a (group, instruction_index) set earlier in the range, but did not
-    submit it for this day, we synthesize a placeholder (followed=False, synthetic=True) so doctor can
-    see consistent timeline continuity. This is a heuristic because we do not yet have a global
-    instruction catalog. It infers expected instructions from the union of all instructions observed
-    in the window.
+        If include_unfollowed_placeholders is true, we attempt to ensure that missing instruction rows
+        are materialized as placeholders (followed=False, synthetic=True) so doctors can see a consistent
+        timeline.
+
+        Materialization order:
+            1) Use a built-in instruction catalog for the patient's treatment/subtype when available.
+            2) Fallback to a union-of-observed heuristic inside the requested window.
     """
     from datetime import date as _date, timedelta as _td, datetime as _dt
     days = max(1, min(days, 60))
@@ -1613,8 +1625,22 @@ async def doctor_instruction_status_enhanced(
     patient = res.scalars().first()
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
-    date_to = _date.today()
-    date_from = date_to - _td(days=days-1)
+
+    # Default window: last N days up to today.
+    # If date_from/date_to are provided, they override days.
+    if date_from is None and date_to is None:
+        date_to = _date.today()
+        date_from = date_to - _td(days=days - 1)
+    else:
+        if date_from is None or date_to is None:
+            raise HTTPException(status_code=400, detail="Both date_from and date_to must be provided")
+        if date_from > date_to:
+            raise HTTPException(status_code=400, detail="date_from must be <= date_to")
+        # Cap to 14-day recovery window.
+        if (date_to - date_from).days + 1 > 14:
+            date_to = date_from + _td(days=13)
+        days = (date_to - date_from).days + 1
+        days = max(1, min(days, 14))
     q = select(models.InstructionStatus).where(
         models.InstructionStatus.patient_id == patient.id,
         models.InstructionStatus.date >= date_from,
@@ -1627,22 +1653,37 @@ async def doctor_instruction_status_enhanced(
     q = q.order_by(models.InstructionStatus.date.asc(), models.InstructionStatus.group.asc(), models.InstructionStatus.instruction_index.asc())
     rows = (await db.execute(q)).scalars().all()
 
+    def _canon_group(g: Optional[str]) -> str:
+        return (g or "").strip().lower()
+
     # Build base structures
-    # Observed instruction identities across window
+    # Observed instruction identities across window (keyed by (group, instruction_index))
     observed_keys: dict[tuple, dict] = {}
     rows_by_date: dict[str, list] = {}
     for r in rows:
         ds = r.date.isoformat()
         rows_by_date.setdefault(ds, []).append(r)
-        key = (r.group, r.instruction_index, r.instruction_text)
+
+        grp = _canon_group(getattr(r, "group", None))
+        key = (grp, r.instruction_index)
+        # Keep first seen meta; instruction_text may vary historically, but identity is by index.
         if key not in observed_keys:
             observed_keys[key] = {
-                "group": r.group,
+                "group": grp,
                 "instruction_index": r.instruction_index,
                 "instruction_text": r.instruction_text,
                 "treatment": r.treatment,
                 "subtype": r.subtype,
             }
+
+    # Prefer a real catalog for the effective treatment/subtype when possible.
+    effective_treatment = filter_treatment or patient.treatment
+    effective_subtype = filter_subtype or patient.treatment_subtype
+    catalog_keys = instruction_catalog.expected_instruction_identities(
+        treatment=effective_treatment,
+        subtype=effective_subtype,
+    )
+    baseline_keys = catalog_keys or observed_keys
 
     days_out = []
     # Iterate each day and materialize
@@ -1650,13 +1691,13 @@ async def doctor_instruction_status_enhanced(
         d = date_from + _td(days=i)
         ds = d.isoformat()
         real_rows = rows_by_date.get(ds, [])
-        real_map = {(r.group, r.instruction_index, r.instruction_text): r for r in real_rows}
+        real_map = {(_canon_group(getattr(r, "group", None)), r.instruction_index): r for r in real_rows}
         materialized = []
         followed_ct = 0
         unfollowed_ct = 0
-        if include_unfollowed_placeholders and observed_keys:
-            # Use union of observed instructions across window as baseline
-            for key, meta in observed_keys.items():
+        if include_unfollowed_placeholders and baseline_keys:
+            # Use catalog when available; else fallback to union-of-observed.
+            for key, meta in baseline_keys.items():
                 r = real_map.get(key)
                 if r is None:
                     # Placeholder synthetic entry (did not appear this day)
@@ -1680,7 +1721,7 @@ async def doctor_instruction_status_enhanced(
                         "date": r.date,
                         "treatment": r.treatment,
                         "subtype": r.subtype,
-                        "group": r.group,
+                        "group": _canon_group(getattr(r, "group", None)),
                         "instruction_index": r.instruction_index,
                         "instruction_text": r.instruction_text,
                         "followed": r.followed,
@@ -1698,7 +1739,7 @@ async def doctor_instruction_status_enhanced(
                     "date": r.date,
                     "treatment": r.treatment,
                     "subtype": r.subtype,
-                    "group": r.group,
+                    "group": _canon_group(getattr(r, "group", None)),
                     "instruction_index": r.instruction_index,
                     "instruction_text": r.instruction_text,
                     "followed": r.followed,
@@ -2634,11 +2675,19 @@ async def _internal_dispatch_due(
             any_token_invalid = False
             for t in tokens:
                 reminder_id = str(object.__getattribute__(r, 'id'))
+                due_utc = getattr(r, 'next_fire_utc', None)
+                due_utc_str = None
+                try:
+                    if due_utc is not None:
+                        due_utc_str = due_utc.isoformat() + "Z"
+                except Exception:
+                    due_utc_str = None
                 data = {
                     "kind": "reminder",
                     "reminder_id": reminder_id,
                     "patient_id": str(getattr(r, 'patient_id')),
                     "fire_utc": now2.isoformat() + "Z",
+                    "scheduled_utc": due_utc_str or (now2.isoformat() + "Z"),
                     "title": str(getattr(r, 'title')),
                     "body": str(getattr(r, 'body')),
                 }
@@ -2648,6 +2697,7 @@ async def _internal_dispatch_due(
                     getattr(r, 'body'),
                     data=data,
                     android_channel_id="reminders_channel_alarm_v2",
+                    data_only=True,
                 )  # type: ignore
                 if res_obj.get("ok"):
                     sent += 1
@@ -2836,11 +2886,19 @@ async def _internal_dispatch_due(
         any_token_invalid = False
         for t in tokens:
             reminder_id = str(object.__getattribute__(r, 'id'))
+            due_utc = getattr(r, 'next_fire_utc', None)
+            due_utc_str = None
+            try:
+                if due_utc is not None:
+                    due_utc_str = due_utc.isoformat() + "Z"
+            except Exception:
+                due_utc_str = None
             data = {
                 "kind": "reminder",
                 "reminder_id": reminder_id,
                 "patient_id": str(getattr(r, 'patient_id')),
                 "fire_utc": now2.isoformat() + "Z",
+                "scheduled_utc": due_utc_str or (now2.isoformat() + "Z"),
                 "title": str(getattr(r, 'title')),
                 "body": str(getattr(r, 'body')),
             }
@@ -2850,6 +2908,7 @@ async def _internal_dispatch_due(
                 getattr(r, 'body'),
                 data=data,
                 android_channel_id="reminders_channel_alarm_v2",
+                data_only=True,
             )  # type: ignore
             if res_obj.get("ok"):
                 sent += 1

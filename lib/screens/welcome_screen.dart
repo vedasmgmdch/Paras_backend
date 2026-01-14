@@ -143,8 +143,11 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
 
     if (userDetails != null) {
       appState.setUserDetails(
+        patientId: userDetails['id'] is int
+            ? userDetails['id']
+            : int.tryParse((userDetails['id'] ?? '').toString()),
         fullName: userDetails['name'],
-        dob: DateTime.parse(userDetails['dob']),
+        dob: DateTime.tryParse((userDetails['dob'] ?? '').toString()) ?? DateTime.now(),
         gender: userDetails['gender'],
         username: userDetails['username'],
         password: password,
@@ -154,12 +157,8 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       appState.setDepartment(userDetails['department']);
       appState.setDoctor(userDetails['doctor']);
       appState.setTreatment(userDetails['treatment'], subtype: userDetails['treatment_subtype']);
-      appState.procedureDate = userDetails['procedure_date'] != null
-          ? DateTime.parse(userDetails['procedure_date'])
-          : null;
-      appState.procedureTime = userDetails['procedure_time'] != null
-          ? _parseTimeOfDay(userDetails['procedure_time'])
-          : null;
+        appState.procedureDate = DateTime.tryParse((userDetails['procedure_date'] ?? '').toString());
+        appState.procedureTime = _parseTimeOfDay(userDetails['procedure_time']);
       appState.procedureCompleted = userDetails['procedure_completed'] == true;
 
       // Pull server-side instruction ticks (non-blocking) so a new device matches the account.
@@ -687,7 +686,11 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           TextFormField(
-            decoration: const InputDecoration(labelText: "Username", border: OutlineInputBorder()),
+            decoration: const InputDecoration(
+              labelText: "Username (not email/phone)",
+              helperText: "Use the username you created during signup.",
+              border: OutlineInputBorder(),
+            ),
             validator: (v) => v == null || v.trim().isEmpty ? "Enter username" : null,
             onSaved: (v) => _loginUsername = (v ?? '').trim(),
           ),

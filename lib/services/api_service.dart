@@ -105,6 +105,48 @@ class ApiService {
   }
 
   // --------------------------
+  // ✅ Delete a registered device token by id
+  // --------------------------
+  static Future<bool> deleteDeviceToken(int deviceId) async {
+    try {
+      final headers = await getAuthHeaders();
+      final res = await http
+          .delete(Uri.parse('$baseUrl/push/devices/$deviceId'), headers: headers)
+          .timeout(_slowEndpointTimeout);
+      if (res.statusCode == 200) return true;
+      print('deleteDeviceToken failed: ${res.statusCode} -> ${res.body}');
+      return false;
+    } catch (e) {
+      print('deleteDeviceToken error: $e');
+      return false;
+    }
+  }
+
+  // --------------------------
+  // ✅ Best-effort: unregister ALL my device tokens
+  //
+  // Call this BEFORE clearing auth token (logout), so the backend stops
+  // dispatching scheduled pushes to this device when logged out.
+  // --------------------------
+  static Future<int> unregisterAllDeviceTokens() async {
+    try {
+      final devices = await listDeviceTokens();
+      int deleted = 0;
+      for (final d in devices) {
+        final idVal = d['id'];
+        final id = idVal is int ? idVal : int.tryParse(idVal?.toString() ?? '');
+        if (id == null) continue;
+        final ok = await deleteDeviceToken(id);
+        if (ok) deleted += 1;
+      }
+      return deleted;
+    } catch (e) {
+      print('unregisterAllDeviceTokens error: $e');
+      return 0;
+    }
+  }
+
+  // --------------------------
   // ✅ Send test push (optional)
   // --------------------------
   static Future<bool> sendTestPush({required String title, required String body}) async {
@@ -1175,35 +1217,35 @@ class ApiService {
   }
 
   // --------------------------
-  // ✅ Doctor: Enhanced materialized daily instruction logs
+  // ✅ Doctor: Enhanced per-day instruction status (includes placeholders)
   // --------------------------
   static Future<Map<String, dynamic>?> doctorGetPatientInstructionStatusEnhanced(
     String username, {
     int days = 14,
     String? treatment,
     String? subtype,
-    bool includePlaceholders = true,
+    String? dateFrom,
+    String? dateTo,
+    bool includeUnfollowedPlaceholders = true,
   }) async {
     try {
       final headers = await getDoctorAuthHeaders();
       final qp = <String, String>{
         'days': days.toString(),
-        'include_unfollowed_placeholders': includePlaceholders ? 'true' : 'false',
+        'include_unfollowed_placeholders': includeUnfollowedPlaceholders ? 'true' : 'false',
       };
-      if (treatment != null && treatment.isNotEmpty) qp['filter_treatment'] = treatment;
-      if (subtype != null && subtype.isNotEmpty) qp['filter_subtype'] = subtype;
-      final uri = Uri.parse(
-        '$baseUrl/doctor/patients/$username/instruction-status/enhanced',
-      ).replace(queryParameters: qp);
-      final res = await http.get(uri, headers: headers).timeout(const Duration(seconds: 12));
+      if (treatment != null && treatment.trim().isNotEmpty) qp['filter_treatment'] = treatment;
+      if (subtype != null && subtype.trim().isNotEmpty) qp['filter_subtype'] = subtype;
+      if (dateFrom != null && dateFrom.trim().isNotEmpty) qp['date_from'] = dateFrom;
+      if (dateTo != null && dateTo.trim().isNotEmpty) qp['date_to'] = dateTo;
+      final uri = Uri.parse('$baseUrl/doctor/patients/$username/instruction-status/enhanced').replace(
+        queryParameters: qp,
+      );
+      final res = await http.get(uri, headers: headers).timeout(_slowEndpointTimeout);
       if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        if (data is Map<String, dynamic>) return data;
-      } else {
-        debugPrint('doctorGetPatientInstructionStatusEnhanced failed: ${res.statusCode} → ${res.body}');
+        return jsonDecode(res.body) as Map<String, dynamic>;
       }
-    } on TimeoutException catch (_) {
-      debugPrint('[Api][timeout] doctorGetPatientInstructionStatusEnhanced');
+      debugPrint('doctorGetPatientInstructionStatusEnhanced failed: ${res.statusCode} → ${res.body}');
     } catch (e) {
       debugPrint('doctorGetPatientInstructionStatusEnhanced error: $e');
     }

@@ -299,7 +299,14 @@ def send_fcm_to_tokens(tokens: list[str], title: str, body: str, data: dict | No
     return results
 
 # --- Extended debug variant that returns raw responses and error hints ---
-def send_fcm_notification_ex(token: str, title: str, body: str, data: dict | None = None, android_channel_id: str | None = None) -> dict:
+def send_fcm_notification_ex(
+    token: str,
+    title: str,
+    body: str,
+    data: dict | None = None,
+    android_channel_id: str | None = None,
+    data_only: bool = False,
+) -> dict:
     """Send a single FCM message and return a structured result.
 
     Returns dict with keys: ok (bool), status (int|None), body (str|None), api ('v1'|'legacy'|None),
@@ -330,9 +337,10 @@ def send_fcm_notification_ex(token: str, title: str, body: str, data: dict | Non
                 }
                 message = {
                     "token": token,
-                    "notification": {"title": title, "body": body},
                     "data": data or {},
                 }
+                if not data_only:
+                    message["notification"] = {"title": title, "body": body}
                 if android_channel_id:
                     message["android"] = {
                         "priority": "HIGH",
@@ -364,16 +372,17 @@ def send_fcm_notification_ex(token: str, title: str, body: str, data: dict | Non
         "Authorization": f"key={server_key}",
         "Content-Type": "application/json",
     }
-    notification_obj = {"title": title, "body": body}
-    if android_channel_id:
-        # Android 8+ channel routing for FCM legacy API
-        notification_obj["android_channel_id"] = android_channel_id
     payload = {
         "to": token,
-        "notification": notification_obj,
         "data": data or {},
         "priority": "high",
     }
+    if not data_only:
+        notification_obj = {"title": title, "body": body}
+        if android_channel_id:
+            # Android 8+ channel routing for FCM legacy API
+            notification_obj["android_channel_id"] = android_channel_id
+        payload["notification"] = notification_obj
     resp = requests.post(url, json=payload, headers=headers, timeout=FCM_HTTP_TIMEOUT)
     ok = resp.status_code == 200
     return {"ok": ok, "status": resp.status_code, "body": resp.text, "api": api_used, "error": None if ok else "SEND_FAILED"}
