@@ -23,7 +23,16 @@ DB_USER=YOUR_USER
 DB_PASSWORD=YOUR_PASSWORD
 ```
 
-> If your provider gives a connection string instead, tell me and I’ll adapt `database.py` to accept `DATABASE_URL` directly.
+### If Neon gives you a connection string (recommended)
+Neon typically provides a single connection string. You can paste it into `.env` as:
+
+```
+DATABASE_URL=postgresql://USER:PASSWORD@HOST/DB?sslmode=require
+```
+
+This repo supports `DATABASE_URL` (and will automatically enable SSL for Neon).
+
+> You do **not** need to run `npx neonctl@latest init` for this backend unless you specifically want to use Neon’s CLI tooling.
 
 ## 2) One-time command to recreate ALL tables
 Run this once (PowerShell):
