@@ -942,6 +942,103 @@ async def task_run_adherence(request: Request, db: AsyncSession = Depends(get_db
     return res
 
 
+@app.post("/tasks/adherence/test")
+@app.get("/tasks/adherence/test")
+async def task_test_adherence(
+    request: Request,
+    patient_id: int | None = None,
+    kind: str = "adherence_nudge",
+    title: str | None = None,
+    body: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Force-send an adherence/progress notification for testing.
+
+    Protected by TASK_TOKEN.
+
+    Query params:
+      - patient_id: optional; if omitted, sends to the first patient with an active token
+      - kind: 'adherence_nudge' or 'adherence_ok'
+      - title/body: optional overrides
+    """
+    _require_task_token(request)
+
+    kind_norm = (kind or "").strip()
+    if kind_norm not in {"adherence_nudge", "adherence_ok"}:
+        raise HTTPException(status_code=422, detail="kind must be adherence_nudge or adherence_ok")
+
+    if title is None:
+        if kind_norm == "adherence_ok":
+            title = os.getenv("ADHERENCE_ALRIGHT_TITLE") or os.getenv("ADHERENCE_OK_TITLE", "All right")
+        else:
+            title = os.getenv("ADHERENCE_NUDGE_TITLE", "Instruction Reminder")
+    if body is None:
+        if kind_norm == "adherence_ok":
+            body = os.getenv("ADHERENCE_ALRIGHT_BODY") or os.getenv(
+                "ADHERENCE_OK_BODY",
+                "You're doing well. Please continue following your doctor's instructions.",
+            )
+        else:
+            body = os.getenv("ADHERENCE_NUDGE_BODY", "Please follow your instructions today.")
+
+    target_pid: int | None = patient_id
+    if target_pid is None:
+        # Pick any patient with an active device token.
+        pid_res = await db.execute(
+            select(models.DeviceToken.patient_id)
+            .where(models.DeviceToken.active == True)
+            .order_by(models.DeviceToken.updated_at.desc())
+            .limit(1)
+        )
+        target_pid = pid_res.scalar_one_or_none()
+
+    if target_pid is None:
+        return {"ok": False, "reason": "no_active_tokens", "sent": 0}
+
+    tok_res = await db.execute(
+        select(models.DeviceToken.token)
+        .where(models.DeviceToken.patient_id == int(target_pid))
+        .where(models.DeviceToken.active == True)
+    )
+    tokens = [row[0] for row in tok_res.all()]
+    if not tokens:
+        return {"ok": False, "reason": "no_tokens_for_patient", "patient_id": int(target_pid), "sent": 0}
+
+    try:
+        adh_ttl = int(os.getenv("ADHERENCE_FCM_TTL_SECONDS", "7200"))
+    except Exception:
+        adh_ttl = 7200
+    if adh_ttl < 0:
+        adh_ttl = 0
+
+    data = {
+        "type": kind_norm,
+        "local_date": datetime.utcnow().date().isoformat(),
+        "test": "1",
+    }
+
+    sent = 0
+    details: list[dict[str, Any]] = []
+    debug = str(request.query_params.get("debug", "")).lower() in {"1", "true", "yes", "on"}
+    for t in tokens:
+        res_obj = send_fcm_notification_ex(
+            str(t),
+            str(title),
+            str(body),
+            data=data,
+            ttl_seconds=adh_ttl,
+        )  # type: ignore
+        if res_obj.get("ok"):
+            sent += 1
+        if debug:
+            details.append({"token": str(t)[-12:], **res_obj})
+
+    resp: dict[str, Any] = {"ok": True, "patient_id": int(target_pid), "kind": kind_norm, "sent": sent, "total": len(tokens)}
+    if debug:
+        resp["debug"] = details
+    return resp
+
+
 @app.get("/tasks/adherence/preview")
 async def task_preview_adherence(
     request: Request,

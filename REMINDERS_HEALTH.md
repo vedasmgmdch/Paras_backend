@@ -29,6 +29,7 @@ use an external cron to call:
 
 * `GET|POST /tasks/dispatch/run` (protected by `TASK_TOKEN`) to send due scheduled pushes + reminder fallbacks.
 * `GET|POST /tasks/adherence/run` (protected by `TASK_TOKEN`) to send adherence/progress nudges.
+* `GET|POST /tasks/adherence/test` (protected by `TASK_TOKEN`) to force-send a test progress notification.
 
 Notes:
 * These endpoints also accept `HEAD` for uptime monitors that probe with `HEAD`.
@@ -43,6 +44,14 @@ To make reminders/nudges deliver as soon as the user turns internet back on, the
 
 * Reminders: queued up to `REMINDER_MAX_LATE_MINUTES` after the scheduled time (default 720 minutes = 12 hours).
 * Adherence/progress nudges: queued up to `ADHERENCE_FCM_TTL_SECONDS` (default 7200 seconds = 2 hours).
+
+### Adherence Testing (Postman)
+
+If `/tasks/adherence/run` returns `nudged: 0`, it usually means the current time is outside the configured adherence window.
+To test the device delivery path instantly, use:
+
+* `POST /tasks/adherence/test?token=<TASK_TOKEN>&patient_id=<PATIENT_ID>&kind=adherence_nudge`
+* Optional: add `&debug=1` to see per-token send results.
 
 ### Frontend Ack Flow
 
