@@ -888,6 +888,7 @@ def _require_task_token(request: Request) -> None:
 
 @app.post("/tasks/dispatch/run")
 @app.get("/tasks/dispatch/run")
+@app.head("/tasks/dispatch/run")
 async def task_run_dispatch(
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -923,6 +924,7 @@ async def task_run_dispatch(
 
 @app.post("/tasks/adherence/run")
 @app.get("/tasks/adherence/run")
+@app.head("/tasks/adherence/run")
 async def task_run_adherence(request: Request, db: AsyncSession = Depends(get_db)):
     """Trigger adherence nudges immediately.
 

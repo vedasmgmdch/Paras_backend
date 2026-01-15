@@ -341,13 +341,19 @@ def send_fcm_notification_ex(
                 }
                 if not data_only:
                     message["notification"] = {"title": title, "body": body}
-                if android_channel_id:
+                # For data-only messages, do NOT include android.notification.
+                # Including android.notification without title/body can cause Android
+                # to display a blank notification (app name only).
+                if android_channel_id and (not data_only):
                     message["android"] = {
                         "priority": "HIGH",
                         "notification": {
                             "channel_id": android_channel_id,
                         },
                     }
+                else:
+                    # Still request high priority for timely background delivery.
+                    message["android"] = {"priority": "HIGH"}
                 payload = {"message": message}
                 resp = requests.post(url, data=json.dumps(payload), headers=headers, timeout=FCM_HTTP_TIMEOUT)
                 ok = resp.status_code in (200, 202)
