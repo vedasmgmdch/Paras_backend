@@ -201,8 +201,17 @@ class PushService {
       final body = message.notification?.body ?? message.data['body']?.toString();
 
       // Important: Android does NOT display FCM notification messages while the app is in the foreground.
-      // We only surface reminders here to avoid "burst" popups for other message types.
-      if (kind == 'reminder' && title != null && body != null) {
+      // We surface:
+      //  - reminders (data-only) via local notifications
+      //  - adherence nudges (a.k.a. progress/instruction status notifications) via local notifications
+      if (title == null || body == null) {
+        if (kDebugMode) {
+          print('FCM foreground message received without title/body; suppressed: data=${message.data}');
+        }
+        return;
+      }
+
+      if (kind == 'reminder') {
         String? lateLabel;
         try {
           final scheduledStr = message.data['scheduled_utc']?.toString();
@@ -225,6 +234,21 @@ class PushService {
             print('Foreground reminder local-notification error: $e');
           }
         }
+        return;
+      }
+
+      // Adherence nudges: backend sends type=adherence_nudge/adherence_ok.
+      // Surface them in foreground so users actually see them.
+      if (kind == 'adherence_nudge' || kind == 'adherence_ok') {
+        final id = DateTime.now().millisecondsSinceEpoch.remainder(2147483647);
+        try {
+          await NotificationService.showNow(id: id, title: title, body: body);
+        } catch (e) {
+          if (kDebugMode) {
+            print('Foreground adherence local-notification error: $e');
+          }
+        }
+        return;
       } else {
         if (kDebugMode) {
           print(

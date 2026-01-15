@@ -44,6 +44,26 @@ def _should_require_ssl(url: str) -> bool:
         pass
     return False
 
+def _is_pgbouncer_pooler_url(url: str) -> bool:
+    """Detect provider pooler/pgbouncer endpoints.
+
+    Neon pooled connection strings often include hosts like "*-pooler.*.neon.tech".
+    PgBouncer in transaction pooling mode is incompatible with asyncpg prepared
+    statements unless statement caching is disabled.
+    """
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        if "pooler" in host or "pgbouncer" in host:
+            return True
+        qs = parse_qs(parsed.query or "")
+        # Some providers include explicit hints
+        if (qs.get("pgbouncer", [""])[0] or "").lower() in {"1", "true", "yes", "on"}:
+            return True
+    except Exception:
+        pass
+    return False
+
 def _strip_asyncpg_unsupported_query_params(url: str) -> str:
     """asyncpg does not accept libpq-style parameters like sslmode/channel_binding.
 
@@ -77,9 +97,16 @@ connect_args = None
 if DATABASE_URL_ENV:
     raw_url = _normalize_asyncpg_url(DATABASE_URL_ENV)
     requires_ssl = _should_require_ssl(raw_url)
+    is_pooler = _is_pgbouncer_pooler_url(raw_url)
     DATABASE_URL = _strip_asyncpg_unsupported_query_params(raw_url)
     if requires_ssl:
         connect_args = {"ssl": ssl.create_default_context()}
+    # If using a pooler/pgbouncer endpoint, disable asyncpg statement cache.
+    # This avoids errors like "prepared statement does not exist" in transaction pooling.
+    if is_pooler:
+        if connect_args is None:
+            connect_args = {}
+        connect_args.setdefault("statement_cache_size", 0)
     print("[DB] Using PostgreSQL via asyncpg (DATABASE_URL detected)")
 else:
     use_postgres = all([DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD])
@@ -87,6 +114,11 @@ else:
         DATABASE_URL = f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
         if (DB_HOST or "").lower().endswith(".neon.tech"):
             connect_args = {"ssl": ssl.create_default_context()}
+        # Best-effort pooler detection when using split env vars
+        if DB_HOST and ("pooler" in DB_HOST.lower() or "pgbouncer" in DB_HOST.lower()):
+            if connect_args is None:
+                connect_args = {}
+            connect_args.setdefault("statement_cache_size", 0)
         print("[DB] Using PostgreSQL via asyncpg (env vars detected)")
     else:
         # Fallback SQLite database next to this file (dev/test convenience)
@@ -96,10 +128,20 @@ else:
         print(f"[DB] Using SQLite fallback at {sqlite_path} (Postgres env not set)")
 
 # ✅ Create async SQLAlchemy engine
+# pool_pre_ping helps long-running schedulers survive transient connection drops.
 if connect_args:
-    engine = create_async_engine(DATABASE_URL, echo=True, connect_args=connect_args)  # Set echo=False in production
+    engine = create_async_engine(
+        DATABASE_URL,
+        echo=True,
+        connect_args=connect_args,
+        pool_pre_ping=True,
+    )  # Set echo=False in production
 else:
-    engine = create_async_engine(DATABASE_URL, echo=True)  # Set echo=False in production
+    engine = create_async_engine(
+        DATABASE_URL,
+        echo=True,
+        pool_pre_ping=True,
+    )  # Set echo=False in production
 
 # ✅ Configure async session factory
 AsyncSessionLocal = async_sessionmaker(

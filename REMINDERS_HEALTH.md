@@ -22,6 +22,16 @@ Notes:
 2. For persistence / dashboards, promote these into a table or external metrics sink later.
 3. The scheduler invokes the same logic (dispatch_due_pushes) every 60s; manual POST /push/dispatch-due (with cron key) or /push/dispatch-mine also update metrics.
 
+### Server-Only Deployment (Recommended)
+
+If you are running on a host where the in-process scheduler may pause/sleep (common on free tiers),
+use an external cron to call:
+
+* `POST /tasks/dispatch/run` (protected by `TASK_TOKEN`) to send due scheduled pushes + reminder fallbacks.
+* `POST /tasks/adherence/run` (protected by `TASK_TOKEN`) to send adherence/progress nudges.
+
+This keeps reminders + progress notifications working even if the app process is restarted.
+
 ### Frontend Ack Flow
 
 The Flutter `NotificationService.init` now accepts a callback. The hybrid reminder service wires this to automatically call `/reminders/ack` when the user interacts with (or the system delivers) a local reminder notification, preventing a duplicate fallback push.

@@ -72,6 +72,12 @@ async def schedule_existing_unverified_cleanup() -> None:
         if pending_ids:
             print(f"[signup-cleanup] Scheduled cleanup for {len(pending_ids)} unverified patient(s) on startup")
     except Exception as exc:
+        # On first boot with a brand-new database (e.g., new Neon project), tables
+        # may not exist until the schema startup hook runs. Avoid misleading noise.
+        msg = str(exc)
+        if "does not exist" in msg or "UndefinedTable" in msg:
+            print("[signup-cleanup] Skipped (tables not ready yet)")
+            return
         print(f"[signup-cleanup] Failed to schedule startup cleanup: {exc}")
 
 @app.get("/healthz")
@@ -880,7 +886,43 @@ def _require_task_token(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Invalid task token")
 
 
+@app.post("/tasks/dispatch/run")
+@app.get("/tasks/dispatch/run")
+async def task_run_dispatch(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Trigger scheduled push + reminder fallback dispatch immediately.
+
+    This is the preferred server-only mechanism on hosts where the in-process
+    APScheduler may be paused/slept. Configure an external cron to call this
+    endpoint periodically.
+
+    Protected by TASK_TOKEN.
+    Query params:
+      - dry_run=1
+      - limit=50
+      - debug=1
+    """
+    _require_task_token(request)
+
+    def _truthy(v: Optional[str]) -> bool:
+        return str(v).lower() in {"1", "true", "yes", "on"}
+
+    def _as_int(v: Optional[str], default: int) -> int:
+        try:
+            return int(str(v))
+        except Exception:
+            return default
+
+    dry_run = _truthy(request.query_params.get("dry_run"))
+    debug = _truthy(request.query_params.get("debug"))
+    limit = _as_int(request.query_params.get("limit"), default=50)
+    return await _internal_dispatch_due(db, dry_run=dry_run, limit=limit, debug=debug)
+
+
 @app.post("/tasks/adherence/run")
+@app.get("/tasks/adherence/run")
 async def task_run_adherence(request: Request, db: AsyncSession = Depends(get_db)):
     """Trigger adherence nudges immediately.
 
@@ -2334,7 +2376,12 @@ async def schedule_push(
         if s.endswith("Z"):
             s = s[:-1] + "+00:00"
         try:
-            return datetime.fromisoformat(s)
+            dt = datetime.fromisoformat(s)
+            # Always store as naive UTC to match TIMESTAMP WITHOUT TIME ZONE columns
+            # and comparisons against datetime.utcnow() elsewhere.
+            if dt.tzinfo is not None:
+                dt = dt.astimezone(pytz.UTC).replace(tzinfo=None)
+            return dt
         except Exception:
             raise HTTPException(status_code=422, detail="Invalid send_at datetime format. Use ISO8601, e.g. 2025-09-22T15:30:00Z")
 
@@ -2416,6 +2463,9 @@ async def schedule_and_optionally_dispatch(
                 s = s[:-1] + "+00:00"
             try:
                 dt = datetime.fromisoformat(s)
+                # Normalize to naive UTC for DB storage
+                if dt.tzinfo is not None:
+                    dt = dt.astimezone(pytz.UTC).replace(tzinfo=None)
             except Exception:
                 raise HTTPException(status_code=422, detail="Invalid send_at datetime format. Use ISO8601")
             payload = schemas.ScheduledPushCreate(title=str(title), body=str(body), send_at=dt)
