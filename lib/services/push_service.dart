@@ -7,19 +7,7 @@ import 'api_service.dart';
 import 'notification_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-String _formatLateLabel({required DateTime nowUtc, required DateTime scheduledUtc}) {
-  final diff = nowUtc.difference(scheduledUtc);
-  if (diff.inSeconds <= 30) return 'Just now';
-  if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
-  if (diff.inHours < 24) return '${diff.inHours} hr ago';
-  return '${diff.inDays} day(s) ago';
-}
-
-String _applyLateSuffix(String body, String? lateLabel) {
-  if (lateLabel == null || lateLabel.trim().isEmpty) return body;
-  // Keep it simple and readable on Android notification UI.
-  return '$body\n$lateLabel';
-}
+// Note: We intentionally do not add any "late" suffix (Android already shows time).
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -40,8 +28,8 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     await Firebase.initializeApp();
   } catch (_) {}
 
-  // We rely on *data-only* reminder pushes so we can render "X min ago" when delivered late.
-  // If a notification payload is present, Android may display it automatically and we skip to avoid duplicates.
+  // If a notification payload is present, Android will display it automatically while backgrounded.
+  // Only handle data-only reminder pushes here (fallback path) to avoid duplicates.
   if (message.notification != null) return;
 
   final data = message.data;
@@ -51,16 +39,6 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   final title = data['title']?.toString();
   final body = data['body']?.toString();
   if (title == null || body == null) return;
-
-  String? lateLabel;
-  try {
-    final scheduledStr = data['scheduled_utc']?.toString();
-    final scheduledUtc = scheduledStr == null ? null : DateTime.tryParse(scheduledStr);
-    if (scheduledUtc != null) {
-      lateLabel = _formatLateLabel(nowUtc: DateTime.now().toUtc(), scheduledUtc: scheduledUtc.toUtc());
-    }
-  } catch (_) {}
-  final displayBody = _applyLateSuffix(body, lateLabel);
 
   int id = DateTime.now().millisecondsSinceEpoch.remainder(2147483647);
   final rid = data['reminder_id']?.toString();
@@ -100,7 +78,7 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
         autoCancel: false,
       ),
     );
-    await plugin.show(id, title, displayBody, details);
+    await plugin.show(id, title, body, details);
   } catch (_) {}
 }
 
@@ -212,15 +190,6 @@ class PushService {
       }
 
       if (kind == 'reminder') {
-        String? lateLabel;
-        try {
-          final scheduledStr = message.data['scheduled_utc']?.toString();
-          final scheduledUtc = scheduledStr == null ? null : DateTime.tryParse(scheduledStr);
-          if (scheduledUtc != null) {
-            lateLabel = _formatLateLabel(nowUtc: DateTime.now().toUtc(), scheduledUtc: scheduledUtc.toUtc());
-          }
-        } catch (_) {}
-        final displayBody = _applyLateSuffix(body, lateLabel);
         int id = DateTime.now().millisecondsSinceEpoch.remainder(2147483647);
         final rid = message.data['reminder_id']?.toString();
         if (rid != null) {
@@ -228,7 +197,7 @@ class PushService {
           if (parsed != null) id = parsed;
         }
         try {
-          await NotificationService.showNow(id: id, title: title, body: displayBody);
+          await NotificationService.showNow(id: id, title: title, body: body);
         } catch (e) {
           if (kDebugMode) {
             print('Foreground reminder local-notification error: $e');

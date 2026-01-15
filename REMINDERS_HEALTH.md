@@ -27,10 +27,22 @@ Notes:
 If you are running on a host where the in-process scheduler may pause/sleep (common on free tiers),
 use an external cron to call:
 
-* `POST /tasks/dispatch/run` (protected by `TASK_TOKEN`) to send due scheduled pushes + reminder fallbacks.
-* `POST /tasks/adherence/run` (protected by `TASK_TOKEN`) to send adherence/progress nudges.
+* `GET|POST /tasks/dispatch/run` (protected by `TASK_TOKEN`) to send due scheduled pushes + reminder fallbacks.
+* `GET|POST /tasks/adherence/run` (protected by `TASK_TOKEN`) to send adherence/progress nudges.
+
+Notes:
+* These endpoints also accept `HEAD` for uptime monitors that probe with `HEAD`.
 
 This keeps reminders + progress notifications working even if the app process is restarted.
+
+### Offline Device Behavior
+
+This deployment is "server-only": if the device is offline at the scheduled time, the notification cannot be delivered at that moment.
+
+To make reminders/nudges deliver as soon as the user turns internet back on, the backend now sets an FCM TTL (time-to-live) window:
+
+* Reminders: queued up to `REMINDER_MAX_LATE_MINUTES` after the scheduled time (default 720 minutes = 12 hours).
+* Adherence/progress nudges: queued up to `ADHERENCE_FCM_TTL_SECONDS` (default 7200 seconds = 2 hours).
 
 ### Frontend Ack Flow
 
@@ -64,6 +76,8 @@ Added internal refactor + richer debug:
 |----------|---------|---------|
 | `REMINDER_DEFAULT_GRACE` | Override grace_minutes on create/sync when client sends 0/none | unset (no override) |
 | `REMINDER_DEFAULT_GRACE_OVERRIDE_ON_UPDATE` | If truthy, also override on PATCH when not explicitly supplied | 0 (disabled) |
+| `REMINDER_MAX_LATE_MINUTES` | Max allowed lateness window for reminder delivery while device is offline | 720 |
+| `ADHERENCE_FCM_TTL_SECONDS` | TTL window for adherence/progress notifications while device is offline | 7200 |
 | `DISPATCH_DEBUG` | Print scheduler dispatch debug dict each run | 0 |
 | `SCHEDULER_ENABLED` | Enable periodic dispatcher | 1 |
 

@@ -626,7 +626,13 @@ async def _internal_send_adherence_nudges(db: AsyncSession) -> dict[str, Any]:
         sent_tokens = 0
         for t in tokens:
             attempted += 1
-            res_obj = send_fcm_notification_ex(str(t), title, body, data=data)  # type: ignore
+            try:
+                adh_ttl = int(os.getenv("ADHERENCE_FCM_TTL_SECONDS", "7200"))
+            except Exception:
+                adh_ttl = 7200
+            if adh_ttl < 0:
+                adh_ttl = 0
+            res_obj = send_fcm_notification_ex(str(t), title, body, data=data, ttl_seconds=adh_ttl)  # type: ignore
             if res_obj.get("ok"):
                 sent_tokens += 1
             else:
@@ -2773,6 +2779,23 @@ async def _internal_dispatch_due(
                         due_utc_str = due_utc.isoformat() + "Z"
                 except Exception:
                     due_utc_str = None
+                # Keep reminders queued while the device is offline, but don't deliver extremely late.
+                try:
+                    max_late_min = int(os.getenv("REMINDER_MAX_LATE_MINUTES", "720"))
+                except Exception:
+                    max_late_min = 720
+                if max_late_min < 1:
+                    max_late_min = 1
+                if max_late_min > 10080:
+                    max_late_min = 10080
+                ttl_seconds = max_late_min * 60
+                try:
+                    base_due = due_utc if due_utc is not None else now2
+                    ttl_seconds = int((base_due + timedelta(minutes=max_late_min) - now2).total_seconds())
+                    if ttl_seconds < 0:
+                        ttl_seconds = 0
+                except Exception:
+                    pass
                 data = {
                     "kind": "reminder",
                     "reminder_id": reminder_id,
@@ -2788,7 +2811,8 @@ async def _internal_dispatch_due(
                     getattr(r, 'body'),
                     data=data,
                     android_channel_id="reminders_channel_alarm_v2",
-                    data_only=True,
+                    data_only=False,
+                    ttl_seconds=ttl_seconds,
                 )  # type: ignore
                 if res_obj.get("ok"):
                     sent += 1
@@ -2984,6 +3008,23 @@ async def _internal_dispatch_due(
                     due_utc_str = due_utc.isoformat() + "Z"
             except Exception:
                 due_utc_str = None
+            # Keep reminders queued while the device is offline, but don't deliver extremely late.
+            try:
+                max_late_min = int(os.getenv("REMINDER_MAX_LATE_MINUTES", "720"))
+            except Exception:
+                max_late_min = 720
+            if max_late_min < 1:
+                max_late_min = 1
+            if max_late_min > 10080:
+                max_late_min = 10080
+            ttl_seconds = max_late_min * 60
+            try:
+                base_due = due_utc if due_utc is not None else now2
+                ttl_seconds = int((base_due + timedelta(minutes=max_late_min) - now2).total_seconds())
+                if ttl_seconds < 0:
+                    ttl_seconds = 0
+            except Exception:
+                pass
             data = {
                 "kind": "reminder",
                 "reminder_id": reminder_id,
@@ -2999,7 +3040,8 @@ async def _internal_dispatch_due(
                 getattr(r, 'body'),
                 data=data,
                 android_channel_id="reminders_channel_alarm_v2",
-                data_only=True,
+                data_only=False,
+                ttl_seconds=ttl_seconds,
             )  # type: ignore
             if res_obj.get("ok"):
                 sent += 1

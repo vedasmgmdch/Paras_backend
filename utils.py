@@ -306,6 +306,7 @@ def send_fcm_notification_ex(
     data: dict | None = None,
     android_channel_id: str | None = None,
     data_only: bool = False,
+    ttl_seconds: int | None = None,
 ) -> dict:
     """Send a single FCM message and return a structured result.
 
@@ -354,6 +355,28 @@ def send_fcm_notification_ex(
                 else:
                     # Still request high priority for timely background delivery.
                     message["android"] = {"priority": "HIGH"}
+
+                # If TTL is provided, keep the message queued while the device is offline.
+                # This improves "deliver as soon as internet returns" behavior.
+                if ttl_seconds is not None:
+                    try:
+                        ttl_int = int(ttl_seconds)
+                    except Exception:
+                        ttl_int = None
+                    if ttl_int is not None:
+                        if ttl_int < 0:
+                            ttl_int = 0
+                        # FCM v1 expects a duration string like "3600s".
+                        message.setdefault("android", {})
+                        message["android"]["ttl"] = f"{ttl_int}s"
+                        # Best-effort iOS TTL parity.
+                        try:
+                            import time as _time
+
+                            exp = str(int(_time.time()) + ttl_int)
+                            message["apns"] = {"headers": {"apns-expiration": exp}}
+                        except Exception:
+                            pass
                 payload = {"message": message}
                 resp = requests.post(url, data=json.dumps(payload), headers=headers, timeout=FCM_HTTP_TIMEOUT)
                 ok = resp.status_code in (200, 202)
@@ -383,6 +406,15 @@ def send_fcm_notification_ex(
         "data": data or {},
         "priority": "high",
     }
+    if ttl_seconds is not None:
+        try:
+            ttl_int = int(ttl_seconds)
+        except Exception:
+            ttl_int = None
+        if ttl_int is not None:
+            if ttl_int < 0:
+                ttl_int = 0
+            payload["time_to_live"] = ttl_int
     if not data_only:
         notification_obj = {"title": title, "body": body}
         if android_channel_id:
