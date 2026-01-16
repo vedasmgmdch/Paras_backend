@@ -529,6 +529,8 @@ class _TreatmentScreenMainState extends State<TreatmentScreenMain> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final bool isProsthesisFitted =
         _selectedIndex != null && treatments[_selectedIndex!]['label'] == 'Prosthesis Fitted';
     final bool isImplant = _selectedIndex != null && treatments[_selectedIndex!]['label'] == 'Implant';
@@ -537,12 +539,12 @@ class _TreatmentScreenMainState extends State<TreatmentScreenMain> {
 
     if (showFractureOptions) {
       return Scaffold(
-        backgroundColor: const Color(0xFFF5F6FA),
+        backgroundColor: isDark ? cs.surface : const Color(0xFFF5F6FA),
         appBar: AppBar(
-          backgroundColor: Colors.white,
+          backgroundColor: isDark ? cs.surface : Colors.white,
           elevation: 0,
           leading: IconButton(
-            icon: const Icon(Icons.arrow_back, color: Colors.blue),
+            icon: Icon(Icons.arrow_back, color: cs.primary),
             onPressed: () => _navigateToCategoryScreen(context),
           ),
           title: Text("Hi ${widget.userName},"),
@@ -641,12 +643,12 @@ class _TreatmentScreenMainState extends State<TreatmentScreenMain> {
 
     if (isProsthesisFitted) {
       return Scaffold(
-        backgroundColor: const Color(0xFFF5F6FA),
+        backgroundColor: isDark ? cs.surface : const Color(0xFFF5F6FA),
         appBar: AppBar(
-          backgroundColor: Colors.white,
+          backgroundColor: isDark ? cs.surface : Colors.white,
           elevation: 0,
           leading: IconButton(
-            icon: const Icon(Icons.arrow_back, color: Colors.blue),
+            icon: Icon(Icons.arrow_back, color: cs.primary),
             onPressed: () => _navigateToCategoryScreen(context),
           ),
           title: Text("Hi ${widget.userName},"),
@@ -684,12 +686,12 @@ class _TreatmentScreenMainState extends State<TreatmentScreenMain> {
 
     if (isImplant) {
       return Scaffold(
-        backgroundColor: const Color(0xFFF5F6FA),
+        backgroundColor: isDark ? cs.surface : const Color(0xFFF5F6FA),
         appBar: AppBar(
-          backgroundColor: Colors.white,
+          backgroundColor: isDark ? cs.surface : Colors.white,
           elevation: 0,
           leading: IconButton(
-            icon: const Icon(Icons.arrow_back, color: Colors.blue),
+            icon: Icon(Icons.arrow_back, color: cs.primary),
             onPressed: () => _navigateToCategoryScreen(context),
           ),
           title: Text("Hi ${widget.userName},"),

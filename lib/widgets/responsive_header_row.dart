@@ -29,6 +29,7 @@ class ResponsiveHeaderRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return LayoutBuilder(
       builder: (context, c) {
         // Use new text scaling API (textScaleFactorOf is deprecated)
@@ -40,7 +41,7 @@ class ResponsiveHeaderRow extends StatelessWidget {
           label,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: labelStyle ?? const TextStyle(fontSize: 15, color: Colors.black87),
+          style: labelStyle ?? TextStyle(fontSize: 15, color: cs.onSurface),
         );
 
         if (narrow) {
@@ -50,7 +51,7 @@ class ResponsiveHeaderRow extends StatelessWidget {
               Row(
                 children: [
                   if (icon != null) ...[
-                    Icon(icon, size: 16, color: Colors.black54),
+                    Icon(icon, size: 16, color: cs.onSurfaceVariant),
                     const SizedBox(width: 6),
                   ],
                   Expanded(child: textWidget),
@@ -68,7 +69,7 @@ class ResponsiveHeaderRow extends StatelessWidget {
         return Row(
           children: [
             if (icon != null) ...[
-              Icon(icon, size: 16, color: Colors.black54),
+              Icon(icon, size: 16, color: cs.onSurfaceVariant),
               const SizedBox(width: 6),
             ],
             Expanded(child: textWidget),

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:async';
+import 'dart:math';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart' show compute;
@@ -10,6 +11,25 @@ dynamic _jsonDecodeInBackground(String body) => jsonDecode(body);
 
 class ApiService {
   static const Duration _slowEndpointTimeout = Duration(seconds: 60);
+
+  // --------------------------
+  // ✅ Stable per-install device id
+  //
+  // Used for backend session/device enforcement.
+  // Stored locally so it persists across app restarts.
+  // --------------------------
+  static Future<String> getOrCreateDeviceId() async {
+    final prefs = await SharedPreferences.getInstance();
+    const key = 'device_id';
+    final existing = prefs.getString(key);
+    if (existing != null && existing.trim().isNotEmpty) return existing.trim();
+
+    final r = Random();
+    final newId = 'dev_${DateTime.now().microsecondsSinceEpoch}_${100000 + r.nextInt(900000)}';
+    await prefs.setString(key, newId);
+    return newId;
+  }
+
   static Future<dynamic> _decodeJson(String body) async {
     // Avoid isolate overhead for small payloads.
     if (body.length < 50 * 1024) {
@@ -156,13 +176,14 @@ class ApiService {
     try {
       final headers = await getAuthHeaders();
       final deviceId = await getOrCreateDeviceId();
-      final res = await http
-          .post(
-            Uri.parse('$baseUrl/session/logout'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded', if (headers['Authorization'] != null) 'Authorization': headers['Authorization']!},
-            body: {'device_id': deviceId},
-          )
-          .timeout(_slowEndpointTimeout);
+      final res = await http.post(
+        Uri.parse('$baseUrl/session/logout'),
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          if (headers['Authorization'] != null) 'Authorization': headers['Authorization']!
+        },
+        body: {'device_id': deviceId},
+      ).timeout(_slowEndpointTimeout);
       if (res.statusCode == 200) return true;
       print('logoutCurrentDeviceSession failed: ${res.statusCode} -> ${res.body}');
       return false;
@@ -596,6 +617,27 @@ class ApiService {
       return null;
     } catch (e) {
       return null;
+    }
+  }
+
+  // --------------------------
+  // ✅ Persist Theme Mode (account-scoped)
+  // --------------------------
+  static Future<bool> updateMyThemeMode(String themeMode) async {
+    try {
+      final mode = themeMode.trim().toLowerCase();
+      if (mode != 'light' && mode != 'dark') return false;
+      final headers = await getAuthHeaders();
+      final res = await http
+          .patch(
+            Uri.parse('$baseUrl/patients/me/theme-mode'),
+            headers: headers,
+            body: jsonEncode({'theme_mode': mode}),
+          )
+          .timeout(_slowEndpointTimeout);
+      return res.statusCode == 200;
+    } catch (e) {
+      return false;
     }
   }
 

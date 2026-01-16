@@ -6,6 +6,7 @@ import 'package:fl_chart/fl_chart.dart';
 import '../main.dart'; // Import for global routeObserver
 import 'chat_screen.dart';
 import '../widgets/no_animation_page_route.dart';
+import '../theme/semantic_colors.dart';
 
 class ProgressScreen extends StatefulWidget {
   const ProgressScreen({super.key});
@@ -366,14 +367,19 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
 
     final shownLogsForSelectedDate = materializedForSelectedDate();
 
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFF),
+        color: isDark ? cs.surfaceContainerLow : const Color(0xFFF8FAFF),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.blueGrey[100]!),
+        border: Border.all(
+          color: isDark ? cs.outlineVariant.withValues(alpha: 0.55) : Colors.blueGrey[100]!,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -387,14 +393,22 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
                     fit: FlexFit.tight,
                     child: Text(
                       "Instructions Log",
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blueGrey),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: isDark ? cs.onSurface : Colors.blueGrey,
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   IconButton(
                     tooltip: 'Refresh history',
-                    icon: const Icon(Icons.refresh, size: 20, color: Colors.blueGrey),
+                    icon: Icon(
+                      Icons.refresh,
+                      size: 20,
+                      color: isDark ? cs.onSurfaceVariant : Colors.blueGrey,
+                    ),
                     onPressed: () async {
                       final appState = Provider.of<AppState>(context, listen: false);
                       try {
@@ -437,8 +451,14 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
                             _selectedDateForInstructionsLog = val ?? "";
                           });
                         },
-                        style: const TextStyle(fontSize: 16, color: Colors.black87),
-                        underline: Container(height: 1, color: Colors.blueGrey[100]),
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: isDark ? cs.onSurface : Colors.black87,
+                        ),
+                        underline: Container(
+                          height: 1,
+                          color: isDark ? cs.outlineVariant.withValues(alpha: 0.55) : Colors.blueGrey[100],
+                        ),
                       ),
                     ),
                   ],
@@ -451,10 +471,16 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: Colors.yellow[50], borderRadius: BorderRadius.circular(8)),
-              child: const Text(
+              decoration: BoxDecoration(
+                color: isDark ? cs.surfaceContainerHighest : Colors.yellow[50],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
                 "No instructions recorded for this day.",
-                style: TextStyle(color: Colors.black54, fontSize: 15),
+                style: TextStyle(
+                  color: isDark ? cs.onSurfaceVariant : Colors.black54,
+                  fontSize: 15,
+                ),
               ),
             )
           else
@@ -464,11 +490,25 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
               final followed = log['followed'] == true || log['followed']?.toString() == 'true';
               final label = followed ? 'Followed' : 'Not Followed';
               final Color? baseColor = type == 'general'
-                  ? Colors.green[100]
+                  ? (isDark ? cs.secondaryContainer : Colors.green[100])
                   : type == 'specific'
-                      ? Colors.red[100]
-                      : Colors.blue[100];
-              final bg = followed ? baseColor : Colors.grey[200];
+                      ? (isDark ? cs.errorContainer : Colors.red[100])
+                      : (isDark ? cs.primaryContainer : Colors.blue[100]);
+              final bg = followed ? baseColor : (isDark ? cs.surfaceContainerHighest : Colors.grey[200]);
+
+              final Color labelTextColor;
+              if (!isDark) {
+                labelTextColor = Colors.black54;
+              } else if (followed) {
+                labelTextColor = type == 'general'
+                    ? cs.onSecondaryContainer
+                    : type == 'specific'
+                        ? cs.onErrorContainer
+                        : cs.onPrimaryContainer;
+              } else {
+                labelTextColor = cs.onSurfaceVariant;
+              }
+
               return Container(
                 margin: const EdgeInsets.only(bottom: 8),
                 child: Row(
@@ -476,7 +516,11 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
                     Expanded(
                       child: Text(
                         instruction,
-                        style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 15, color: Colors.black87),
+                        style: TextStyle(
+                          fontWeight: FontWeight.w500,
+                          fontSize: 15,
+                          color: isDark ? cs.onSurface : Colors.black87,
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -486,7 +530,9 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
                       child: Icon(
                         followed ? Icons.check_circle : Icons.radio_button_unchecked,
                         size: 18,
-                        color: followed ? Colors.green : Colors.black38,
+                        color: followed
+                            ? Colors.green
+                            : (isDark ? cs.onSurfaceVariant.withValues(alpha: 0.65) : Colors.black38),
                       ),
                     ),
                     Container(
@@ -494,7 +540,11 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
                       decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(8)),
                       child: Text(
                         label,
-                        style: const TextStyle(color: Colors.black54, fontWeight: FontWeight.w600, fontSize: 13),
+                        style: TextStyle(
+                          color: labelTextColor,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
                       ),
                     ),
                   ],
@@ -522,6 +572,8 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
   }
 
   Widget _buildPieChart(List<dynamic> instructionLogs) {
+    final cs = Theme.of(context).colorScheme;
+    final semantic = AppSemanticColors.of(context);
     final appState = Provider.of<AppState>(context, listen: false);
     final filteredLogs = _filterInstructionLogs(
       instructionLogs,
@@ -664,21 +716,24 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
 
     final total = generalCount + specificCount + notFollowedGeneralCount + notFollowedSpecificCount;
     if (total == 0) {
-      return const Padding(
+      return Padding(
         padding: EdgeInsets.only(bottom: 16.0),
         child: Text(
           "No instruction logs available for selected treatment/subtype.",
-          style: TextStyle(color: Colors.black54),
+          style: TextStyle(color: cs.onSurfaceVariant),
         ),
       );
     }
+
+    final notFollowedTotal = notFollowedGeneralCount + notFollowedSpecificCount;
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 16.0),
       child: Column(
         children: [
-          const Text(
+          Text(
             "Instructions Followed",
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.blueGrey),
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: cs.onSurface),
           ),
           const SizedBox(height: 10),
           SizedBox(
@@ -688,26 +743,24 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
                 sections: [
                   PieChartSectionData(
                     value: generalCount.toDouble(),
-                    color: Colors.green,
+                    color: semantic.success,
                     title: generalCount > 0 ? 'General\n$generalCount' : '',
                     radius: 55,
-                    titleStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                    titleStyle: TextStyle(color: semantic.onSuccess, fontWeight: FontWeight.bold, fontSize: 14),
                   ),
                   PieChartSectionData(
                     value: specificCount.toDouble(),
-                    color: Colors.red,
+                    color: semantic.info,
                     title: specificCount > 0 ? 'Specific\n$specificCount' : '',
                     radius: 55,
-                    titleStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                    titleStyle: TextStyle(color: semantic.onInfo, fontWeight: FontWeight.bold, fontSize: 14),
                   ),
                   PieChartSectionData(
-                    value: (notFollowedGeneralCount + notFollowedSpecificCount).toDouble(),
-                    color: Colors.blue,
-                    title: (notFollowedGeneralCount + notFollowedSpecificCount) > 0
-                        ? 'Not\n${notFollowedGeneralCount + notFollowedSpecificCount}'
-                        : '',
+                    value: notFollowedTotal.toDouble(),
+                    color: cs.error,
+                    title: notFollowedTotal > 0 ? 'Not\n$notFollowedTotal' : '',
                     radius: 55,
-                    titleStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                    titleStyle: TextStyle(color: cs.onError, fontWeight: FontWeight.bold, fontSize: 14),
                   ),
                 ],
                 sectionsSpace: 2,
@@ -720,9 +773,9 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
             alignment: WrapAlignment.center,
             spacing: 16,
             children: [
-              _buildPieLegend(Colors.green, "General Followed"),
-              _buildPieLegend(Colors.red, "Specific Followed"),
-              _buildPieLegend(Colors.blue, "Not Followed"),
+              _buildPieLegend(context, semantic.success, "General Followed"),
+              _buildPieLegend(context, semantic.info, "Specific Followed"),
+              _buildPieLegend(context, cs.error, "Not Followed"),
             ],
           ),
           const SizedBox(height: 12),
@@ -731,8 +784,8 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
             children: [
               Flexible(
                 child: Text(
-                  "$generalCount General, $specificCount Specific, ${notFollowedGeneralCount + notFollowedSpecificCount} Not followed",
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: Colors.black87),
+                  "$generalCount General, $specificCount Specific, $notFollowedTotal Not followed",
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: cs.onSurface),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -743,13 +796,21 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
     );
   }
 
-  Widget _buildPieLegend(Color color, String label) {
+  Widget _buildPieLegend(BuildContext context, Color color, String label) {
+    final cs = Theme.of(context).colorScheme;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(width: 14, height: 14, color: color),
+        Container(
+          width: 14,
+          height: 14,
+          decoration: BoxDecoration(
+            color: color,
+            border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.70)),
+          ),
+        ),
         const SizedBox(width: 4),
-        Text(label, style: const TextStyle(fontSize: 13)),
+        Text(label, style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
       ],
     );
   }
@@ -757,6 +818,7 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final appState = Provider.of<AppState>(context);
     final procedureDate = appState.procedureDate ?? appState.effectiveLocalNow();
     final nowLocal = appState.effectiveLocalNow();
@@ -785,39 +847,55 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
                       margin: const EdgeInsets.only(bottom: 18),
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
-                        color: colorScheme.primary,
+                        color: isDark ? colorScheme.surfaceContainerLow : colorScheme.primary,
                         borderRadius: BorderRadius.circular(20),
+                        border: isDark
+                            ? Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.70))
+                            : null,
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(
                             children: [
-                              const Expanded(
+                              Expanded(
                                 child: Text(
                                   'Recovery Dashboard',
-                                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
+                                  style: TextStyle(
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.bold,
+                                    color: isDark ? colorScheme.onSurface : Colors.white,
+                                  ),
                                 ),
                               ),
-                              const Icon(Icons.favorite_border, color: Colors.white),
+                              Icon(
+                                Icons.favorite_border,
+                                color: isDark ? colorScheme.primary : Colors.white,
+                              ),
                             ],
                           ),
                           const SizedBox(height: 8),
                           Text(
                             'Day $dayOfRecovery of recovery',
-                            style: const TextStyle(fontSize: 16, color: Colors.white),
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: isDark ? colorScheme.onSurfaceVariant : Colors.white,
+                            ),
                           ),
                           const SizedBox(height: 12),
                           LinearProgressIndicator(
                             value: (dayOfRecovery / totalRecoveryDays).clamp(0, 1),
-                            backgroundColor: Colors.white24,
-                            color: Colors.white,
+                            backgroundColor: isDark ? colorScheme.surfaceContainerHighest : Colors.white24,
+                            color: isDark ? colorScheme.primary : Colors.white,
                             minHeight: 5,
                           ),
                           const SizedBox(height: 6),
                           Text(
                             'Recovery Progress: $progressPercent%',
-                            style: const TextStyle(color: Colors.white, fontSize: 14),
+                            style: TextStyle(
+                              color: isDark ? colorScheme.onSurfaceVariant : Colors.white,
+                              fontSize: 14,
+                            ),
                           ),
                         ],
                       ),
@@ -827,18 +905,31 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
                       padding: const EdgeInsets.all(22),
                       width: double.infinity,
                       decoration: BoxDecoration(
-                        color: colorScheme.primary,
+                        color: isDark ? colorScheme.surfaceContainerLow : colorScheme.primary,
                         borderRadius: BorderRadius.circular(20),
+                        border: isDark
+                            ? Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.70))
+                            : null,
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
+                        children: [
                           Text(
                             'Recovery Progress',
-                            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                              color: isDark ? colorScheme.onSurface : Colors.white,
+                            ),
                           ),
-                          SizedBox(height: 6),
-                          Text("Monitor your recovery day by day", style: TextStyle(fontSize: 15, color: Colors.white)),
+                          const SizedBox(height: 6),
+                          Text(
+                            "Monitor your recovery day by day",
+                            style: TextStyle(
+                              fontSize: 15,
+                              color: isDark ? colorScheme.onSurfaceVariant : Colors.white,
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -856,6 +947,7 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
                               child: Text('Summary', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
                             ),
                             _buildSummaryRow(
+                              context,
                               'Days since procedure',
                               '$daysSinceProcedure',
                               'days',
@@ -864,6 +956,7 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
                             ),
                             const SizedBox(height: 10),
                             _buildSummaryRow(
+                              context,
                               'Expected healing',
                               '7-14',
                               'days',
@@ -917,10 +1010,20 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
     );
   }
 
-  Widget _buildSummaryRow(String label, String value, String unit, Color bgColor, Color textColor) {
+  Widget _buildSummaryRow(BuildContext context, String label, String value, String unit, Color bgColor, Color textColor) {
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(10)),
+      decoration: BoxDecoration(
+        color: isDark ? cs.surfaceContainer : bgColor,
+        borderRadius: BorderRadius.circular(10),
+        border: isDark
+            ? Border(
+                left: BorderSide(color: textColor.withValues(alpha: 0.90), width: 3),
+              )
+            : null,
+      ),
       child: Row(
         children: [
           Expanded(
@@ -929,7 +1032,10 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
               children: [
                 Text(
                   label,
-                  style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.w500),
+                  style: TextStyle(
+                    color: isDark ? cs.onSurfaceVariant : Colors.black87,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -939,7 +1045,10 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
               ],
             ),
           ),
-          Text(unit, style: const TextStyle(color: Colors.black54)),
+          Text(
+            unit,
+            style: TextStyle(color: isDark ? cs.onSurfaceVariant : Colors.black54),
+          ),
         ],
       ),
     );

@@ -231,6 +231,9 @@ class _RemindersScreenState extends State<RemindersScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Daily Reminders'),
@@ -328,6 +331,23 @@ class _RemindersScreenState extends State<RemindersScreen> {
                           final time = TimeOfDay(hour: r.hour, minute: r.minute);
                           final timeLabel = time.format(context);
                           final on = r.active;
+
+                          final leadingBg = on
+                              ? (isDark ? cs.secondaryContainer : const Color(0xFFE8F5E9))
+                              : (isDark ? cs.surfaceContainerHighest : Colors.grey.shade200);
+                          final leadingBorder = on
+                              ? (isDark ? cs.secondary : const Color(0xFF22B573))
+                              : (isDark ? cs.outlineVariant : Colors.grey.shade300);
+                          final leadingText = on
+                              ? (isDark ? cs.onSecondaryContainer : const Color(0xFF22B573))
+                              : (isDark ? cs.onSurfaceVariant : Colors.black54);
+
+                          final toggleBg = on
+                              ? (isDark ? cs.secondary : const Color(0xFF22B573))
+                              : (isDark ? cs.surfaceContainerHighest : Colors.grey.shade400);
+                          final toggleText =
+                              on ? (isDark ? cs.onSecondary : Colors.white) : (isDark ? cs.onSurface : Colors.white);
+
                           return Card(
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                             margin: const EdgeInsets.only(bottom: 10),
@@ -338,9 +358,9 @@ class _RemindersScreenState extends State<RemindersScreen> {
                                 width: 48,
                                 height: 48,
                                 decoration: BoxDecoration(
-                                  color: on ? const Color(0xFFE8F5E9) : Colors.grey.shade200,
+                                  color: leadingBg,
                                   borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: on ? const Color(0xFF22B573) : Colors.grey.shade300),
+                                  border: Border.all(color: leadingBorder),
                                 ),
                                 child: Center(
                                   child: Text(
@@ -348,7 +368,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
                                     style: TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.bold,
-                                      color: on ? const Color(0xFF22B573) : Colors.black54,
+                                      color: leadingText,
                                     ),
                                   ),
                                 ),
@@ -395,12 +415,12 @@ class _RemindersScreenState extends State<RemindersScreen> {
                                     child: Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                                       decoration: BoxDecoration(
-                                        color: on ? const Color(0xFF22B573) : Colors.grey.shade400,
+                                        color: toggleBg,
                                         borderRadius: BorderRadius.circular(20),
                                       ),
                                       child: Text(
                                         on ? 'On' : 'Off',
-                                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                                        style: TextStyle(color: toggleText, fontWeight: FontWeight.w600),
                                       ),
                                     ),
                                   ),

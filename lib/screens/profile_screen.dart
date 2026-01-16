@@ -62,6 +62,7 @@ class ProfileScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final appState = Provider.of<AppState>(context);
     final patientId = appState.patientId != null ? "#${appState.patientId}" : "Not specified";
     final fullName = appState.fullName ?? "Not specified";
@@ -98,25 +99,35 @@ class ProfileScreen extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    // --- Sign Out Button at top right ---
-                    Align(
-                      alignment: Alignment.topRight,
-                      child: Padding(
-                        padding: const EdgeInsets.only(bottom: 10.0),
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.red,
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 18),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10.0),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 160),
+                            child: ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: isDark ? colorScheme.surfaceContainerLow : Colors.red,
+                                foregroundColor: isDark ? colorScheme.error : Colors.white,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                side: isDark
+                                    ? BorderSide(color: colorScheme.error.withValues(alpha: 0.60))
+                                    : BorderSide.none,
+                                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                minimumSize: const Size(0, 0),
+                                elevation: isDark ? 0 : null,
+                              ),
+                              icon: const Icon(Icons.logout, size: 18),
+                              label: const Text(
+                                'Sign Out',
+                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                              ),
+                              onPressed: () => _signOut(context),
+                            ),
                           ),
-                          icon: const Icon(Icons.exit_to_app),
-                          label: const Text(
-                            "Sign Out",
-                            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                          ),
-                          onPressed: () => _signOut(context),
-                        ),
+                        ],
                       ),
                     ),
                     // Header
@@ -125,8 +136,9 @@ class ProfileScreen extends StatelessWidget {
                       padding: const EdgeInsets.all(22),
                       width: double.infinity,
                       decoration: BoxDecoration(
-                        color: colorScheme.primary,
+                        color: isDark ? colorScheme.surfaceContainerLow : colorScheme.primary,
                         borderRadius: BorderRadius.circular(20),
+                        border: isDark ? Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.70)) : null,
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -136,13 +148,17 @@ class ProfileScreen extends StatelessWidget {
                             style: TextStyle(
                               fontSize: 22,
                               fontWeight: FontWeight.bold,
-                              color: colorScheme.onPrimary,
+                              color: isDark ? colorScheme.onSurface : colorScheme.onPrimary,
                             ),
                           ),
                           const SizedBox(height: 6),
                           Text(
                             "Your recovery information",
-                            style: TextStyle(fontSize: 15, color: colorScheme.onPrimary.withValues(alpha: 0.92)),
+                            style: TextStyle(
+                              fontSize: 15,
+                              color: (isDark ? colorScheme.onSurfaceVariant : colorScheme.onPrimary)
+                                  .withValues(alpha: 0.92),
+                            ),
                           ),
                         ],
                       ),
@@ -157,46 +173,20 @@ class ProfileScreen extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Row(
-                              children: [
-                                Icon(Icons.palette_outlined, color: colorScheme.primary),
-                                const SizedBox(width: 8),
-                                const Text(
-                                  'Appearance',
-                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            SegmentedButton<ThemeMode>(
-                              showSelectedIcon: false,
-                              segments: const <ButtonSegment<ThemeMode>>[
-                                ButtonSegment<ThemeMode>(
-                                  value: ThemeMode.system,
-                                  icon: Icon(Icons.settings_suggest_outlined),
-                                  label: Text('System'),
-                                ),
-                                ButtonSegment<ThemeMode>(
-                                  value: ThemeMode.light,
-                                  icon: Icon(Icons.light_mode_outlined),
-                                  label: Text('Light'),
-                                ),
-                                ButtonSegment<ThemeMode>(
-                                  value: ThemeMode.dark,
-                                  icon: Icon(Icons.dark_mode_outlined),
-                                  label: Text('Dark'),
-                                ),
-                              ],
-                              selected: <ThemeMode>{appState.themeMode},
-                              onSelectionChanged: (selection) {
-                                final next = selection.isEmpty ? ThemeMode.system : selection.first;
-                                appState.setThemeMode(next);
+                            SwitchListTile(
+                              contentPadding: EdgeInsets.zero,
+                              title: const Text(
+                                'Dark mode',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                              ),
+                              secondary: Icon(Icons.dark_mode_outlined, color: colorScheme.primary),
+                              value: appState.themeMode == ThemeMode.dark,
+                              onChanged: (isDark) {
+                                appState.setThemeMode(
+                                  isDark ? ThemeMode.dark : ThemeMode.light,
+                                  syncToServer: true,
+                                );
                               },
-                            ),
-                            const SizedBox(height: 10),
-                            Text(
-                              'Choose how the app looks on your device.',
-                              style: TextStyle(color: colorScheme.onSurfaceVariant),
                             ),
                           ],
                         ),
@@ -434,6 +424,7 @@ class ProfileScreen extends StatelessWidget {
 
   static Widget _buildEmergencyContact(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Card(
       margin: const EdgeInsets.only(bottom: 20),
       elevation: 2,
@@ -458,8 +449,13 @@ class ProfileScreen extends StatelessWidget {
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: colorScheme.errorContainer,
+                color: isDark ? colorScheme.surfaceContainer : colorScheme.errorContainer,
                 borderRadius: BorderRadius.circular(8),
+                border: isDark
+                    ? Border(
+                        left: BorderSide(color: colorScheme.error.withValues(alpha: 0.95), width: 3),
+                      )
+                    : null,
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -468,31 +464,37 @@ class ProfileScreen extends StatelessWidget {
                     "Dental Office",
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color: colorScheme.onErrorContainer,
+                      color: isDark ? colorScheme.onSurface : colorScheme.onErrorContainer,
                       fontSize: 16,
                     ),
                   ),
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      Icon(Icons.phone, size: 18, color: colorScheme.onErrorContainer),
+                      Icon(Icons.phone, size: 18, color: isDark ? colorScheme.error : colorScheme.onErrorContainer),
                       const SizedBox(width: 6),
                       // Not const because of TextStyle
                       Text(
                         "022-27433404 , 022-27437992",
-                        style: TextStyle(fontSize: 15, color: colorScheme.onErrorContainer),
+                        style: TextStyle(
+                          fontSize: 15,
+                          color: isDark ? colorScheme.onSurface : colorScheme.onErrorContainer,
+                        ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      Icon(Icons.email, size: 18, color: colorScheme.onErrorContainer),
+                      Icon(Icons.email, size: 18, color: isDark ? colorScheme.error : colorScheme.onErrorContainer),
                       const SizedBox(width: 6),
                       // Not const because of TextStyle
                       Text(
                         "mgmmcnb@gmail.com",
-                        style: TextStyle(fontSize: 15, color: colorScheme.onErrorContainer),
+                        style: TextStyle(
+                          fontSize: 15,
+                          color: isDark ? colorScheme.onSurface : colorScheme.onErrorContainer,
+                        ),
                       ),
                     ],
                   ),

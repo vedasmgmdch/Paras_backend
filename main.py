@@ -1568,6 +1568,25 @@ async def get_my_profile(current_user: models.Patient = Depends(get_current_user
     await _rotate_if_due(db, current_user)
     return current_user
 
+
+class ThemeModeUpdate(BaseModel):
+    theme_mode: str
+
+
+@app.patch("/patients/me/theme-mode", response_model=schemas.PatientPublic)
+async def update_my_theme_mode(
+    payload: ThemeModeUpdate,
+    current_user: models.Patient = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    mode = (payload.theme_mode or "").strip().lower()
+    if mode not in {"light", "dark"}:
+        raise HTTPException(status_code=400, detail="theme_mode must be 'light' or 'dark'")
+    current_user.theme_mode = mode
+    await db.commit()
+    await db.refresh(current_user)
+    return current_user
+
 # -------------------------------------------------
 # Temporary public endpoint: list patients by doctor
 # SECURITY NOTE: This endpoint is unauthenticated right now to support

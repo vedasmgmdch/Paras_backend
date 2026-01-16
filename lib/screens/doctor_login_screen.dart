@@ -221,9 +221,11 @@ class _DoctorLoginScreenState extends State<DoctorLoginScreen> {
                               Container(
                                 padding: const EdgeInsets.all(12),
                                 decoration: BoxDecoration(
-                                  color: Colors.red.withValues(alpha: 0.06),
+                                  color: isDark ? colorScheme.surfaceContainerLow : Colors.red.withValues(alpha: 0.06),
                                   borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: Colors.red.withValues(alpha: 0.22)),
+                                  border: Border.all(
+                                    color: Colors.red.withValues(alpha: isDark ? 0.45 : 0.22),
+                                  ),
                                 ),
                                 child: Row(
                                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -269,7 +271,9 @@ class _DoctorLoginScreenState extends State<DoctorLoginScreen> {
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                 fontSize: 11,
-                                color: Colors.black.withValues(alpha: 0.45),
+                                color: isDark
+                                    ? colorScheme.onSurfaceVariant.withValues(alpha: 0.75)
+                                    : Colors.black.withValues(alpha: 0.45),
                               ),
                             ),
                           ],

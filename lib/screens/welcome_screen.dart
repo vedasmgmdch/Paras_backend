@@ -118,16 +118,16 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
 
   // Default login implementation if onLogin is not provided
   Future<String?> _defaultLogin(BuildContext context, String username, String password) async {
+    final appState = Provider.of<AppState>(context, listen: false);
+
+    // Always clear all state before loading new user!
+    await appState.clearUserData();
+
     final error = await ApiService.login(username, password);
 
     if (error != null) {
       return error;
     }
-
-    final appState = Provider.of<AppState>(context, listen: false);
-
-    // Always clear all state before loading new user!
-    await appState.clearUserData();
 
     // Ensure token is in AppState
     final savedToken = await ApiService.getSavedToken();
@@ -152,6 +152,8 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         phone: userDetails['phone'],
         email: userDetails['email'],
       );
+
+      await appState.applyThemeModeFromServer(userDetails['theme_mode']);
       appState.setDepartment(userDetails['department']);
       appState.setDoctor(userDetails['doctor']);
       appState.setTreatment(userDetails['treatment'], subtype: userDetails['treatment_subtype']);

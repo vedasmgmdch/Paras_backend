@@ -58,6 +58,17 @@ python -c "from database import engine; from models import Base; Base.metadata.c
 
 ---
 
+## Step 2.1: Apply New Columns (if upgrading an existing DB)
+
+If you're NOT recreating the database from scratch (i.e., you already have an existing `patients` table), you must apply the new column used to persist theme preference across devices:
+
+```sql
+ALTER TABLE patients
+ADD COLUMN IF NOT EXISTS theme_mode VARCHAR NOT NULL DEFAULT 'light';
+```
+
+---
+
 ## Step 3: Import to NEW Database
 
 ### Import Each Table in pgAdmin:

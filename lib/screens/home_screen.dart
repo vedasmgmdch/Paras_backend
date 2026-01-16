@@ -608,6 +608,8 @@ class _HomeMainContentState extends State<HomeMainContent> {
   @override
   Widget build(BuildContext context) {
     final appState = Provider.of<AppState>(context);
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     final name = appState.username ?? "";
     final procedureDate = appState.procedureDate;
@@ -630,10 +632,10 @@ class _HomeMainContentState extends State<HomeMainContent> {
                 style: TextStyle(fontSize: 22, color: Colors.red, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 "Please select your department on the previous screen.",
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 16, color: Colors.black87),
+                style: TextStyle(fontSize: 16, color: isDark ? cs.onSurface : Colors.black87),
               ),
               const SizedBox(height: 24),
               ElevatedButton(
@@ -1039,6 +1041,9 @@ class _HomeMainContentState extends State<HomeMainContent> {
                           physics: const NeverScrollableScrollPhysics(),
                           childAspectRatio: aspectRatio,
                           children: activities.map((activity) {
+                            final tileBg = isDark ? cs.surfaceContainerHigh : activity['bgColor'] as Color;
+                            final overlayBg = isDark ? cs.surfaceContainerHighest : Colors.black87;
+                            final overlayText = isDark ? cs.onSurface : Colors.white;
                             return GestureDetector(
                               onTap: () async {
                                 String? url;
@@ -1064,7 +1069,7 @@ class _HomeMainContentState extends State<HomeMainContent> {
                               },
                               child: Container(
                                 decoration: BoxDecoration(
-                                  color: activity['bgColor'] as Color,
+                                  color: tileBg,
                                   borderRadius: BorderRadius.circular(14),
                                 ),
                                 padding: const EdgeInsets.all(12),
@@ -1072,24 +1077,28 @@ class _HomeMainContentState extends State<HomeMainContent> {
                                   crossAxisAlignment: CrossAxisAlignment.center,
                                   children: [
                                     CircleAvatar(
-                                      backgroundColor: Colors.white,
+                                      backgroundColor: isDark ? cs.surfaceContainerHighest : Colors.white,
                                       radius: 22,
                                       child: Icon(
                                         activity['icon'] as IconData,
-                                        color: Colors.blue,
+                                        color: isDark ? cs.primary : Colors.blue,
                                         size: 28,
                                       ),
                                     ),
                                     const SizedBox(height: 12),
                                     Text(
                                       activity['title'] as String,
-                                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 15,
+                                        color: isDark ? cs.onSurface : null,
+                                      ),
                                     ),
                                     const SizedBox(height: 8),
                                     Expanded(
                                       child: Container(
                                         decoration: BoxDecoration(
-                                          color: Colors.black87,
+                                          color: overlayBg,
                                           borderRadius: BorderRadius.circular(10),
                                         ),
                                         padding: const EdgeInsets.all(8),
@@ -1099,18 +1108,23 @@ class _HomeMainContentState extends State<HomeMainContent> {
                                             Row(
                                               crossAxisAlignment: CrossAxisAlignment.start,
                                               children: [
-                                                const Icon(Icons.play_arrow, color: Colors.white, size: 24),
+                                                Icon(Icons.play_arrow, color: overlayText, size: 24),
                                                 const Spacer(),
                                                 Container(
                                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                                   decoration: BoxDecoration(
-                                                    color: Colors.white12,
+                                                    color: isDark
+                                                        ? cs.surfaceContainerHigh.withValues(alpha: 0.6)
+                                                        : Colors.white12,
                                                     borderRadius: BorderRadius.circular(6),
                                                   ),
                                                   child: Text(
                                                     activity['duration'] as String,
-                                                    style: const TextStyle(
-                                                        color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                                                    style: TextStyle(
+                                                      color: overlayText,
+                                                      fontSize: 12,
+                                                      fontWeight: FontWeight.bold,
+                                                    ),
                                                   ),
                                                 ),
                                               ],
@@ -1121,8 +1135,11 @@ class _HomeMainContentState extends State<HomeMainContent> {
                                               child: Text(
                                                 (activity['desc'] as String).split('\n')[0],
                                                 textAlign: TextAlign.center,
-                                                style: const TextStyle(
-                                                    color: Colors.white, fontSize: 12, fontWeight: FontWeight.w400),
+                                                style: TextStyle(
+                                                  color: overlayText,
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w400,
+                                                ),
                                                 overflow: TextOverflow.ellipsis,
                                                 maxLines: 1,
                                               ),
@@ -1134,8 +1151,11 @@ class _HomeMainContentState extends State<HomeMainContent> {
                                                     ? (activity['desc'] as String).split('\n')[1]
                                                     : '',
                                                 textAlign: TextAlign.center,
-                                                style: const TextStyle(
-                                                    color: Colors.white, fontSize: 12, fontWeight: FontWeight.w400),
+                                                style: TextStyle(
+                                                  color: overlayText,
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w400,
+                                                ),
                                                 overflow: TextOverflow.ellipsis,
                                                 maxLines: 1,
                                               ),

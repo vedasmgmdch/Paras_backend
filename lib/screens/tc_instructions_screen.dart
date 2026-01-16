@@ -235,6 +235,7 @@ ${buildSection("Specific Instructions", notFollowedSpecific)}
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final appState = Provider.of<AppState>(context);
     final treatment = appState.treatment;
     final subtype = appState.treatmentSubtype;
@@ -307,7 +308,6 @@ ${buildSection("Specific Instructions", notFollowedSpecific)}
                       foregroundColor: colorScheme.onPrimary,
                       padding: const EdgeInsets.symmetric(vertical: 18),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      elevation: 3,
                       textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, letterSpacing: 0.2),
                     ),
                     label: const Text("Select Different Treatment"),
@@ -374,8 +374,11 @@ ${buildSection("Specific Instructions", notFollowedSpecific)}
                       const SizedBox(height: 20),
                       Container(
                         decoration: BoxDecoration(
-                          color: colorScheme.surfaceContainerLow,
-                          border: Border.all(color: Colors.green.shade200, width: 2),
+                          color: isDark ? colorScheme.secondaryContainer : colorScheme.surfaceContainerLow,
+                          border: Border.all(
+                            color: isDark ? colorScheme.outlineVariant : Colors.green.shade200,
+                            width: 2,
+                          ),
                           borderRadius: BorderRadius.circular(10),
                         ),
                         margin: const EdgeInsets.only(bottom: 20),
@@ -387,7 +390,7 @@ ${buildSection("Specific Instructions", notFollowedSpecific)}
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
                                 decoration: BoxDecoration(
-                                  color: Colors.green[700],
+                                  color: isDark ? colorScheme.secondary : Colors.green[700],
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: Text(
@@ -414,9 +417,13 @@ ${buildSection("Specific Instructions", notFollowedSpecific)}
                                     dense: true,
                                     title: Text(
                                       tcDos[i][selectedLang]!,
-                                      style: TextStyle(fontSize: 15, color: Colors.green.shade400, fontWeight: FontWeight.w600),
+                                      style: TextStyle(
+                                        fontSize: 15,
+                                        color: isDark ? colorScheme.onSurface : Colors.green.shade400,
+                                        fontWeight: FontWeight.w600,
+                                      ),
                                     ),
-                                    activeColor: Colors.green.shade400,
+                                    activeColor: isDark ? colorScheme.secondary : Colors.green.shade400,
                                     checkboxShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
                                   ),
                                 ),
@@ -427,8 +434,11 @@ ${buildSection("Specific Instructions", notFollowedSpecific)}
                       ),
                       Container(
                         decoration: BoxDecoration(
-                          color: const Color(0xFFFFF2F2),
-                          border: Border.all(color: Colors.red.shade200, width: 2),
+                          color: isDark ? colorScheme.errorContainer : const Color(0xFFFFF2F2),
+                          border: Border.all(
+                            color: isDark ? colorScheme.outlineVariant : Colors.red.shade200,
+                            width: 2,
+                          ),
                           borderRadius: BorderRadius.circular(10),
                         ),
                         margin: const EdgeInsets.only(bottom: 20),
@@ -440,7 +450,7 @@ ${buildSection("Specific Instructions", notFollowedSpecific)}
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
                                 decoration: BoxDecoration(
-                                  color: Colors.red[700],
+                                  color: isDark ? colorScheme.error : Colors.red[700],
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: Text(
@@ -460,14 +470,18 @@ ${buildSection("Specific Instructions", notFollowedSpecific)}
                                   child: Row(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      const Icon(Icons.close, color: Colors.red, size: 20),
+                                      Icon(
+                                        Icons.close,
+                                        color: isDark ? colorScheme.error : Colors.red,
+                                        size: 20,
+                                      ),
                                       const SizedBox(width: 8),
                                       Expanded(
                                         child: Text(
                                           tcDonts[i][selectedLang]!,
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                             fontSize: 15,
-                                            color: Colors.red,
+                                            color: isDark ? colorScheme.onSurface : Colors.red,
                                             fontWeight: FontWeight.w600,
                                           ),
                                         ),
@@ -486,7 +500,7 @@ ${buildSection("Specific Instructions", notFollowedSpecific)}
                         child: ElevatedButton.icon(
                           icon: const Icon(Icons.menu_book, color: Colors.white),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.amber[700],
+                            backgroundColor: isDark ? colorScheme.primary : Colors.amber[700],
                             foregroundColor: Colors.white,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                             padding: const EdgeInsets.symmetric(vertical: 14),
@@ -507,7 +521,7 @@ ${buildSection("Specific Instructions", notFollowedSpecific)}
                         width: double.infinity,
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blue[700],
+                            backgroundColor: isDark ? colorScheme.primary : Colors.blue[700],
                             foregroundColor: Colors.white,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                             padding: const EdgeInsets.symmetric(vertical: 15),
@@ -550,7 +564,7 @@ ${buildSection("Specific Instructions", notFollowedSpecific)}
                         width: double.infinity,
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blue[700],
+                            backgroundColor: isDark ? colorScheme.primary : Colors.blue[700],
                             foregroundColor: Colors.white,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                             padding: const EdgeInsets.symmetric(vertical: 15),

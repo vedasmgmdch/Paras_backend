@@ -6,6 +6,53 @@ import 'department_doctors_data.dart';
 import '../widgets/ui_safety.dart';
 import '../widgets/no_animation_page_route.dart';
 
+DateTime? _parseDateOnlyFlexible(String raw) {
+  final s = raw.trim();
+  if (s.isEmpty) return null;
+
+  // Handle unix timestamps (seconds or milliseconds)
+  if (RegExp(r'^\d+$').hasMatch(s)) {
+    final n = int.tryParse(s);
+    if (n != null) {
+      final ms = n > 100000000000 ? n : (n * 1000);
+      final dt = DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true).toLocal();
+      return DateTime(dt.year, dt.month, dt.day);
+    }
+  }
+
+  // Try parsing full timestamp first (preserves timezone), including "YYYY-MM-DD HH:mm:ss".
+  final isoCandidate = s.contains(' ') && !s.contains('T') ? s.replaceFirst(' ', 'T') : s;
+  final full = DateTime.tryParse(isoCandidate);
+  if (full != null) {
+    final local = full.toLocal();
+    return DateTime(local.year, local.month, local.day);
+  }
+
+  // Fallback: plain YYYY-MM-DD
+  final ymdMatch = RegExp(r'^(\d{4})-(\d{2})-(\d{2})').firstMatch(s);
+  if (ymdMatch != null) {
+    final year = int.tryParse(ymdMatch.group(1) ?? '');
+    final month = int.tryParse(ymdMatch.group(2) ?? '');
+    final day = int.tryParse(ymdMatch.group(3) ?? '');
+    if (year != null && month != null && day != null) {
+      return DateTime(year, month, day);
+    }
+  }
+
+  // Fallback: DD-MM-YYYY or DD/MM/YYYY
+  final dmyMatch = RegExp(r'^(\d{2})[-/](\d{2})[-/](\d{4})$').firstMatch(s);
+  if (dmyMatch != null) {
+    final day = int.tryParse(dmyMatch.group(1) ?? '');
+    final month = int.tryParse(dmyMatch.group(2) ?? '');
+    final year = int.tryParse(dmyMatch.group(3) ?? '');
+    if (year != null && month != null && day != null) {
+      return DateTime(year, month, day);
+    }
+  }
+
+  return null;
+}
+
 class DoctorsPatientsListScreen extends StatefulWidget {
   final String? initialDepartment;
   final String? initialDoctor;
@@ -45,16 +92,6 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
     super.dispose();
   }
 
-  DateTime? _parseDateOnly(String raw) {
-    final s = raw.trim();
-    if (s.isEmpty) return null;
-    // Accept both "YYYY-MM-DD" and timestamps like "YYYY-MM-DDTHH:mm:ss"
-    final normalized = s.contains('T') ? s.split('T').first : s;
-    final dt = DateTime.tryParse(normalized);
-    if (dt == null) return null;
-    return DateTime(dt.year, dt.month, dt.day);
-  }
-
   String _formatDMY(DateTime dt) {
     return '${dt.day.toString().padLeft(2, '0')}-${dt.month.toString().padLeft(2, '0')}-${dt.year.toString().padLeft(4, '0')}';
   }
@@ -69,93 +106,161 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
     final selectedYmd = _formatYMD(selected);
     return src.where((p) {
       final raw = (p['procedure_date'] ?? '').toString();
-      final pd = _parseDateOnly(raw);
+      final pd = _parseDateOnlyFlexible(raw);
       if (pd == null) return false;
       return _formatYMD(pd) == selectedYmd;
     }).toList();
   }
 
-  Future<void> _openTreatmentStartDateFilterCard() async {
+  void _openTreatmentStartDateFilterCard() async {
+    debugPrint('[DoctorDash] Open treatment start date filter');
+    if (!mounted) return;
+
+    // NOTE:
+    // We intentionally use a dialog instead of a modal bottom sheet.
+    // Some theme/navigator configurations can result in a visible barrier (dim)
+    // but an invisible sheet surface (user reports: "screen light dark and doesnt work").
+    // A dialog is significantly more reliable across nested navigators.
     final initial = _treatmentStartDateFilter ?? DateTime.now();
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (ctx) {
+    final rootContext = Navigator.of(context, rootNavigator: true).context;
+
+    // UI requirement: look like the earlier bottom sheet.
+    // Reliability requirement: avoid the "dim barrier but no visible sheet" case.
+    // We implement a bottom-aligned custom dialog that renders its own Material surface.
+    await showGeneralDialog<void>(
+      context: rootContext,
+      barrierDismissible: true,
+      barrierLabel: 'Dismiss',
+      barrierColor: Colors.black.withValues(alpha: 0.45),
+      transitionDuration: const Duration(milliseconds: 220),
+      transitionBuilder: (ctx, anim, secondaryAnim, child) {
+        final curved = CurvedAnimation(parent: anim, curve: Curves.easeOutCubic);
+        return SlideTransition(
+          position: Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero).animate(curved),
+          child: FadeTransition(opacity: curved, child: child),
+        );
+      },
+      pageBuilder: (dialogCtx, anim, secondaryAnim) {
         DateTime? temp = _treatmentStartDateFilter;
-        return SafeArea(
-          child: DraggableScrollableSheet(
-            expand: false,
-            initialChildSize: 0.72,
-            minChildSize: 0.45,
-            maxChildSize: 0.92,
-            builder: (ctx, scrollController) {
-              return StatefulBuilder(
-                builder: (ctx, setModalState) {
-                  return SingleChildScrollView(
-                    controller: scrollController,
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const Text(
-                          'Filter by treatment start date',
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+
+        return StatefulBuilder(
+          builder: (sheetCtx, setSheetState) {
+            final cs = Theme.of(sheetCtx).colorScheme;
+            final media = MediaQuery.of(sheetCtx);
+            final maxHeight = media.size.height * 0.85;
+            final calendarHeight = (media.size.height * 0.45).clamp(320.0, 460.0);
+
+            return SizedBox.expand(
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                child: SafeArea(
+                  top: false,
+                  child: SizedBox(
+                    width: media.size.width,
+                    child: Material(
+                      color: cs.surface,
+                      shape: const RoundedRectangleBorder(
+                        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxHeight: maxHeight,
+                          maxWidth: media.size.width,
                         ),
-                        const SizedBox(height: 8),
-                        Text(
-                          temp == null ? 'No date selected' : 'Selected: ${_formatDMY(temp!)}',
-                          style: const TextStyle(fontSize: 13, color: Colors.black54),
-                        ),
-                        const SizedBox(height: 12),
-                        Card(
-                          child: CalendarDatePicker(
-                            initialDate: temp ?? initial,
-                            firstDate: DateTime(2000, 1, 1),
-                            lastDate: DateTime(2100, 12, 31),
-                            onDateChanged: (picked) {
-                              setModalState(() {
-                                temp = DateTime(picked.year, picked.month, picked.day);
-                              });
-                            },
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Center(
+                                child: Container(
+                                  width: 40,
+                                  height: 4,
+                                  decoration: BoxDecoration(
+                                    color: cs.onSurfaceVariant.withValues(alpha: 0.35),
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              const Text(
+                                'Filter by treatment start date',
+                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                temp == null ? 'No date selected' : 'Selected: ${_formatDMY(temp!)}',
+                                style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant),
+                              ),
+                              const SizedBox(height: 12),
+                              SizedBox(
+                                height: calendarHeight,
+                                child: Card(
+                                  clipBehavior: Clip.antiAlias,
+                                  child: CalendarDatePicker(
+                                    initialDate: temp ?? initial,
+                                    firstDate: DateTime(2000, 1, 1),
+                                    lastDate: DateTime(2100, 12, 31),
+                                    onDateChanged: (picked) {
+                                      setSheetState(() {
+                                        temp = DateTime(picked.year, picked.month, picked.day);
+                                      });
+                                    },
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Row(
+                                children: [
+                                  TextButton(
+                                    onPressed: () {
+                                      if (!mounted) return;
+                                      setState(() {
+                                        _treatmentStartDateFilter = null;
+                                      });
+                                      Navigator.of(sheetCtx, rootNavigator: true).pop();
+                                    },
+                                    child: const Text('Clear'),
+                                  ),
+                                  const Spacer(),
+                                  TextButton(
+                                    onPressed: () => Navigator.of(sheetCtx, rootNavigator: true).pop(),
+                                    child: const Text('Cancel'),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  ElevatedButton(
+                                    // In a Row, children may receive an unbounded maxWidth.
+                                    // If the app theme uses an infinite `minimumSize` for ElevatedButton,
+                                    // this will crash with: "BoxConstraints forces an infinite width".
+                                    // Override locally to ensure finite constraints.
+                                    style: ElevatedButton.styleFrom(
+                                      minimumSize: const Size(0, 40),
+                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                    onPressed: () {
+                                      if (!mounted) return;
+                                      setState(() {
+                                        _treatmentStartDateFilter = temp;
+                                      });
+                                      Navigator.of(sheetCtx, rootNavigator: true).pop();
+                                    },
+                                    child: const Text('Apply'),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            TextButton(
-                              onPressed: () {
-                                setState(() {
-                                  _treatmentStartDateFilter = null;
-                                });
-                                Navigator.of(ctx).pop();
-                              },
-                              child: const Text('Clear'),
-                            ),
-                            const Spacer(),
-                            TextButton(
-                              onPressed: () => Navigator.of(ctx).pop(),
-                              child: const Text('Cancel'),
-                            ),
-                            const SizedBox(width: 8),
-                            ElevatedButton(
-                              onPressed: () {
-                                setState(() {
-                                  _treatmentStartDateFilter = temp;
-                                });
-                                Navigator.of(ctx).pop();
-                              },
-                              child: const Text('Apply'),
-                            ),
-                          ],
-                        ),
-                      ],
+                      ),
                     ),
-                  );
-                },
-              );
-            },
-          ),
+                  ),
+                ),
+              ),
+            );
+          },
         );
       },
     );
@@ -329,7 +434,10 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
                     Expanded(
                       child: SafeText(
                         '$_selectedDepartment • $_selectedDoctor',
-                        style: const TextStyle(fontSize: 13, color: Colors.black54),
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ),
                     IconButton(
@@ -348,7 +456,10 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
                     Expanded(
                       child: SafeText(
                         '$_selectedDepartment • $_selectedDoctor',
-                        style: const TextStyle(fontSize: 13, color: Colors.black54),
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ),
                     IconButton(
@@ -369,7 +480,10 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
                         : (_loading
                             ? 'Loading patients for ${_selectedDoctor!}...'
                             : 'Showing patients for ${_selectedDoctor!}')),
-                style: const TextStyle(fontSize: 13, color: Colors.grey),
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -392,7 +506,7 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
                                 final treatment = p['treatment'] ?? 'No treatment set';
                                 final subtype = (p['treatment_subtype'] ?? '').toString().trim();
                                 final rawDate = (p['procedure_date'] ?? '').toString();
-                                final pd = _parseDateOnly(rawDate);
+                                final pd = _parseDateOnlyFlexible(rawDate);
                                 final dateLabel = pd == null ? '-' : _formatDMY(pd);
                                 final tLabel = subtype.isNotEmpty ? '$treatment ($subtype)' : '$treatment';
                                 return ListTile(
@@ -553,15 +667,6 @@ class _ResultsList extends StatelessWidget {
   final ValueChanged<String> onPick;
   const _ResultsList({required this.list, required this.onPick});
 
-  DateTime? _parseDateOnly(String raw) {
-    final s = raw.trim();
-    if (s.isEmpty) return null;
-    final normalized = s.contains('T') ? s.split('T').first : s;
-    final dt = DateTime.tryParse(normalized);
-    if (dt == null) return null;
-    return DateTime(dt.year, dt.month, dt.day);
-  }
-
   String _formatDMY(DateTime dt) {
     return '${dt.day.toString().padLeft(2, '0')}-${dt.month.toString().padLeft(2, '0')}-${dt.year.toString().padLeft(4, '0')}';
   }
@@ -581,7 +686,7 @@ class _ResultsList extends StatelessWidget {
         final treatment = (p['treatment'] ?? '').toString();
         final subtype = (p['treatment_subtype'] ?? '').toString().trim();
         final rawDate = (p['procedure_date'] ?? '').toString();
-        final pd = _parseDateOnly(rawDate);
+        final pd = _parseDateOnlyFlexible(rawDate);
         final dateLabel = pd == null ? '' : _formatDMY(pd);
         final tLabel = subtype.isNotEmpty ? '$treatment ($subtype)' : treatment;
         final base = tLabel.isEmpty ? username : '$username • $tLabel';

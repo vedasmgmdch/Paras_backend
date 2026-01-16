@@ -97,9 +97,7 @@ class _LoginScreenState extends State<LoginScreen> {
     if (userDetails != null) {
       try {
         appState.setUserDetails(
-          patientId: userDetails['id'] is int
-              ? userDetails['id']
-              : int.tryParse((userDetails['id'] ?? '').toString()),
+          patientId: userDetails['id'] is int ? userDetails['id'] : int.tryParse((userDetails['id'] ?? '').toString()),
           fullName: userDetails['name'] ?? '',
           dob: DateTime.tryParse(userDetails['dob'] ?? '') ?? DateTime.now(),
           gender: userDetails['gender'] ?? '',
@@ -108,6 +106,8 @@ class _LoginScreenState extends State<LoginScreen> {
           phone: userDetails['phone'] ?? '',
           email: userDetails['email'] ?? '',
         );
+
+        await appState.applyThemeModeFromServer(userDetails['theme_mode']);
 
         // Hydrate selection info so this device matches the account.
         appState.setDepartment(userDetails['department']?.toString());
@@ -290,8 +290,12 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final linkColor = isDark ? cs.primary : const Color(0xFF6C63FF);
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFF),
+      backgroundColor: isDark ? cs.surface : const Color(0xFFF8FAFF),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(32.0),
@@ -332,9 +336,9 @@ class _LoginScreenState extends State<LoginScreen> {
                       alignment: Alignment.centerRight,
                       child: TextButton(
                         onPressed: _loading ? null : _showForgotPasswordDialog,
-                        child: const Text(
+                        child: Text(
                           "Forgot Password?",
-                          style: TextStyle(color: Color(0xFF6C63FF), fontWeight: FontWeight.w500),
+                          style: TextStyle(color: linkColor, fontWeight: FontWeight.w500),
                         ),
                       ),
                     ),
@@ -365,9 +369,9 @@ class _LoginScreenState extends State<LoginScreen> {
                               MaterialPageRoute(builder: (_) => const WelcomeScreen()),
                             );
                           },
-                    child: const Text(
+                    child: Text(
                       "Don't have an account? Sign up",
-                      style: TextStyle(color: Color(0xFF6C63FF), decoration: TextDecoration.underline),
+                      style: TextStyle(color: linkColor, decoration: TextDecoration.underline),
                     ),
                   ),
                   if (_error.isNotEmpty)

@@ -8,6 +8,7 @@ import 'app_state.dart';
 import 'services/api_service.dart';
 import 'services/notification_service.dart';
 import 'services/push_service.dart';
+import 'services/reminder_api.dart';
 import 'screens/welcome_screen.dart';
 import 'screens/category_screen.dart';
 import 'screens/home_screen.dart';
@@ -99,8 +100,8 @@ Future<void> _postStartupInit(AppState appState) async {
     // Apply persisted theme mode early in startup.
     await appState.loadThemeMode();
 
-    // Server-only reminders: rely on backend pushes.
-    NotificationService.serverOnlyMode = true;
+    // Hybrid reminders: backend is source-of-truth, device schedules locally for offline reliability.
+    NotificationService.serverOnlyMode = false;
     // AlarmManager initialization removed: we rely on plugin pre-scheduled daily notifications.
     await NotificationService.init();
     // Log current notification capabilities for diagnostics
@@ -112,6 +113,10 @@ Future<void> _postStartupInit(AppState appState) async {
     // Ensure persisted auth/user state is hydrated quickly (no bulk sync here).
     await appState.loadUserDetails(runBulkSync: false);
     await appState.syncTokenFromPrefs();
+
+    // Sync any pending theme preference to the server once auth is ready.
+    // This makes the user's theme choice follow their account across devices.
+    await appState.flushPendingThemeMode();
 
     // Centralized push (Firebase + token registration + foreground handling)
     await PushService.initializeAndRegister();
@@ -125,11 +130,17 @@ Future<void> _postStartupInit(AppState appState) async {
     await PushService.registerNow();
     await PushService.flushPendingIfAny();
 
-    // Clear any legacy local schedules once; reminders are server-push only.
+    // Reconcile local schedules to match server reminders (works offline via cache fallback).
     try {
-      await NotificationService.cancelAllPending();
+      if ((appState.token ?? '').isNotEmpty) {
+        final list = await ReminderApi.listWithCacheFallback();
+        await ReminderApi.scheduleLocally(list);
+      } else {
+        // Logged out: remove local schedules to avoid cross-account confusion.
+        await NotificationService.cancelAllPending();
+      }
     } catch (e) {
-      print('Startup cancelAllPending failed: $e');
+      print('Startup reminder scheduling failed: $e');
     }
 
     // Load persisted per-user data without blocking the first frame.
@@ -194,7 +205,7 @@ class ToothCareGuideApp extends StatelessWidget {
     return MaterialApp(
       title: 'ToothCareGuide',
       builder: (context, child) {
-        final w = child ?? const SizedBox.shrink();
+        final w = _ReminderResyncGate(child: child ?? const SizedBox.shrink());
         if (!kDebugMode || !_kDebugDisableSemanticsWorkaround) return w;
         // Suppress semantics in debug as a workaround for a framework assertion
         // that can otherwise flood the scheduler and lock up interactions.
@@ -240,6 +251,61 @@ class ToothCareGuideApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
     );
   }
+}
+
+class _ReminderResyncGate extends StatefulWidget {
+  final Widget child;
+  const _ReminderResyncGate({required this.child});
+
+  @override
+  State<_ReminderResyncGate> createState() => _ReminderResyncGateState();
+}
+
+class _ReminderResyncGateState extends State<_ReminderResyncGate> with WidgetsBindingObserver {
+  bool _resyncInFlight = false;
+  Timer? _debounce;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    // Debounce rapid resume events.
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(seconds: 1), () {
+      if (!mounted) return;
+      unawaited(_resyncReminders());
+    });
+  }
+
+  Future<void> _resyncReminders() async {
+    if (_resyncInFlight) return;
+    _resyncInFlight = true;
+    try {
+      final appState = Provider.of<AppState>(context, listen: false);
+      if ((appState.token ?? '').isEmpty) return;
+      final list = await ReminderApi.listWithCacheFallback();
+      await ReminderApi.scheduleLocally(list);
+    } catch (_) {
+      // best-effort
+    } finally {
+      _resyncInFlight = false;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 class AppEntryGate extends StatefulWidget {
@@ -332,6 +398,8 @@ class _AppEntryGateState extends State<AppEntryGate> {
         phone: userDetails['phone'],
         email: userDetails['email'],
       );
+
+      await appState.applyThemeModeFromServer(userDetails['theme_mode']);
       // Load persisted data for this user
       await appState.loadAllChecklists(username: appState.username);
       await appState.loadInstructionLogs(username: appState.username);
@@ -472,6 +540,8 @@ class _AppEntryGateState extends State<AppEntryGate> {
               phone: userDetails['phone'],
               email: userDetails['email'],
             );
+
+            await appState.applyThemeModeFromServer(userDetails['theme_mode']);
             // Load persisted data for this user
             await appState.loadAllChecklists(username: appState.username);
             await appState.loadInstructionLogs(username: appState.username);

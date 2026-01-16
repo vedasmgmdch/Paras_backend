@@ -6,8 +6,9 @@ class PasswordResetSuccessScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: cs.surface,
       body: Center(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 32.0),
@@ -16,30 +17,30 @@ class PasswordResetSuccessScreen extends StatelessWidget {
             children: [
               Container(
                 decoration: BoxDecoration(
-                  color: Colors.green[100],
+                  color: cs.secondaryContainer,
                   shape: BoxShape.circle,
                 ),
                 padding: const EdgeInsets.all(32),
-                child: const Icon(
+                child: Icon(
                   Icons.check_circle,
-                  color: Colors.green,
+                  color: cs.onSecondaryContainer,
                   size: 80,
                 ),
               ),
               const SizedBox(height: 32),
-              const Text(
+              Text(
                 'Password Reset Successful!',
                 style: TextStyle(
                   fontSize: 24,
                   fontWeight: FontWeight.bold,
-                  color: Colors.black87,
+                  color: cs.onSurface,
                 ),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 16),
-              const Text(
+              Text(
                 'You can now log in with your new password.',
-                style: TextStyle(fontSize: 16, color: Colors.black54),
+                style: TextStyle(fontSize: 16, color: cs.onSurfaceVariant),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 40),
@@ -47,8 +48,8 @@ class PasswordResetSuccessScreen extends StatelessWidget {
                 width: double.infinity,
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    foregroundColor: Colors.white,
+                    backgroundColor: cs.primary,
+                    foregroundColor: cs.onPrimary,
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),

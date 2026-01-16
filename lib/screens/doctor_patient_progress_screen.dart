@@ -39,6 +39,8 @@ class _DoctorPatientProgressScreenState extends State<DoctorPatientProgressScree
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       appBar: AppBar(
         title: Text('Progress • ${widget.username}'),
@@ -48,45 +50,45 @@ class _DoctorPatientProgressScreenState extends State<DoctorPatientProgressScree
         child: _loading
             ? const Center(child: CircularProgressIndicator())
             : _error || _data == null
-            ? _ErrorState(onRetry: _load)
-            : RefreshIndicator(
-                onRefresh: _load,
-                child: ListView(
-                  padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
-                  children: [
-                    _HeaderCard(data: _data!),
-                    const SizedBox(height: 16),
-                    _SummaryPie(data: _data!),
-                    const SizedBox(height: 16),
-                    _DailyAdherenceList(data: _data!),
-                    const SizedBox(height: 16),
-                    ElevatedButton.icon(
-                      onPressed: () {
-                        final patient = (_data?['patient'] as Map<String, dynamic>?) ?? const {};
-                        final displayName = (patient['name'] ?? '').toString();
-                        Navigator.of(context).push(
-                          NoAnimationPageRoute(
-                            builder: (_) => ChatScreen(
-                              patientUsername: widget.username,
-                              asDoctor: true,
-                              patientDisplayName: displayName,
-                              readOnly: patient['procedure_completed'] == true,
-                              bannerText: patient['procedure_completed'] == true ? 'Treatment completed' : null,
-                            ),
+                ? _ErrorState(onRetry: _load)
+                : RefreshIndicator(
+                    onRefresh: _load,
+                    child: ListView(
+                      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+                      children: [
+                        _HeaderCard(data: _data!),
+                        const SizedBox(height: 16),
+                        _SummaryPie(data: _data!),
+                        const SizedBox(height: 16),
+                        _DailyAdherenceList(data: _data!),
+                        const SizedBox(height: 16),
+                        ElevatedButton.icon(
+                          onPressed: () {
+                            final patient = (_data?['patient'] as Map<String, dynamic>?) ?? const {};
+                            final displayName = (patient['name'] ?? '').toString();
+                            Navigator.of(context).push(
+                              NoAnimationPageRoute(
+                                builder: (_) => ChatScreen(
+                                  patientUsername: widget.username,
+                                  asDoctor: true,
+                                  patientDisplayName: displayName,
+                                  readOnly: patient['procedure_completed'] == true,
+                                  bannerText: patient['procedure_completed'] == true ? 'Treatment completed' : null,
+                                ),
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.chat_bubble_outline),
+                          label: const Text('Chat with Patient'),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            backgroundColor: isDark ? cs.primary : Colors.deepPurple,
+                            foregroundColor: isDark ? cs.onPrimary : Colors.white,
                           ),
-                        );
-                      },
-                      icon: const Icon(Icons.chat_bubble_outline),
-                      label: const Text('Chat with Patient'),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        backgroundColor: Colors.deepPurple,
-                        foregroundColor: Colors.white,
-                      ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-              ),
+                  ),
       ),
     );
   }
@@ -202,6 +204,8 @@ class _DonutChart extends StatelessWidget {
   const _DonutChart({required this.followed, required this.unfollowed});
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final total = (followed + unfollowed).clamp(1, 999999);
     final fRatio = followed / total;
     return SizedBox(
@@ -213,8 +217,8 @@ class _DonutChart extends StatelessWidget {
           CircularProgressIndicator(
             value: fRatio,
             strokeWidth: 10,
-            backgroundColor: Colors.red.withValues(alpha: 0.25),
-            valueColor: AlwaysStoppedAnimation<Color>(Colors.green),
+            backgroundColor: isDark ? cs.onSurfaceVariant.withValues(alpha: 0.20) : Colors.red.withValues(alpha: 0.25),
+            valueColor: AlwaysStoppedAnimation<Color>(isDark ? cs.primary : Colors.green),
           ),
           Text(
             '${(fRatio * 100).toStringAsFixed(0)}%',
@@ -274,11 +278,12 @@ class _ErrorState extends StatelessWidget {
   const _ErrorState({required this.onRetry});
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.error_outline, size: 40, color: Colors.redAccent),
+          Icon(Icons.error_outline, size: 40, color: cs.error),
           const SizedBox(height: 12),
           const Text('Failed to load progress'),
           const SizedBox(height: 16),

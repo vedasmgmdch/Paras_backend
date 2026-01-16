@@ -3,6 +3,7 @@ import 'package:fl_chart/fl_chart.dart';
 import '../services/api_service.dart';
 import 'chat_screen.dart';
 import '../widgets/no_animation_page_route.dart';
+import '../theme/semantic_colors.dart';
 
 // This doctor view is a read-only mirror of the patient's ProgressScreen, showing:
 // - Recovery Dashboard (day of recovery + progress bar)
@@ -158,14 +159,16 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
   }
 
   Widget _buildProgressStatusBar() {
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final status = _computeProgressStatus();
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFF),
+        color: isDark ? cs.surfaceContainerLow : const Color(0xFFF8FAFF),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.blueGrey.shade100),
+        border: Border.all(color: isDark ? cs.outlineVariant : Colors.blueGrey.shade100),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -175,7 +178,7 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
               const Expanded(
                 child: Text(
                   'Progress Status',
-                  style: TextStyle(fontWeight: FontWeight.w600, color: Colors.black87),
+                  style: TextStyle(fontWeight: FontWeight.w600),
                 ),
               ),
               Container(
@@ -197,12 +200,18 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
             child: LinearProgressIndicator(
               value: status.score.clamp(0.0, 1.0),
               minHeight: 10,
-              backgroundColor: Colors.blueGrey.shade50,
+              backgroundColor: isDark ? cs.onSurfaceVariant.withValues(alpha: 0.18) : Colors.blueGrey.shade50,
               color: status.color,
             ),
           ),
           const SizedBox(height: 8),
-          Text(status.sublabel, style: const TextStyle(color: Colors.black54, fontSize: 13)),
+          Text(
+            status.sublabel,
+            style: TextStyle(
+              color: isDark ? cs.onSurfaceVariant : Colors.black54,
+              fontSize: 13,
+            ),
+          ),
         ],
       ),
     );
@@ -554,6 +563,8 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
     // Subtype fallback no longer needs latest collapse; just reuse matches (already done above).
     _lastUsedSubtypeFallback = usedSubtypeFallbackLocal;
     final stats = _getInstructionStats(_instructionStatus.where(_isAllowedForPfdFixed).toList());
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
       appBar: AppBar(
@@ -565,7 +576,7 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
         }()),
         actions: [IconButton(onPressed: _loading ? null : _loadAll, icon: const Icon(Icons.refresh))],
       ),
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       body: SafeArea(
         child: _loading
             ? const Center(child: CircularProgressIndicator())
@@ -583,13 +594,13 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
                             margin: const EdgeInsets.only(bottom: 12),
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: Colors.amber[100],
+                              color: isDark ? cs.surfaceContainerLow : Colors.amber[100],
                               borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.amber.shade300),
+                              border: Border.all(color: (isDark ? cs.primary : Colors.amber.shade300)),
                             ),
                             child: Text(
                               _debugStatusMessage!,
-                              style: const TextStyle(fontSize: 13, color: Colors.black87),
+                              style: TextStyle(fontSize: 13, color: cs.onSurface),
                             ),
                           ),
                         if (_lastRefreshed != null)
@@ -597,7 +608,7 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
                             padding: const EdgeInsets.only(bottom: 8.0),
                             child: Text(
                               'Last refreshed: ' + _lastRefreshed!.toIso8601String().substring(11, 19),
-                              style: const TextStyle(fontSize: 12, color: Colors.black54),
+                              style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
                             ),
                           ),
                         _treatmentLabelSection(),
@@ -616,8 +627,8 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
                           width: double.infinity,
                           child: ElevatedButton.icon(
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.deepPurple,
-                              foregroundColor: Colors.white,
+                              backgroundColor: isDark ? cs.primary : Colors.deepPurple,
+                              foregroundColor: isDark ? cs.onPrimary : Colors.white,
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                               padding: const EdgeInsets.symmetric(vertical: 15),
                             ),
@@ -658,6 +669,8 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
 
   // --- UI subsections mirroring patient screen ---
   Widget _treatmentLabelSection() {
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final treatment = (_patientInfo?['treatment'] ?? '').toString().trim();
     final subtype = (_patientInfo?['subtype'] ?? _patientInfo?['treatment_subtype'] ?? '').toString().trim();
     final procDate = (_patientInfo?['procedure_date'] ?? '').toString().trim();
@@ -671,18 +684,21 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
       margin: const EdgeInsets.only(bottom: 14),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFF),
+        color: isDark ? cs.surfaceContainerLow : const Color(0xFFF8FAFF),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.blueGrey.shade100),
+        border: Border.all(color: isDark ? cs.outlineVariant : Colors.blueGrey.shade100),
       ),
       child: Row(
         children: [
-          const Icon(Icons.medical_information, color: Colors.black54),
+          Icon(Icons.medical_information, color: isDark ? cs.primary : Colors.black54),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               '$label$datePart',
-              style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.black87),
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                color: isDark ? cs.onSurface : Colors.black87,
+              ),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
@@ -693,60 +709,86 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
   }
 
   Widget _recoveryDashboardSection() {
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final dayOfRecovery = _dayOfRecovery ?? 0;
     final progressPercent = _progressPercent ?? 0;
     return Container(
       margin: const EdgeInsets.only(bottom: 18),
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(color: const Color(0xFF2196F3), borderRadius: BorderRadius.circular(20)),
+      decoration: BoxDecoration(
+        color: isDark ? cs.surfaceContainerLow : const Color(0xFF2196F3),
+        borderRadius: BorderRadius.circular(20),
+        border: isDark ? Border.all(color: cs.outlineVariant) : null,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            children: const [
+            children: [
               Expanded(
                 child: Text(
                   'Recovery Dashboard',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? cs.onSurface : Colors.white,
+                  ),
                 ),
               ),
-              Icon(Icons.favorite_border, color: Colors.white),
+              Icon(Icons.favorite_border, color: isDark ? cs.primary : Colors.white),
             ],
           ),
           const SizedBox(height: 8),
           Text(
             _dayOfRecovery != null ? 'Day $dayOfRecovery of recovery' : 'Procedure date not set',
-            style: const TextStyle(fontSize: 16, color: Colors.white),
+            style: TextStyle(fontSize: 16, color: isDark ? cs.onSurfaceVariant : Colors.white),
           ),
           const SizedBox(height: 12),
           LinearProgressIndicator(
             value: (_dayOfRecovery ?? 0) / _totalRecoveryDays,
-            backgroundColor: Colors.white24,
-            color: Colors.white,
+            backgroundColor: isDark ? cs.onSurfaceVariant.withValues(alpha: 0.18) : Colors.white24,
+            color: isDark ? cs.primary : Colors.white,
             minHeight: 5,
           ),
           const SizedBox(height: 6),
-          Text('Recovery Progress: $progressPercent%', style: const TextStyle(color: Colors.white, fontSize: 14)),
+          Text(
+            'Recovery Progress: $progressPercent%',
+            style: TextStyle(color: isDark ? cs.onSurfaceVariant : Colors.white, fontSize: 14),
+          ),
         ],
       ),
     );
   }
 
   Widget _recoveryProgressHeadingCard() {
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       margin: const EdgeInsets.only(bottom: 20),
       padding: const EdgeInsets.all(22),
       width: double.infinity,
-      decoration: BoxDecoration(color: const Color(0xFF2196F3), borderRadius: BorderRadius.circular(20)),
+      decoration: BoxDecoration(
+        color: isDark ? cs.surfaceContainerLow : const Color(0xFF2196F3),
+        borderRadius: BorderRadius.circular(20),
+        border: isDark ? Border.all(color: cs.outlineVariant) : null,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: const [
+        children: [
           Text(
             'Recovery Progress',
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: isDark ? cs.onSurface : Colors.white,
+            ),
           ),
-          SizedBox(height: 6),
-          Text('Monitor your recovery day by day', style: TextStyle(fontSize: 15, color: Colors.white)),
+          const SizedBox(height: 6),
+          Text(
+            'Monitor your recovery day by day',
+            style: TextStyle(fontSize: 15, color: isDark ? cs.onSurfaceVariant : Colors.white),
+          ),
         ],
       ),
     );
@@ -782,27 +824,32 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
   }
 
   Widget _pieChartSection(Map<String, int> stats) {
+    final cs = Theme.of(context).colorScheme;
+    final semantic = AppSemanticColors.of(context);
     final generalCount = stats['GeneralFollowed'] ?? 0;
     final specificCount = stats['SpecificFollowed'] ?? 0;
     final notGeneral = stats['GeneralNotFollowed'] ?? 0;
     final notSpecific = stats['SpecificNotFollowed'] ?? 0;
     final total = generalCount + specificCount + notGeneral + notSpecific;
     if (total == 0) {
-      return const Padding(
+      return Padding(
         padding: EdgeInsets.only(bottom: 16.0),
         child: Text(
           'No instruction logs available for selected treatment/subtype.',
-          style: TextStyle(color: Colors.black54),
+          style: TextStyle(color: cs.onSurfaceVariant),
         ),
       );
     }
+
+    final notFollowedTotal = notGeneral + notSpecific;
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 16.0),
       child: Column(
         children: [
-          const Text(
+          Text(
             'Instructions Followed',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.blueGrey),
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: cs.onSurface),
           ),
           const SizedBox(height: 10),
           SizedBox(
@@ -812,24 +859,24 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
                 sections: [
                   PieChartSectionData(
                     value: generalCount.toDouble(),
-                    color: Colors.green,
+                    color: semantic.success,
                     title: generalCount > 0 ? 'General\n$generalCount' : '',
                     radius: 55,
-                    titleStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                    titleStyle: TextStyle(color: semantic.onSuccess, fontWeight: FontWeight.bold, fontSize: 14),
                   ),
                   PieChartSectionData(
                     value: specificCount.toDouble(),
-                    color: Colors.red,
+                    color: semantic.info,
                     title: specificCount > 0 ? 'Specific\n$specificCount' : '',
                     radius: 55,
-                    titleStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                    titleStyle: TextStyle(color: semantic.onInfo, fontWeight: FontWeight.bold, fontSize: 14),
                   ),
                   PieChartSectionData(
-                    value: (notGeneral + notSpecific).toDouble(),
-                    color: Colors.blue,
-                    title: (notGeneral + notSpecific) > 0 ? 'Not\n${notGeneral + notSpecific}' : '',
+                    value: notFollowedTotal.toDouble(),
+                    color: cs.error,
+                    title: notFollowedTotal > 0 ? 'Not\n$notFollowedTotal' : '',
                     radius: 55,
-                    titleStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                    titleStyle: TextStyle(color: cs.onError, fontWeight: FontWeight.bold, fontSize: 14),
                   ),
                 ],
                 sectionsSpace: 2,
@@ -841,10 +888,10 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
           Wrap(
             alignment: WrapAlignment.center,
             spacing: 16,
-            children: const [
-              _Legend(color: Colors.green, label: 'General Followed'),
-              _Legend(color: Colors.red, label: 'Specific Followed'),
-              _Legend(color: Colors.blue, label: 'Not Followed'),
+            children: [
+              _Legend(color: semantic.success, label: 'General Followed'),
+              _Legend(color: semantic.info, label: 'Specific Followed'),
+              _Legend(color: cs.error, label: 'Not Followed'),
             ],
           ),
           const SizedBox(height: 12),
@@ -853,8 +900,8 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
             children: [
               Flexible(
                 child: Text(
-                  '$generalCount General, $specificCount Specific, ${notGeneral + notSpecific} Not followed',
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: Colors.black87),
+                  '$generalCount General, $specificCount Specific, $notFollowedTotal Not followed',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: cs.onSurface),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -870,14 +917,17 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
     List<Map<String, dynamic>> logsForSelectedDate, {
     bool missingProcedureDate = false,
   }) {
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final semantic = AppSemanticColors.of(context);
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFF),
+        color: isDark ? cs.surfaceContainerLow : const Color(0xFFF8FAFF),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.blueGrey[100]!),
+        border: Border.all(color: isDark ? cs.outlineVariant : Colors.blueGrey[100]!),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -886,11 +936,15 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
             builder: (context, constraints) {
               if (missingProcedureDate) {
                 return Row(
-                  children: const [
+                  children: [
                     Expanded(
                       child: Text(
                         'Instructions Log',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blueGrey),
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: isDark ? cs.onSurface : Colors.blueGrey,
+                        ),
                       ),
                     ),
                   ],
@@ -902,7 +956,11 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
                     fit: FlexFit.tight,
                     child: Text(
                       'Instructions Log',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blueGrey),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: isDark ? cs.onSurface : Colors.blueGrey,
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -930,7 +988,10 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
                         onChanged: (v) {
                           setState(() => _selectedDateForInstructionsLog = v ?? _selectedDateForInstructionsLog);
                         },
-                        underline: Container(height: 1, color: Colors.blueGrey[100]),
+                        underline: Container(
+                          height: 1,
+                          color: isDark ? cs.outlineVariant : Colors.blueGrey[100],
+                        ),
                       ),
                     ),
                   ],
@@ -943,10 +1004,14 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: Colors.yellow[50], borderRadius: BorderRadius.circular(8)),
-              child: const Text(
+              decoration: BoxDecoration(
+                color: isDark ? cs.surfaceContainerHighest : Colors.yellow[50],
+                borderRadius: BorderRadius.circular(8),
+                border: isDark ? Border(left: BorderSide(color: cs.error, width: 3)) : null,
+              ),
+              child: Text(
                 'Please set up treatment and procedure date first.',
-                style: TextStyle(color: Colors.black54, fontSize: 15),
+                style: TextStyle(color: isDark ? cs.onSurfaceVariant : Colors.black54, fontSize: 15),
               ),
             )
           else ...[
@@ -954,7 +1019,11 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(color: Colors.yellow[50], borderRadius: BorderRadius.circular(8)),
+                decoration: BoxDecoration(
+                  color: isDark ? cs.surfaceContainerHighest : Colors.yellow[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: isDark ? Border(left: BorderSide(color: cs.error, width: 3)) : null,
+                ),
                 child: Builder(
                   builder: (_) {
                     // Provide debug info about available dates when empty to help diagnose mismatches.
@@ -966,7 +1035,7 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
                       ..sort();
                     return Text(
                       'No instructions recorded for this day. (Have ${_instructionStatus.length} rows total across ${uniqueDates.length} dates)',
-                      style: const TextStyle(color: Colors.black54, fontSize: 15),
+                      style: TextStyle(color: isDark ? cs.onSurfaceVariant : Colors.black54, fontSize: 15),
                     );
                   },
                 ),
@@ -977,13 +1046,13 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
                 margin: const EdgeInsets.only(bottom: 8),
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.blue[50],
+                  color: isDark ? cs.surfaceContainerHighest : Colors.blue[50],
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blueGrey[100]!),
+                  border: Border.all(color: isDark ? cs.outlineVariant : Colors.blueGrey[100]!),
                 ),
-                child: const Text(
+                child: Text(
                   'Subtype-specific logs empty; showing subtype-agnostic entries for this date.',
-                  style: TextStyle(fontSize: 12, color: Colors.black87),
+                  style: TextStyle(fontSize: 12, color: isDark ? cs.onSurface : Colors.black87),
                 ),
               ),
             ...logsForSelectedDate.map((log) {
@@ -997,6 +1066,7 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
                       : Colors.blue[100];
               final color = followed ? baseColor : Colors.grey[200];
               final label = followed ? 'Followed' : 'Not Followed';
+              final accent = followed ? semantic.success : cs.error;
               return Container(
                 margin: const EdgeInsets.only(bottom: 8),
                 child: Row(
@@ -1004,7 +1074,11 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
                     Expanded(
                       child: Text(
                         instruction,
-                        style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 15, color: Colors.black87),
+                        style: TextStyle(
+                          fontWeight: FontWeight.w500,
+                          fontSize: 15,
+                          color: isDark ? cs.onSurface : Colors.black87,
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -1014,15 +1088,23 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
                       child: Icon(
                         followed ? Icons.check_circle : Icons.cancel,
                         size: 18,
-                        color: followed ? Colors.green : Colors.black38,
+                        color: isDark ? accent : (followed ? Colors.green : Colors.black38),
                       ),
                     ),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(8)),
+                      decoration: BoxDecoration(
+                        color: isDark ? cs.surfaceContainerHighest : color,
+                        borderRadius: BorderRadius.circular(8),
+                        border: isDark ? Border.all(color: accent.withValues(alpha: 0.35)) : null,
+                      ),
                       child: Text(
                         label,
-                        style: const TextStyle(color: Colors.black54, fontWeight: FontWeight.w600, fontSize: 13),
+                        style: TextStyle(
+                          color: isDark ? accent : Colors.black54,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
                       ),
                     ),
                   ],
@@ -1039,6 +1121,8 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
     if (_progressEntries.isEmpty) {
       return const SizedBox.shrink();
     }
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1046,7 +1130,7 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
           padding: const EdgeInsets.only(bottom: 8.0, left: 4.0),
           child: Text(
             "Patient Progress Entries",
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.blueGrey[900]),
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: cs.onSurface),
           ),
         ),
         ..._progressEntries.map((e) {
@@ -1057,9 +1141,9 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
             margin: const EdgeInsets.symmetric(vertical: 8),
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: const Color(0xFFF8FAFF),
+              color: isDark ? cs.surfaceContainerLow : const Color(0xFFF8FAFF),
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.blueGrey[100]!),
+              border: Border.all(color: isDark ? cs.outlineVariant : Colors.blueGrey[100]!),
             ),
             child: Row(
               children: [
@@ -1068,7 +1152,7 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: const [
                       Text('Entry', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                      SizedBox(height: 4),
+                      SizedBox(height: 4)
                     ],
                   ),
                 ),
@@ -1076,7 +1160,7 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
                   flex: 2,
                   child: Text(
                     msg,
-                    style: const TextStyle(color: Colors.black87, fontSize: 15),
+                    style: TextStyle(color: isDark ? cs.onSurface : Colors.black87, fontSize: 15),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1084,7 +1168,11 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
                 Flexible(
                   child: Text(
                     ts,
-                    style: const TextStyle(color: Colors.black54, fontWeight: FontWeight.w600, fontSize: 13),
+                    style: TextStyle(
+                      color: isDark ? cs.onSurfaceVariant : Colors.black54,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1098,9 +1186,15 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
   }
 
   Widget _summaryRow(String label, String value, String unit, Color bgColor, Color textColor) {
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(10)),
+      decoration: BoxDecoration(
+        color: isDark ? cs.surfaceContainerHighest : bgColor,
+        borderRadius: BorderRadius.circular(10),
+        border: isDark ? Border(left: BorderSide(color: textColor.withValues(alpha: 0.85), width: 4)) : null,
+      ),
       child: Row(
         children: [
           Expanded(
@@ -1109,17 +1203,21 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
               children: [
                 Text(
                   label,
-                  style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.w500),
+                  style: TextStyle(color: isDark ? cs.onSurface : Colors.black87, fontWeight: FontWeight.w500),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   value,
-                  style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 26),
+                  style: TextStyle(
+                    color: isDark ? cs.onSurface : textColor,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 26,
+                  ),
                 ),
               ],
             ),
           ),
-          Text(unit, style: const TextStyle(color: Colors.black54)),
+          Text(unit, style: TextStyle(color: isDark ? cs.onSurfaceVariant : Colors.black54)),
         ],
       ),
     );
@@ -1134,9 +1232,16 @@ class _Legend extends StatelessWidget {
   Widget build(BuildContext context) => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(width: 14, height: 14, color: color),
+          Container(
+            width: 14,
+            height: 14,
+            decoration: BoxDecoration(
+              color: color,
+              border: Border.all(color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.70)),
+            ),
+          ),
           const SizedBox(width: 4),
-          Text(label, style: const TextStyle(fontSize: 13)),
+          Text(label, style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant)),
         ],
       );
 }

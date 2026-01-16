@@ -40,20 +40,21 @@ class _ReliabilityTipsCardState extends State<ReliabilityTipsCard> {
   @override
   Widget build(BuildContext context) {
     if (_hidden) return const SizedBox.shrink();
+    final cs = Theme.of(context).colorScheme;
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFFE8F5E9),
+        color: cs.secondaryContainer,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFB2DFDB)),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.alarm, color: Color(0xFF00796B)),
+              Icon(Icons.alarm, color: cs.onSecondaryContainer),
               const SizedBox(width: 8),
               const Expanded(
                 child: Text(
@@ -114,7 +115,7 @@ class _ReliabilityTipsCardState extends State<ReliabilityTipsCard> {
           const SizedBox(height: 6),
           const Text(
             'Tip: Some devices delay alarms when battery saver is on. These steps help the phone deliver reminders exactly at the scheduled time.',
-            style: TextStyle(fontSize: 12, color: Colors.black87),
+            style: TextStyle(fontSize: 12),
           ),
         ],
       ),

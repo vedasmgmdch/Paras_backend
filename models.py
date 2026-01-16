@@ -29,6 +29,10 @@ class Patient(Base):
     procedure_completed = Column(Boolean, nullable=True, default=None)
     is_verified = Column(Boolean, default=False, nullable=False)
 
+    # UI preferences (synced across devices via account)
+    # Allowed values: 'light' | 'dark'
+    theme_mode = Column(String, nullable=False, default="light")
+
     appointments = relationship("Appointment", back_populates="patient", cascade="all, delete-orphan")
     feedbacks = relationship("Feedback", back_populates="patient", cascade="all, delete-orphan")
     doctor_feedbacks = relationship("DoctorFeedback", back_populates="patient", cascade="all, delete-orphan")

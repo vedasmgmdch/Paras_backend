@@ -6,16 +6,16 @@ import 'services/push_service.dart';
 // (imports of UI screens removed as they are not used here)
 
 Future<String?> handleSignUp(
-    BuildContext context,
-    String username,
-    String password,
-    String phone,
-    String email,
-    String name,
-    String dob,
-    String gender,
-    VoidCallback switchToLogin,
-    ) async {
+  BuildContext context,
+  String username,
+  String password,
+  String phone,
+  String email,
+  String name,
+  String dob,
+  String gender,
+  VoidCallback switchToLogin,
+) async {
   final error = await ApiService.register({
     'username': username,
     'password': password,
@@ -60,10 +60,10 @@ Future<String?> handleSignUp(
 }
 
 Future<String?> handleLogin(
-    BuildContext context,
-    String username,
-    String password,
-    ) async {
+  BuildContext context,
+  String username,
+  String password,
+) async {
   final error = await ApiService.login(username, password);
 
   if (error != null) {
@@ -86,9 +86,7 @@ Future<String?> handleLogin(
 
     if (userDetails != null) {
       appState.setUserDetails(
-        patientId: userDetails['id'] is int
-            ? userDetails['id']
-            : int.tryParse((userDetails['id'] ?? '').toString()),
+        patientId: userDetails['id'] is int ? userDetails['id'] : int.tryParse((userDetails['id'] ?? '').toString()),
         fullName: userDetails['name'],
         dob: DateTime.tryParse((userDetails['dob'] ?? '').toString()) ?? DateTime.now(),
         gender: userDetails['gender'],
@@ -97,6 +95,8 @@ Future<String?> handleLogin(
         phone: userDetails['phone'],
         email: userDetails['email'],
       );
+
+      await appState.applyThemeModeFromServer(userDetails['theme_mode']);
       appState.setDepartment(userDetails['department']);
       appState.setDoctor(userDetails['doctor']);
       appState.setTreatment(userDetails['treatment'], subtype: userDetails['treatment_subtype']);

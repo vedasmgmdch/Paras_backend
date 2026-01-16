@@ -76,6 +76,7 @@ class PatientPublic(BaseModel):
     procedure_date: Optional[date] = None
     procedure_time: Optional[time] = None
     procedure_completed: Optional[bool] = None
+    theme_mode: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
 class DoctorBase(BaseModel):

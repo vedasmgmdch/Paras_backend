@@ -11,9 +11,12 @@ class AppState extends ChangeNotifier {
   static final DateFormat _ymd = DateFormat('yyyy-MM-dd');
 
   static const String _prefsThemeModeKey = 'theme_mode_v1';
+  static const String _prefsThemeModePendingKey = 'theme_mode_pending_v1';
 
   ThemeMode _themeMode = ThemeMode.light;
   ThemeMode get themeMode => _themeMode;
+
+  String _prefsThemeModeKeyForUser(String username) => 'theme_mode_v1_${username.trim()}';
 
   String _encodeThemeMode(ThemeMode mode) {
     switch (mode) {
@@ -40,19 +43,90 @@ class AppState extends ChangeNotifier {
 
   Future<void> loadThemeMode() async {
     final prefs = await SharedPreferences.getInstance();
-    final stored = prefs.getString(_prefsThemeModeKey);
+    // Prefer per-user theme mode if we have a last-known username.
+    final lastUser = (prefs.getString('username') ?? '').trim();
+    // Theme is account-scoped. If logged out (no username), default to light.
+    // Avoid the legacy global key here; it causes cross-account leakage.
+    final stored = lastUser.isNotEmpty ? prefs.getString(_prefsThemeModeKeyForUser(lastUser)) : null;
     final next = _decodeThemeMode(stored);
     if (next == _themeMode) return;
     _themeMode = next;
     notifyListeners();
   }
 
-  Future<void> setThemeMode(ThemeMode mode) async {
+  Future<void> setThemeMode(ThemeMode mode, {bool syncToServer = false}) async {
     if (mode == _themeMode) return;
     _themeMode = mode;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_prefsThemeModeKey, _encodeThemeMode(mode));
+    final encoded = _encodeThemeMode(mode);
+    final u = (username ?? prefs.getString('username') ?? '').trim();
+    if (u.isNotEmpty) {
+      await prefs.setString(_prefsThemeModeKeyForUser(u), encoded);
+    }
+
+    if (!syncToServer) return;
+
+    // Server sync (best-effort). If it fails (offline, token missing, etc.),
+    // keep a pending value to retry later.
+    final hasAuth = (token ?? '').trim().isNotEmpty;
+    if (!hasAuth) {
+      await prefs.setString(_prefsThemeModePendingKey, encoded);
+      return;
+    }
+    final ok = await ApiService.updateMyThemeMode(encoded);
+    if (ok) {
+      await prefs.remove(_prefsThemeModePendingKey);
+    } else {
+      await prefs.setString(_prefsThemeModePendingKey, encoded);
+    }
+  }
+
+  Future<void> flushPendingThemeMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final pending = (prefs.getString(_prefsThemeModePendingKey) ?? '').trim().toLowerCase();
+    if (pending.isEmpty) return;
+    final hasAuth = (token ?? '').trim().isNotEmpty;
+    if (!hasAuth) return;
+    final ok = await ApiService.updateMyThemeMode(pending);
+    if (ok) {
+      await prefs.remove(_prefsThemeModePendingKey);
+    }
+  }
+
+  Future<void> applyThemeModeFromServerIfNeeded(dynamic serverThemeMode) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    // If there's a pending local choice to sync, don't override it with server data.
+    final pending = (prefs.getString(_prefsThemeModePendingKey) ?? '').trim();
+    if (pending.isNotEmpty) return;
+
+    // If we already have a local preference for this device/user, keep it.
+    final u = (username ?? prefs.getString('username') ?? '').trim();
+    final hasLocalPreference = u.isNotEmpty ? prefs.containsKey(_prefsThemeModeKeyForUser(u)) : false;
+    if (hasLocalPreference) return;
+
+    final decoded = _decodeThemeMode(serverThemeMode?.toString());
+    // Set locally only (server is already the source of truth here).
+    await setThemeMode(decoded, syncToServer: false);
+  }
+
+  /// Apply theme_mode coming from the backend as the account source-of-truth.
+  ///
+  /// Use this right after login / auto-login so switching accounts on the same
+  /// device always picks the correct theme.
+  ///
+  /// If there is a pending local preference to sync (offline), we do NOT
+  /// override it.
+  Future<void> applyThemeModeFromServer(dynamic serverThemeMode) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    // If there's a pending local choice to sync, don't override it with server data.
+    final pending = (prefs.getString(_prefsThemeModePendingKey) ?? '').trim();
+    if (pending.isNotEmpty) return;
+
+    final decoded = _decodeThemeMode(serverThemeMode?.toString());
+    await setThemeMode(decoded, syncToServer: false);
   }
 
   String _canonicalTreatment(String? value) {
@@ -1398,12 +1472,16 @@ class AppState extends ChangeNotifier {
     _progressFeedback.clear();
     _instructionLogs.clear();
     _stopPendingUploadFlushLoop();
-    SharedPreferences.getInstance().then((prefs) {
-      prefs.remove('token');
-      prefs.remove('user_details');
-    });
-    _saveInstructionLogs(username: username);
-    _saveUserDetails();
+
+    // On logout/reset, always revert UI to light until a user logs in.
+    _themeMode = ThemeMode.light;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('token');
+    await prefs.remove('username');
+    await prefs.remove('user_details');
+    await prefs.remove(_prefsThemeModePendingKey);
+    await prefs.remove(_prefsThemeModeKey); // legacy global key (avoid leakage)
     notifyListeners();
   }
 
@@ -1514,6 +1592,7 @@ class AppState extends ChangeNotifier {
 
   // Properly use setters for private fields (fixes direct assignment error)
   Future<void> clearUserData() async {
+    // Clear in-memory user/session state.
     username = null;
     patientId = null;
     fullName = null;
@@ -1521,6 +1600,12 @@ class AppState extends ChangeNotifier {
     gender = null;
     phone = null;
     email = null;
+    password = null;
+    token = null;
+
+    // On logout, always revert UI to light until a user logs in.
+    _themeMode = ThemeMode.light;
+
     setDepartment(null);
     setDoctor(null);
     setTreatment(null, subtype: null);
@@ -1533,6 +1618,10 @@ class AppState extends ChangeNotifier {
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('user_details');
+    await prefs.remove('token');
+    await prefs.remove('username');
+    await prefs.remove(_prefsThemeModePendingKey);
+    await prefs.remove(_prefsThemeModeKey); // legacy global key (avoid leakage)
   }
 
   void updatePersonalInfo({String? fullName, String? email, String? phone, String? gender, DateTime? dob}) {

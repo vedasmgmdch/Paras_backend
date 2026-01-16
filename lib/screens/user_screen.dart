@@ -154,6 +154,9 @@ class _PortalCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final buttonBg = isDark ? colorScheme.primary : color;
+    final buttonFg = isDark ? colorScheme.onPrimary : Colors.white;
     return Card(
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
@@ -200,8 +203,8 @@ class _PortalCard extends StatelessWidget {
               width: double.infinity,
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: color,
-                  foregroundColor: Colors.white,
+                  backgroundColor: buttonBg,
+                  foregroundColor: buttonFg,
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
