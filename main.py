@@ -1376,53 +1376,51 @@ async def login(
     if not user or not verify_password(password, user.password):
         raise HTTPException(status_code=401, detail="Incorrect username or password")
 
-    warning: Optional[str] = None
-    # Multi-device warning is best-effort; never block login on session tracking issues.
-    try:
-        did = (device_id or "").strip()
-        if did:
+    # Single-device enforcement is best-effort; if session tracking fails we still allow login.
+    did = (device_id or "").strip()
+    if did:
+        try:
             now = datetime.utcnow()
             try:
                 window_min = int(os.getenv("SESSION_ACTIVE_WINDOW_MINUTES", "60"))
-            # Single-device enforcement is best-effort; if session tracking fails we still allow login.
+            except Exception:
+                window_min = 60
             window_min = max(1, window_min)
             cutoff = now - timedelta(minutes=window_min)
 
-            # Is there another device considered active recently?
-            other_q = await db.execute(
+            other_recent_q = await db.execute(
                 select(models.UserSession)
                 .where(models.UserSession.patient_id == user.id)
                 .where(models.UserSession.active == True)
                 .where(models.UserSession.device_id != did)
                 .where(models.UserSession.last_seen_at >= cutoff)
                 .order_by(models.UserSession.last_seen_at.desc())
-                    # If there is another active device within the window, block login.
-                    other_recent_q = await db.execute(
-                        select(models.UserSession)
-                        .where(models.UserSession.patient_id == user.id)
-                        .where(models.UserSession.active == True)
-                        .where(models.UserSession.device_id != did)
-                        .where(models.UserSession.last_seen_at >= cutoff)
-                        .order_by(models.UserSession.last_seen_at.desc())
-                        .limit(1)
-                    )
-                    other_recent = other_recent_q.scalars().first()
-                    if other_recent:
-                        raise HTTPException(
-                            status_code=409,
-                            detail="Account is in use on another device. Please log out on that device first.",
-                        )
+                .limit(1)
+            )
+            other_recent = other_recent_q.scalars().first()
+            if other_recent:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Account is in use on another device. Please log out on that device first.",
+                )
 
-                    # Cleanup: deactivate any stale active sessions to satisfy the one-active constraint.
-                    stale_q = await db.execute(
-                        select(models.UserSession)
-                        .where(models.UserSession.patient_id == user.id)
-                        .where(models.UserSession.active == True)
-                        .where(models.UserSession.device_id != did)
-                    )
-                    for s in stale_q.scalars().all():
-                        object.__setattr__(s, 'active', False)
-                        db.add(s)
+            # Deactivate any other active sessions (stale), then upsert this device as active.
+            stale_q = await db.execute(
+                select(models.UserSession)
+                .where(models.UserSession.patient_id == user.id)
+                .where(models.UserSession.active == True)
+                .where(models.UserSession.device_id != did)
+            )
+            for s in stale_q.scalars().all():
+                object.__setattr__(s, 'active', False)
+                db.add(s)
+
+            me_q = await db.execute(
+                select(models.UserSession)
+                .where(models.UserSession.patient_id == user.id)
+                .where(models.UserSession.device_id == did)
+                .limit(1)
+            )
             me = me_q.scalars().first()
             if me:
                 object.__setattr__(me, 'last_seen_at', now)
@@ -1431,68 +1429,68 @@ async def login(
                     object.__setattr__(me, 'device_name', str(device_name)[:200])
                 db.add(me)
             else:
-                me = models.UserSession(
+                db.add(models.UserSession(
                     patient_id=user.id,
                     device_id=did,
                     device_name=(str(device_name)[:200] if device_name else None),
                     created_at=now,
                     last_seen_at=now,
                     active=True,
-                )
-                db.add(me)
+                ))
 
-            # Deactivate any other sessions to satisfy the partial unique constraint
-            others_q = await db.execute(
-                select(models.UserSession)
-                .where(models.UserSession.patient_id == user.id)
-                .where(models.UserSession.device_id != did)
-                .where(models.UserSession.active == True)
-            )
-    return {"access_token": access_token, "token_type": "bearer", "warning": warning}
+            await db.commit()
+        except HTTPException:
+            raise
+        except Exception:
+            try:
+                await db.rollback()
+            except Exception:
+                pass
 
-                # Preserve explicit login block.
-                raise
-            except Exception as _sess_e:
-                try:
-                    await db.rollback()
-                except Exception:
-                    pass
+    access_token = create_access_token(data={"sub": user.username})
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+@app.post("/session/logout")
+async def logout_session(
+    device_id: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: models.Patient = Depends(get_current_user),
+):
+    did = (device_id or "").strip()
+    if not did:
+        raise HTTPException(status_code=422, detail="device_id required")
+    now = datetime.utcnow()
+    try:
+        q = await db.execute(
+            select(models.UserSession)
+            .where(models.UserSession.patient_id == current_user.id)
+            .where(models.UserSession.device_id == did)
+            .limit(1)
+        )
+        sess = q.scalars().first()
+        if sess:
+            object.__setattr__(sess, 'active', False)
+            object.__setattr__(sess, 'last_seen_at', now)
+            db.add(sess)
+            await db.commit()
+        return {"ok": True}
+    except Exception:
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail="Failed to logout session")
+
+
+@app.post("/doctor-login", response_model=schemas.TokenResponse)
+async def doctor_login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(models.Doctor).where(models.Doctor.username == form_data.username))
+    doctor = result.scalars().first()
+    if not doctor or not verify_password(form_data.password, doctor.password):
         raise HTTPException(status_code=401, detail="Incorrect username or password")
     access_token = create_access_token(data={"sub": doctor.username})
-            return {"access_token": access_token, "token_type": "bearer", "warning": None}
-
-
-        @app.post("/session/logout")
-        async def logout_session(
-            device_id: str = Form(...),
-            db: AsyncSession = Depends(get_db),
-            current_user: models.Patient = Depends(get_current_user),
-        ):
-            did = (device_id or "").strip()
-            if not did:
-                raise HTTPException(status_code=422, detail="device_id required")
-            now = datetime.utcnow()
-            try:
-                q = await db.execute(
-                    select(models.UserSession)
-                    .where(models.UserSession.patient_id == current_user.id)
-                    .where(models.UserSession.device_id == did)
-                    .limit(1)
-                )
-                sess = q.scalars().first()
-                if sess:
-                    object.__setattr__(sess, 'active', False)
-                    object.__setattr__(sess, 'last_seen_at', now)
-                    db.add(sess)
-                    await db.commit()
-                return {"ok": True}
-            except Exception as e:
-                try:
-                    await db.rollback()
-                except Exception:
-                    pass
-                # Best-effort logout should not break client UX; but still report server failure.
-                raise HTTPException(status_code=500, detail="Failed to logout session")
+    return {"access_token": access_token, "token_type": "bearer"}
 
 @app.post("/doctor/master-login", response_model=schemas.TokenResponse)
 async def doctor_master_login(payload: schemas.DoctorMasterLoginRequest, db: AsyncSession = Depends(get_db)):
