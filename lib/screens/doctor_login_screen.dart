@@ -21,6 +21,13 @@ class _DoctorLoginScreenState extends State<DoctorLoginScreen> {
   final _passwordController = TextEditingController();
   bool _loading = false;
   String? _error;
+  bool _showPassword = false;
+
+  @override
+  void dispose() {
+    _passwordController.dispose();
+    super.dispose();
+  }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
@@ -87,6 +94,8 @@ class _DoctorLoginScreenState extends State<DoctorLoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return PopScope(
       canPop: true,
       onPopInvokedWithResult: (didPop, result) {
@@ -96,9 +105,12 @@ class _DoctorLoginScreenState extends State<DoctorLoginScreen> {
         }
       },
       child: Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         appBar: AppBar(
           title: const Text("Doctor Login"),
+          centerTitle: true,
+          backgroundColor: Colors.transparent,
+          elevation: 0,
           actions: [
             IconButton(
               tooltip: 'Clear saved doctor token',
@@ -113,77 +125,161 @@ class _DoctorLoginScreenState extends State<DoctorLoginScreen> {
           ],
         ),
         body: SafeArea(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              return SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 24),
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 480),
-                    child: Card(
-                      elevation: 2,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      child: Padding(
-                        padding: const EdgeInsets.all(28.0),
-                        child: Form(
-                          key: _formKey,
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              const Text(
-                                'Secure Master Access',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                              ),
-                              const SizedBox(height: 24),
-                              TextFormField(
-                                controller: _passwordController,
-                                decoration: const InputDecoration(
-                                  labelText: 'Master Password',
-                                  border: OutlineInputBorder(),
+          child: Container(
+            width: double.infinity,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: isDark
+                    ? [
+                        colorScheme.surface,
+                        colorScheme.surfaceContainerLow,
+                      ]
+                    : const [
+                        Color(0xFFF8FAFF),
+                        Colors.white,
+                      ],
+              ),
+            ),
+            child: SingleChildScrollView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 24),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 520),
+                  child: Card(
+                    elevation: 10,
+                    shadowColor: Colors.black.withValues(alpha: 0.10),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
+                      child: Form(
+                        key: _formKey,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Center(
+                              child: Container(
+                                width: 56,
+                                height: 56,
+                                decoration: BoxDecoration(
+                                  color: colorScheme.primary.withValues(alpha: 0.10),
+                                  shape: BoxShape.circle,
                                 ),
-                                obscureText: true,
-                                validator: (v) => v == null || v.isEmpty ? 'Required' : null,
-                                onFieldSubmitted: (_) => _submit(),
-                              ),
-                              const SizedBox(height: 20),
-                              if (_error != null) ...[
-                                Text(
-                                  _error!,
-                                  style: const TextStyle(color: Colors.red),
-                                  textAlign: TextAlign.center,
-                                ),
-                                const SizedBox(height: 6),
-                                const Text(
-                                  'Tips: Ensure server awake (first call can be slow). If repeated timeouts persist beyond 30s, backend may be sleeping or unreachable.',
-                                  style: TextStyle(fontSize: 11, color: Colors.grey),
-                                  textAlign: TextAlign.center,
-                                ),
-                                const SizedBox(height: 12),
-                              ],
-                              SizedBox(
-                                width: double.infinity,
-                                child: ElevatedButton(
-                                  onPressed: _loading ? null : _submit,
-                                  child: _loading
-                                      ? const SizedBox(
-                                          height: 20,
-                                          width: 20,
-                                          child: CircularProgressIndicator(strokeWidth: 2),
-                                        )
-                                      : const Text('Login'),
+                                child: Icon(
+                                  Icons.admin_panel_settings_outlined,
+                                  color: colorScheme.primary,
+                                  size: 28,
                                 ),
                               ),
+                            ),
+                            const SizedBox(height: 12),
+                            const Text(
+                              'Secure Master Access',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Enter the master password to continue.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                            TextFormField(
+                              controller: _passwordController,
+                              decoration: InputDecoration(
+                                labelText: 'Master Password',
+                                prefixIcon: const Icon(Icons.lock_outline),
+                                suffixIcon: IconButton(
+                                  tooltip: _showPassword ? 'Hide password' : 'Show password',
+                                  onPressed: () => setState(() => _showPassword = !_showPassword),
+                                  icon: Icon(
+                                    _showPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                                  ),
+                                ),
+                                filled: true,
+                                fillColor: colorScheme.surfaceContainerHighest,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                              obscureText: !_showPassword,
+                              enableSuggestions: false,
+                              autocorrect: false,
+                              textInputAction: TextInputAction.done,
+                              validator: (v) => v == null || v.isEmpty ? 'Required' : null,
+                              onFieldSubmitted: (_) => _submit(),
+                            ),
+                            const SizedBox(height: 14),
+                            if (_error != null) ...[
+                              Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.red.withValues(alpha: 0.06),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: Colors.red.withValues(alpha: 0.22)),
+                                ),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Padding(
+                                      padding: EdgeInsets.only(top: 2),
+                                      child: Icon(Icons.error_outline, color: Colors.red, size: 18),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        _error!,
+                                        style: const TextStyle(color: Colors.red, height: 1.2),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 10),
                             ],
-                          ),
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton(
+                                onPressed: _loading ? null : _submit,
+                                style: ElevatedButton.styleFrom(
+                                  minimumSize: const Size.fromHeight(48),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                ),
+                                child: _loading
+                                    ? const SizedBox(
+                                        height: 20,
+                                        width: 20,
+                                        child: CircularProgressIndicator(strokeWidth: 2),
+                                      )
+                                    : const Text('Continue'),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Text(
+                              'Tip: First login can be slow if the server is waking up.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.black.withValues(alpha: 0.45),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
                   ),
                 ),
-              );
-            },
+              ),
+            ),
           ),
         ),
       ),

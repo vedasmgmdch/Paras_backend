@@ -199,9 +199,10 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen>
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     if (currentDay >= totalDays) {
       return Scaffold(
-        backgroundColor: const Color(0xFFF9FAFB),
+        backgroundColor: colorScheme.surface,
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(24.0),
@@ -215,7 +216,7 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen>
                   curve: Curves.easeOutBack,
                   builder: (context, value, child) => Transform.scale(scale: value, child: child),
                   child: Container(
-                    decoration: BoxDecoration(color: Colors.green[50], shape: BoxShape.circle),
+                    decoration: BoxDecoration(color: colorScheme.secondaryContainer, shape: BoxShape.circle),
                     padding: const EdgeInsets.all(22),
                     child: const Icon(Icons.emoji_events_rounded, color: Color(0xFF2ECC71), size: 64),
                   ),
@@ -225,7 +226,7 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen>
                 Card(
                   elevation: 6,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-                  color: Colors.white,
+                  color: colorScheme.surfaceContainerLow,
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 28),
                     child: Column(
@@ -235,7 +236,6 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen>
                           style: const TextStyle(
                             fontSize: 24,
                             fontWeight: FontWeight.bold,
-                            color: Color(0xFF222B45),
                             letterSpacing: 1.1,
                           ),
                         ),
@@ -244,7 +244,7 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen>
                           selectedLang == 'en'
                               ? "Congratulations! Your procedure recovery is complete. You can now select a new treatment."
                               : "अभिनंदन! तुमची उपचार प्रक्रिया पूर्ण झाली आहे. तुम्ही आता नवीन उपचार निवडू शकता.",
-                          style: const TextStyle(fontSize: 16, color: Color(0xFF6B7280)),
+                          style: TextStyle(fontSize: 16, color: colorScheme.onSurfaceVariant),
                           textAlign: TextAlign.center,
                         ),
                       ],
@@ -258,8 +258,8 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen>
                   child: ElevatedButton.icon(
                     icon: const Icon(Icons.assignment_turned_in_rounded, size: 22),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF0052CC),
-                      foregroundColor: Colors.white,
+                      backgroundColor: colorScheme.primary,
+                      foregroundColor: colorScheme.onPrimary,
                       padding: const EdgeInsets.symmetric(vertical: 18),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                       elevation: 3,
@@ -286,20 +286,20 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen>
       }
 
       return Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: colorScheme.surface,
         appBar: showSpecific
             ? AppBar(
-                backgroundColor: Colors.white,
+                backgroundColor: colorScheme.surface,
                 elevation: 1,
                 leading: IconButton(
-                  icon: const Icon(Icons.arrow_back, color: Colors.blue),
+                  icon: Icon(Icons.arrow_back, color: colorScheme.primary),
                   onPressed: () {
                     setState(() => showSpecific = false);
                   },
                 ),
                 title: Text(
                   selectedLang == 'en' ? "Specific Instructions - Day $currentDay" : "विशिष्ट सूचना - दिवस $currentDay",
-                  style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold),
+                  style: TextStyle(color: colorScheme.primary, fontWeight: FontWeight.bold),
                 ),
                 centerTitle: true,
               )
@@ -318,8 +318,8 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen>
                       alignment: Alignment.centerRight,
                       child: ElevatedButton.icon(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue[100],
-                          foregroundColor: Colors.blue[900],
+                          backgroundColor: colorScheme.primaryContainer,
+                          foregroundColor: colorScheme.onPrimaryContainer,
                         ),
                         icon: const Icon(Icons.language, size: 20),
                         label: Text(selectedLang == 'en' ? 'मराठी' : 'English'),
@@ -333,13 +333,13 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen>
                     if (!showSpecific) ...[
                       Text(
                         "$title (Day $currentDay)",
-                        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                        style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: colorScheme.onSurface),
                       ),
                       const SizedBox(height: 20),
                       // Do's Section with Checklist
                       Container(
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: colorScheme.surfaceContainerLow,
                           border: Border.all(color: Colors.green.shade200, width: 2),
                           borderRadius: BorderRadius.circular(10),
                         ),
@@ -379,13 +379,9 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen>
                                     dense: true,
                                     title: Text(
                                       bracesDos[i][selectedLang]!,
-                                      style: const TextStyle(
-                                        fontSize: 15,
-                                        color: Colors.green,
-                                        fontWeight: FontWeight.w600,
-                                      ),
+                                      style: TextStyle(fontSize: 15, color: Colors.green.shade400, fontWeight: FontWeight.w600),
                                     ),
-                                    activeColor: Colors.green,
+                                    activeColor: Colors.green.shade400,
                                     checkboxShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
                                   ),
                                 ),
@@ -397,7 +393,7 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen>
                       // Don'ts Section (no checklist)
                       Container(
                         decoration: BoxDecoration(
-                          color: const Color(0xFFFFF2F2),
+                          color: colorScheme.errorContainer,
                           border: Border.all(color: Colors.red.shade200, width: 2),
                           borderRadius: BorderRadius.circular(10),
                         ),
@@ -430,16 +426,12 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen>
                                   child: Row(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      const Icon(Icons.close, color: Colors.red, size: 20),
+                                      Icon(Icons.close, color: colorScheme.error, size: 20),
                                       const SizedBox(width: 8),
                                       Expanded(
                                         child: Text(
                                           bracesDonts[i][selectedLang]!,
-                                          style: const TextStyle(
-                                            fontSize: 15,
-                                            color: Colors.red,
-                                            fontWeight: FontWeight.w600,
-                                          ),
+                                          style: TextStyle(fontSize: 15, color: colorScheme.error, fontWeight: FontWeight.w600),
                                         ),
                                       ),
                                     ],
@@ -456,7 +448,7 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen>
                         child: ElevatedButton.icon(
                           icon: const Icon(Icons.menu_book, color: Colors.white),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.amber[700],
+                            backgroundColor: Colors.amber.shade700,
                             foregroundColor: Colors.white,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                             padding: const EdgeInsets.symmetric(vertical: 14),
@@ -477,8 +469,8 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen>
                         width: double.infinity,
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blue[700],
-                            foregroundColor: Colors.white,
+                            backgroundColor: colorScheme.primary,
+                            foregroundColor: colorScheme.onPrimary,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                             padding: const EdgeInsets.symmetric(vertical: 15),
                           ),
@@ -499,7 +491,7 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen>
                         selectedLang == 'en'
                             ? "Specific Instructions (Day $currentDay)"
                             : "विशिष्ट सूचना (दिवस $currentDay)",
-                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: colorScheme.onSurface),
                       ),
                       const SizedBox(height: 12),
                       ...List.generate(
@@ -528,8 +520,8 @@ class _BracesInstructionsScreenState extends State<BracesInstructionsScreen>
                         width: double.infinity,
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blue[700],
-                            foregroundColor: Colors.white,
+                            backgroundColor: colorScheme.primary,
+                            foregroundColor: colorScheme.onPrimary,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                             padding: const EdgeInsets.symmetric(vertical: 15),
                           ),

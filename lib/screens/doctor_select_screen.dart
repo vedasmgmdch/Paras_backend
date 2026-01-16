@@ -35,6 +35,7 @@ class _DoctorSelectScreenState extends State<DoctorSelectScreen> {
   @override
   Widget build(BuildContext context) {
     final canContinue = _selectedDepartment != null && _selectedDoctor != null;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return PopScope(
       canPop: true,
@@ -62,10 +63,10 @@ class _DoctorSelectScreenState extends State<DoctorSelectScreen> {
                             mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              const Text(
+                              Text(
                                 'Please select the department and doctor',
                                 textAlign: TextAlign.center,
-                                style: TextStyle(fontSize: 13, color: Colors.black54),
+                                style: TextStyle(fontSize: 13, color: colorScheme.onSurfaceVariant),
                               ),
                               const SizedBox(height: 14),
                               DropdownButtonFormField<String>(
@@ -125,9 +126,9 @@ class _DoctorSelectScreenState extends State<DoctorSelectScreen> {
                                 ),
                               ),
                               const SizedBox(height: 10),
-                              const Text(
+                              Text(
                                 'Tip: You can search patients on the next screen.',
-                                style: TextStyle(fontSize: 12, color: Colors.black54),
+                                style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
                                 textAlign: TextAlign.center,
                               ),
                             ],

@@ -10,6 +10,51 @@ class AppState extends ChangeNotifier {
   // Reusable date formatter (yyyy-MM-dd) to standardize instruction log dates
   static final DateFormat _ymd = DateFormat('yyyy-MM-dd');
 
+  static const String _prefsThemeModeKey = 'theme_mode_v1';
+
+  ThemeMode _themeMode = ThemeMode.light;
+  ThemeMode get themeMode => _themeMode;
+
+  String _encodeThemeMode(ThemeMode mode) {
+    switch (mode) {
+      case ThemeMode.dark:
+        return 'dark';
+      case ThemeMode.light:
+        return 'light';
+      case ThemeMode.system:
+        return 'system';
+    }
+  }
+
+  ThemeMode _decodeThemeMode(String? value) {
+    switch ((value ?? '').toLowerCase().trim()) {
+      case 'dark':
+        return ThemeMode.dark;
+      case 'system':
+        return ThemeMode.system;
+      case 'light':
+      default:
+        return ThemeMode.light;
+    }
+  }
+
+  Future<void> loadThemeMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final stored = prefs.getString(_prefsThemeModeKey);
+    final next = _decodeThemeMode(stored);
+    if (next == _themeMode) return;
+    _themeMode = next;
+    notifyListeners();
+  }
+
+  Future<void> setThemeMode(ThemeMode mode) async {
+    if (mode == _themeMode) return;
+    _themeMode = mode;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefsThemeModeKey, _encodeThemeMode(mode));
+  }
+
   String _canonicalTreatment(String? value) {
     final raw = (value ?? '').trim();
     if (raw.isEmpty) return '';

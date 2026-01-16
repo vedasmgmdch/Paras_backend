@@ -121,11 +121,7 @@ class _HomeScreenState extends State<HomeScreen> {
     List<Widget> pages = List<Widget>.from(_pages);
     pages[2] = _getInstructionsScreen(context);
     return Scaffold(
-      backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.black),
         actions: [
           IconButton(
             icon: const Icon(Icons.menu),
@@ -154,10 +150,12 @@ class _HomeScreenState extends State<HomeScreen> {
           // Pure Reminders debug entry removed
         ],
       ),
-      body: IndexedStack(
-        index: _selectedIndex,
-        children: pages,
-      ),
+      // NOTE: Avoid laying out all tabs at once.
+      // Some complex pages can trigger framework assertions during semantics flush
+      // even when they are not visible inside an IndexedStack.
+      // Rendering only the selected page keeps the app responsive and isolates
+      // any remaining issues to the tab being viewed.
+      body: pages[_selectedIndex],
       bottomNavigationBar: BottomNavigationBar(
         type: BottomNavigationBarType.fixed,
         currentIndex: _selectedIndex,
@@ -196,6 +194,7 @@ class _NoInstructionsSelected extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 80),
@@ -204,15 +203,15 @@ class _NoInstructionsSelected extends StatelessWidget {
           children: [
             Icon(Icons.menu_book, color: Colors.blue, size: 48),
             const SizedBox(height: 20),
-            const Text(
+            Text(
               "No Instructions Available",
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22, color: Colors.black87),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22, color: colorScheme.onSurface),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 14),
-            const Text(
+            Text(
               "Please select your treatment and subtype using the menu in the top right to view care instructions.",
-              style: TextStyle(fontSize: 16, color: Colors.black54),
+              style: TextStyle(fontSize: 16, color: colorScheme.onSurfaceVariant),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
@@ -225,6 +224,8 @@ class _NoInstructionsSelected extends StatelessWidget {
                 ));
               },
               style: ElevatedButton.styleFrom(
+                minimumSize: const Size(0, 48),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 backgroundColor: Colors.blue,
                 foregroundColor: Colors.white,
                 textStyle: const TextStyle(fontWeight: FontWeight.bold),
@@ -928,6 +929,9 @@ class _HomeMainContentState extends State<HomeMainContent> {
                                     height: 36,
                                     child: ElevatedButton.icon(
                                       style: ElevatedButton.styleFrom(
+                                        minimumSize: const Size(0, 36),
+                                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                        visualDensity: VisualDensity.compact,
                                         backgroundColor: const Color(0xFF2196F3),
                                         foregroundColor: Colors.white,
                                         padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -967,7 +971,7 @@ class _HomeMainContentState extends State<HomeMainContent> {
                               ] else if (_remindersCount == 0) ...[
                                 const Text(
                                   'Set a daily reminder to get a gentle nudge at your preferred time.',
-                                  style: TextStyle(fontSize: 15, color: Colors.black87),
+                                  style: TextStyle(fontSize: 15),
                                 ),
                                 const SizedBox(height: 6),
                                 TextButton(

@@ -8,7 +8,7 @@ import asyncio  # moved here so exception handlers can reference
 import models
 from database import get_db, AsyncSessionLocal
 
-from fastapi import FastAPI, Depends, HTTPException, status, Body
+from fastapi import FastAPI, Depends, HTTPException, status, Body, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 
@@ -237,6 +237,8 @@ async def startup():
                 alter_stmts.append("ALTER TABLE device_tokens ADD COLUMN deactivated_at TIMESTAMP WITHOUT TIME ZONE NULL;")
             if 'deactivated_reason' not in existing_cols:
                 alter_stmts.append("ALTER TABLE device_tokens ADD COLUMN deactivated_reason VARCHAR NULL;")
+            if 'local_reminders_enabled' not in existing_cols:
+                alter_stmts.append("ALTER TABLE device_tokens ADD COLUMN local_reminders_enabled BOOLEAN DEFAULT FALSE NOT NULL;")
             for stmt in alter_stmts:
                 try:
                     await conn.execute(text(stmt))
@@ -257,6 +259,35 @@ async def startup():
                     await conn.execute(text(stmt))
                 except Exception as _e:
                     print(f"[Startup] reminders migration note: {_e}")
+
+            # UserSession table for multi-device login warnings
+            try:
+                await conn.execute(text(
+                    """
+                    CREATE TABLE IF NOT EXISTS user_sessions (
+                      id SERIAL PRIMARY KEY,
+                      patient_id INTEGER NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+                      device_id VARCHAR NOT NULL,
+                      device_name VARCHAR NULL,
+                      created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW() NOT NULL,
+                      last_seen_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW() NOT NULL,
+                      active BOOLEAN DEFAULT TRUE NOT NULL,
+                      CONSTRAINT ux_user_sessions_patient_device UNIQUE (patient_id, device_id)
+                    );
+                    """
+                ))
+                await conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_user_sessions_patient_active ON user_sessions (patient_id, active);"
+                ))
+                await conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_user_sessions_last_seen_at ON user_sessions (last_seen_at);"
+                ))
+                # Enforce at most one active session per patient (Postgres partial unique index)
+                await conn.execute(text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ux_user_sessions_patient_active_true ON user_sessions (patient_id) WHERE active = TRUE;"
+                ))
+            except Exception as sess_mig_e:
+                print(f"[Startup] user_sessions migration note: {sess_mig_e}")
         except Exception as mig_all:
             print(f"[Startup] WARNING push/reminder migration block failed: {mig_all}")
     if os.getenv("SCHEDULER_ENABLED", "1") == "1":
@@ -1332,22 +1363,136 @@ async def signup(patient: schemas.PatientCreate, db: AsyncSession = Depends(get_
     return {"access_token": access_token, "token_type": "bearer"}
 
 @app.post("/login", response_model=schemas.TokenResponse)
-async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(models.Patient).where(models.Patient.username == form_data.username))
+async def login(
+    username: str = Form(...),
+    password: str = Form(...),
+    device_id: Optional[str] = Form(None),
+    device_name: Optional[str] = Form(None),
+    db: AsyncSession = Depends(get_db),
+):
+    normalized = (username or "").strip()
+    result = await db.execute(select(models.Patient).where(models.Patient.username == normalized))
     user = result.scalars().first()
-    if not user or not verify_password(form_data.password, user.password):
+    if not user or not verify_password(password, user.password):
         raise HTTPException(status_code=401, detail="Incorrect username or password")
-    access_token = create_access_token(data={"sub": user.username})
-    return {"access_token": access_token, "token_type": "bearer"}
 
-@app.post("/doctor-login", response_model=schemas.TokenResponse)
-async def doctor_login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(models.Doctor).where(models.Doctor.username == form_data.username))
-    doctor = result.scalars().first()
-    if not doctor or not verify_password(form_data.password, doctor.password):
+    warning: Optional[str] = None
+    # Multi-device warning is best-effort; never block login on session tracking issues.
+    try:
+        did = (device_id or "").strip()
+        if did:
+            now = datetime.utcnow()
+            try:
+                window_min = int(os.getenv("SESSION_ACTIVE_WINDOW_MINUTES", "60"))
+            # Single-device enforcement is best-effort; if session tracking fails we still allow login.
+            window_min = max(1, window_min)
+            cutoff = now - timedelta(minutes=window_min)
+
+            # Is there another device considered active recently?
+            other_q = await db.execute(
+                select(models.UserSession)
+                .where(models.UserSession.patient_id == user.id)
+                .where(models.UserSession.active == True)
+                .where(models.UserSession.device_id != did)
+                .where(models.UserSession.last_seen_at >= cutoff)
+                .order_by(models.UserSession.last_seen_at.desc())
+                    # If there is another active device within the window, block login.
+                    other_recent_q = await db.execute(
+                        select(models.UserSession)
+                        .where(models.UserSession.patient_id == user.id)
+                        .where(models.UserSession.active == True)
+                        .where(models.UserSession.device_id != did)
+                        .where(models.UserSession.last_seen_at >= cutoff)
+                        .order_by(models.UserSession.last_seen_at.desc())
+                        .limit(1)
+                    )
+                    other_recent = other_recent_q.scalars().first()
+                    if other_recent:
+                        raise HTTPException(
+                            status_code=409,
+                            detail="Account is in use on another device. Please log out on that device first.",
+                        )
+
+                    # Cleanup: deactivate any stale active sessions to satisfy the one-active constraint.
+                    stale_q = await db.execute(
+                        select(models.UserSession)
+                        .where(models.UserSession.patient_id == user.id)
+                        .where(models.UserSession.active == True)
+                        .where(models.UserSession.device_id != did)
+                    )
+                    for s in stale_q.scalars().all():
+                        object.__setattr__(s, 'active', False)
+                        db.add(s)
+            me = me_q.scalars().first()
+            if me:
+                object.__setattr__(me, 'last_seen_at', now)
+                object.__setattr__(me, 'active', True)
+                if device_name:
+                    object.__setattr__(me, 'device_name', str(device_name)[:200])
+                db.add(me)
+            else:
+                me = models.UserSession(
+                    patient_id=user.id,
+                    device_id=did,
+                    device_name=(str(device_name)[:200] if device_name else None),
+                    created_at=now,
+                    last_seen_at=now,
+                    active=True,
+                )
+                db.add(me)
+
+            # Deactivate any other sessions to satisfy the partial unique constraint
+            others_q = await db.execute(
+                select(models.UserSession)
+                .where(models.UserSession.patient_id == user.id)
+                .where(models.UserSession.device_id != did)
+                .where(models.UserSession.active == True)
+            )
+    return {"access_token": access_token, "token_type": "bearer", "warning": warning}
+
+                # Preserve explicit login block.
+                raise
+            except Exception as _sess_e:
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
         raise HTTPException(status_code=401, detail="Incorrect username or password")
     access_token = create_access_token(data={"sub": doctor.username})
-    return {"access_token": access_token, "token_type": "bearer"}
+            return {"access_token": access_token, "token_type": "bearer", "warning": None}
+
+
+        @app.post("/session/logout")
+        async def logout_session(
+            device_id: str = Form(...),
+            db: AsyncSession = Depends(get_db),
+            current_user: models.Patient = Depends(get_current_user),
+        ):
+            did = (device_id or "").strip()
+            if not did:
+                raise HTTPException(status_code=422, detail="device_id required")
+            now = datetime.utcnow()
+            try:
+                q = await db.execute(
+                    select(models.UserSession)
+                    .where(models.UserSession.patient_id == current_user.id)
+                    .where(models.UserSession.device_id == did)
+                    .limit(1)
+                )
+                sess = q.scalars().first()
+                if sess:
+                    object.__setattr__(sess, 'active', False)
+                    object.__setattr__(sess, 'last_seen_at', now)
+                    db.add(sess)
+                    await db.commit()
+                return {"ok": True}
+            except Exception as e:
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
+                # Best-effort logout should not break client UX; but still report server failure.
+                raise HTTPException(status_code=500, detail="Failed to logout session")
 
 @app.post("/doctor/master-login", response_model=schemas.TokenResponse)
 async def doctor_master_login(payload: schemas.DoctorMasterLoginRequest, db: AsyncSession = Depends(get_db)):
@@ -2864,12 +3009,23 @@ async def _internal_dispatch_due(
             # Server-only mode: ignore ack/grace decisions, but still honor delivery success/failure.
             # Critically: do NOT advance to next day if nothing was delivered.
             reason = "server_only_send"
-            token_res = await db.execute(
-                select(models.DeviceToken.token)
-                .where(models.DeviceToken.patient_id == getattr(r, 'patient_id'))
-                .where(models.DeviceToken.active == True)
-            )
-            tokens = [row[0] for row in token_res.all()]
+            try:
+                token_res = await db.execute(
+                    select(models.DeviceToken.token)
+                    .where(models.DeviceToken.patient_id == getattr(r, 'patient_id'))
+                    .where(models.DeviceToken.active == True)
+                    # Avoid duplicate reminders if the client schedules locally.
+                    .where(models.DeviceToken.local_reminders_enabled == False)
+                )
+                tokens = [row[0] for row in token_res.all()]
+            except Exception:
+                # Backwards-compatible: if migration not applied yet, don't filter.
+                token_res = await db.execute(
+                    select(models.DeviceToken.token)
+                    .where(models.DeviceToken.patient_id == getattr(r, 'patient_id'))
+                    .where(models.DeviceToken.active == True)
+                )
+                tokens = [row[0] for row in token_res.all()]
             tokens_count = len(tokens)
             if tokens_count == 0:
                 # No active token to deliver to.
@@ -3085,8 +3241,23 @@ async def _internal_dispatch_due(
                         pass
                 continue
         # Send
-        token_res = await db.execute(select(models.DeviceToken.token).where(models.DeviceToken.patient_id == getattr(r, 'patient_id')).where(models.DeviceToken.active == True))
-        tokens = [row[0] for row in token_res.all()]
+        try:
+            token_res = await db.execute(
+                select(models.DeviceToken.token)
+                .where(models.DeviceToken.patient_id == getattr(r, 'patient_id'))
+                .where(models.DeviceToken.active == True)
+                # Avoid duplicate reminders if the client schedules locally.
+                .where(models.DeviceToken.local_reminders_enabled == False)
+            )
+            tokens = [row[0] for row in token_res.all()]
+        except Exception:
+            # Backwards-compatible: if migration not applied yet, don't filter.
+            token_res = await db.execute(
+                select(models.DeviceToken.token)
+                .where(models.DeviceToken.patient_id == getattr(r, 'patient_id'))
+                .where(models.DeviceToken.active == True)
+            )
+            tokens = [row[0] for row in token_res.all()]
         tokens_count = len(tokens)
         if tokens_count == 0:
             # No device tokens: treat as terminal for today; move to next day to avoid tight retries.
@@ -3350,6 +3521,10 @@ async def register_device(
     if existing:
         object.__setattr__(existing, 'patient_id', current_user.id)
         object.__setattr__(existing, 'platform', payload.platform)
+        try:
+            object.__setattr__(existing, 'local_reminders_enabled', bool(getattr(payload, 'local_reminders_enabled', False)))
+        except Exception:
+            pass
         # Reactivate if previously deactivated
         if hasattr(existing, 'active'):
             object.__setattr__(existing, 'active', True)
@@ -3369,7 +3544,12 @@ async def register_device(
                 await db.delete(d)
             await db.commit()
         return existing
-    row = models.DeviceToken(patient_id=current_user.id, platform=payload.platform, token=payload.token)
+    row = models.DeviceToken(
+        patient_id=current_user.id,
+        platform=payload.platform,
+        token=payload.token,
+        local_reminders_enabled=bool(getattr(payload, 'local_reminders_enabled', False)),
+    )
     db.add(row)
     await db.commit()
     await db.refresh(row)

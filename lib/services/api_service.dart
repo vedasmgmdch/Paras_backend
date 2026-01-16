@@ -147,6 +147,32 @@ class ApiService {
   }
 
   // --------------------------
+  // ✅ Best-effort: logout THIS device session
+  //
+  // Call this BEFORE clearing auth token so the backend can mark the
+  // current device as inactive, enabling login from another device.
+  // --------------------------
+  static Future<bool> logoutCurrentDeviceSession() async {
+    try {
+      final headers = await getAuthHeaders();
+      final deviceId = await getOrCreateDeviceId();
+      final res = await http
+          .post(
+            Uri.parse('$baseUrl/session/logout'),
+            headers: {'Content-Type': 'application/x-www-form-urlencoded', if (headers['Authorization'] != null) 'Authorization': headers['Authorization']!},
+            body: {'device_id': deviceId},
+          )
+          .timeout(_slowEndpointTimeout);
+      if (res.statusCode == 200) return true;
+      print('logoutCurrentDeviceSession failed: ${res.statusCode} -> ${res.body}');
+      return false;
+    } catch (e) {
+      print('logoutCurrentDeviceSession error: $e');
+      return false;
+    }
+  }
+
+  // --------------------------
   // ✅ Send test push (optional)
   // --------------------------
   static Future<bool> sendTestPush({required String title, required String body}) async {

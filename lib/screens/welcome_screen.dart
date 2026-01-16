@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../app_state.dart';
 import 'category_screen.dart';
 import 'forgot_password_screen.dart';
@@ -22,8 +23,7 @@ class WelcomeScreen extends StatefulWidget {
     String dob,
     String gender,
     VoidCallback switchToLogin,
-  )?
-  onSignUp;
+  )? onSignUp;
 
   final Future<String?> Function(BuildContext context, String username, String password)? onLogin;
 
@@ -143,9 +143,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
 
     if (userDetails != null) {
       appState.setUserDetails(
-        patientId: userDetails['id'] is int
-            ? userDetails['id']
-            : int.tryParse((userDetails['id'] ?? '').toString()),
+        patientId: userDetails['id'] is int ? userDetails['id'] : int.tryParse((userDetails['id'] ?? '').toString()),
         fullName: userDetails['name'],
         dob: DateTime.tryParse((userDetails['dob'] ?? '').toString()) ?? DateTime.now(),
         gender: userDetails['gender'],
@@ -157,8 +155,8 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       appState.setDepartment(userDetails['department']);
       appState.setDoctor(userDetails['doctor']);
       appState.setTreatment(userDetails['treatment'], subtype: userDetails['treatment_subtype']);
-        appState.procedureDate = DateTime.tryParse((userDetails['procedure_date'] ?? '').toString());
-        appState.procedureTime = _parseTimeOfDay(userDetails['procedure_time']);
+      appState.procedureDate = DateTime.tryParse((userDetails['procedure_date'] ?? '').toString());
+      appState.procedureTime = _parseTimeOfDay(userDetails['procedure_time']);
       appState.procedureCompleted = userDetails['procedure_completed'] == true;
 
       // Hydrate locally persisted data for this user so past days don't appear as "Not Followed"
@@ -362,6 +360,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   }
 
   Widget _buildDobConnectedFields() {
+    final colorScheme = Theme.of(context).colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -369,9 +368,9 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         const SizedBox(height: 8),
         Container(
           decoration: BoxDecoration(
-            border: Border.all(color: Colors.grey.shade400),
+            border: Border.all(color: colorScheme.outlineVariant),
             borderRadius: BorderRadius.circular(8),
-            color: Colors.white,
+            color: colorScheme.surfaceContainerHighest,
           ),
           child: Row(
             children: [
@@ -386,12 +385,12 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                   keyboardType: TextInputType.number,
                   textAlign: TextAlign.center,
                   maxLength: 2,
-                  style: const TextStyle(fontSize: 16),
+                  style: TextStyle(fontSize: 16, color: colorScheme.onSurface),
                   onChanged: (_) => setState(() {}),
                   buildCounter: (_, {required currentLength, maxLength, required isFocused}) => null,
                 ),
               ),
-              Container(width: 1, height: 32, color: Colors.grey.shade400),
+              Container(width: 1, height: 32, color: colorScheme.outlineVariant),
               Expanded(
                 child: TextFormField(
                   controller: _dobMonthController,
@@ -403,12 +402,12 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                   keyboardType: TextInputType.number,
                   textAlign: TextAlign.center,
                   maxLength: 2,
-                  style: const TextStyle(fontSize: 16),
+                  style: TextStyle(fontSize: 16, color: colorScheme.onSurface),
                   onChanged: (_) => setState(() {}),
                   buildCounter: (_, {required currentLength, maxLength, required isFocused}) => null,
                 ),
               ),
-              Container(width: 1, height: 32, color: Colors.grey.shade400),
+              Container(width: 1, height: 32, color: colorScheme.outlineVariant),
               Expanded(
                 child: TextFormField(
                   controller: _dobYearController,
@@ -420,7 +419,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                   keyboardType: TextInputType.number,
                   textAlign: TextAlign.center,
                   maxLength: 4,
-                  style: const TextStyle(fontSize: 16),
+                  style: TextStyle(fontSize: 16, color: colorScheme.onSurface),
                   onChanged: (_) => setState(() {}),
                   buildCounter: (_, {required currentLength, maxLength, required isFocused}) => null,
                 ),
@@ -441,68 +440,78 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final colorScheme = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFF),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(
         child: Center(
           child: Padding(
             padding: const EdgeInsets.all(32.0),
             child: Column(
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Image.asset(
-                      'assets/LOGO2.jpg',
-                      width: 64,
-                      height: 64,
-                      fit: BoxFit.contain,
-                      errorBuilder: (ctx, err, stack) => Container(
-                        width: 64,
-                        height: 64,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade200,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.grey.shade400),
-                        ),
-                        child: const Icon(Icons.broken_image, color: Colors.grey),
-                      ),
-                    ),
-                    Image.asset(
-                      'assets/LOGO1.jpg',
-                      width: 64,
-                      height: 64,
-                      fit: BoxFit.contain,
-                      errorBuilder: (ctx, err, stack) => Container(
-                        width: 64,
-                        height: 64,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade200,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.grey.shade400),
-                        ),
-                        child: const Icon(Icons.broken_image, color: Colors.grey),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                const Text(
-                  "Welcome to Post Dental Guide!",
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 24),
                 Expanded(
                   child: SingleChildScrollView(
-                    child: _isLoading
-                        ? const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 32.0),
-                            child: Center(child: CircularProgressIndicator()),
-                          )
-                        : (_showSignUp ? _buildSignUpForm() : _buildLoginForm(context)),
+                    keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                    child: Padding(
+                      padding: EdgeInsets.only(bottom: _showSignUp ? 72 : 24),
+                      child: Column(
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Image.asset(
+                                'assets/LOGO2.jpg',
+                                width: 64,
+                                height: 64,
+                                fit: BoxFit.contain,
+                                errorBuilder: (ctx, err, stack) => Container(
+                                  width: 64,
+                                  height: 64,
+                                  alignment: Alignment.center,
+                                  decoration: BoxDecoration(
+                                    color: colorScheme.surfaceContainerHighest,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: colorScheme.outlineVariant),
+                                  ),
+                                  child: Icon(Icons.broken_image, color: colorScheme.onSurfaceVariant),
+                                ),
+                              ),
+                              Image.asset(
+                                'assets/LOGO1.jpg',
+                                width: 64,
+                                height: 64,
+                                fit: BoxFit.contain,
+                                errorBuilder: (ctx, err, stack) => Container(
+                                  width: 64,
+                                  height: 64,
+                                  alignment: Alignment.center,
+                                  decoration: BoxDecoration(
+                                    color: colorScheme.surfaceContainerHighest,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: colorScheme.outlineVariant),
+                                  ),
+                                  child: Icon(Icons.broken_image, color: colorScheme.onSurfaceVariant),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 24),
+                          const Text(
+                            "Welcome to Post Dental Guide!",
+                            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 24),
+                          if (_isLoading)
+                            const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 32.0),
+                              child: Center(child: CircularProgressIndicator()),
+                            )
+                          else
+                            (_showSignUp ? _buildSignUpForm() : _buildLoginForm(context)),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
                 if (_showSignUp) ...[
@@ -573,20 +582,22 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
             onSaved: (_) {},
           ),
           const SizedBox(height: 8),
-          const Text.rich(
-            TextSpan(
-              children: [
+          Builder(
+            builder: (context) {
+              final cs = Theme.of(context).colorScheme;
+              return Text.rich(
                 TextSpan(
-                  text: 'Note:- ',
-                  style: TextStyle(fontSize: 12, color: Colors.red),
+                  children: [
+                    TextSpan(text: 'Note:- ', style: TextStyle(fontSize: 12, color: cs.error)),
+                    TextSpan(
+                      text: "Please remember your username and password — you'll need them to log in.",
+                      style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+                    ),
+                  ],
                 ),
-                TextSpan(
-                  text: "Please remember your username and password — you'll need them to log in.",
-                  style: TextStyle(fontSize: 12, color: Colors.black54),
-                ),
-              ],
-            ),
-            textAlign: TextAlign.center,
+                textAlign: TextAlign.center,
+              );
+            },
           ),
           const SizedBox(height: 16),
           TextFormField(
@@ -643,22 +654,42 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                     content: SingleChildScrollView(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
-                          Text(
+                        children: [
+                          const Text(
                             "Your privacy is important to us. We comply with the Health Insurance Portability and Accountability Act (HIPAA), which requires us to maintain the privacy and security of your health information.",
                           ),
-                          SizedBox(height: 12),
-                          Text("• All health information you provide is encrypted and securely stored."),
-                          SizedBox(height: 8),
-                          Text(
+                          const SizedBox(height: 12),
+                          const Text("• All health information you provide is encrypted and securely stored."),
+                          const SizedBox(height: 8),
+                          const Text(
                             "• We will not share your personal health information with anyone except as required by law or as necessary for your care.",
                           ),
-                          SizedBox(height: 8),
-                          Text(
+                          const SizedBox(height: 8),
+                          const Text(
                             "• You have the right to access, amend, and receive an accounting of disclosures of your health information.",
                           ),
-                          SizedBox(height: 8),
-                          Text("• For more details, please review our Privacy Policy."),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              const Text('• For more info: '),
+                              InkWell(
+                                onTap: () async {
+                                  final uri = Uri.parse(
+                                    'https://www.hhs.gov/hipaa/for-professionals/index.html',
+                                  );
+                                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                },
+                                child: Text(
+                                  'https://www.hhs.gov/hipaa/for-professionals/index.html',
+                                  style: TextStyle(
+                                    color: Theme.of(context).colorScheme.primary,
+                                    decoration: TextDecoration.underline,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ],
                       ),
                     ),
@@ -668,14 +699,14 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
               },
               child: Row(
                 children: [
-                  Icon(Icons.info_outline, color: Colors.blue[800], size: 20),
+                  Icon(Icons.info_outline, color: Theme.of(context).colorScheme.primary, size: 20),
                   const SizedBox(width: 6),
-                  const Flexible(
+                  Flexible(
                     child: Text(
                       'I agree to the HIPAA Disclaimer',
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        color: Colors.blue,
+                        color: Theme.of(context).colorScheme.primary,
                         fontSize: 14,
                         decoration: TextDecoration.underline,
                       ),
@@ -688,9 +719,9 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
             contentPadding: EdgeInsets.zero,
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'By signing up, you agree your data will be used in compliance with HIPAA and our Privacy Policy.',
-            style: TextStyle(fontSize: 12, color: Colors.black54),
+            style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 20),
@@ -732,9 +763,9 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                 onPressed: () {
                   Navigator.push(context, MaterialPageRoute(builder: (context) => const ForgotPasswordScreen()));
                 },
-                child: const Text(
+                child: Text(
                   "Forgot Password?",
-                  style: TextStyle(color: Color(0xFF6C63FF), fontWeight: FontWeight.w500),
+                  style: TextStyle(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.w500),
                 ),
               ),
             ),

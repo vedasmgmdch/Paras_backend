@@ -774,9 +774,9 @@ class _TreatmentScreenMainState extends State<TreatmentScreenMain> {
 
     // --- Main selection grid, overflow-free ---
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F6FA),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).colorScheme.surface,
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.blue),
@@ -787,11 +787,11 @@ class _TreatmentScreenMainState extends State<TreatmentScreenMain> {
             children: [
               TextSpan(
                 text: "Hi ${widget.userName}",
-                style: const TextStyle(color: Colors.black, fontSize: 22, fontWeight: FontWeight.w400),
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 22, fontWeight: FontWeight.w400),
               ),
               const TextSpan(
                 text: ", ",
-                style: TextStyle(color: Colors.black, fontSize: 22),
+                style: TextStyle(fontSize: 22),
               ),
               const WidgetSpan(
                 child: Icon(Icons.waving_hand, color: Colors.amber, size: 22),
@@ -800,7 +800,7 @@ class _TreatmentScreenMainState extends State<TreatmentScreenMain> {
           ),
         ),
         centerTitle: false,
-        iconTheme: const IconThemeData(color: Colors.black),
+        iconTheme: IconThemeData(color: Theme.of(context).colorScheme.onSurface),
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {
@@ -814,21 +814,21 @@ class _TreatmentScreenMainState extends State<TreatmentScreenMain> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     "Please select your area of need",
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 22,
-                      color: Color(0xFF2B2B2B),
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                   const SizedBox(height: 18),
-                  const Text(
+                  Text(
                     "I have/had ...",
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 18,
-                      color: Color(0xFF2B2B2B),
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                   const SizedBox(height: 26),

@@ -86,9 +86,8 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
     // - the log date is within the first 14 recovery days.
     final appState = Provider.of<AppState>(context, listen: false);
     final procedureDate = appState.procedureDate;
-    final DateTime? windowStart = procedureDate != null
-        ? DateTime(procedureDate.year, procedureDate.month, procedureDate.day)
-        : null;
+    final DateTime? windowStart =
+        procedureDate != null ? DateTime(procedureDate.year, procedureDate.month, procedureDate.day) : null;
     final DateTime? windowEnd = windowStart?.add(const Duration(days: 13));
 
     bool _isWithinRecoveryWindow(String dateStr) {
@@ -757,6 +756,7 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     final appState = Provider.of<AppState>(context);
     final procedureDate = appState.procedureDate ?? appState.effectiveLocalNow();
     final nowLocal = appState.effectiveLocalNow();
@@ -771,7 +771,6 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
     final int progressPercent = ((dayOfRecovery / totalRecoveryDays) * 100).clamp(0, 100).toInt();
 
     return Scaffold(
-      backgroundColor: Colors.white,
       body: SafeArea(
         child: SingleChildScrollView(
           child: Center(
@@ -786,7 +785,7 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
                       margin: const EdgeInsets.only(bottom: 18),
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF2196F3),
+                        color: colorScheme.primary,
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Column(
@@ -828,7 +827,7 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
                       padding: const EdgeInsets.all(22),
                       width: double.infinity,
                       decoration: BoxDecoration(
-                        color: const Color(0xFF2196F3),
+                        color: colorScheme.primary,
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Column(

@@ -220,8 +220,7 @@ class PushService {
         return;
       } else {
         if (kDebugMode) {
-          print(
-              'FCM foreground message received (suppressed): title="${title ?? ''}" body="${body ?? ''}" data=${message.data}');
+          print('FCM foreground message received (suppressed): title="$title" body="$body" data=${message.data}');
         }
       }
     });

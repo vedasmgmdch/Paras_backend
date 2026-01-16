@@ -211,6 +211,11 @@ class _CategoryScreenState extends State<CategoryScreen> {
                 await ApiService.unregisterAllDeviceTokens();
               } catch (_) {}
 
+              // Mark this device session inactive (enables login on another device).
+              try {
+                await ApiService.logoutCurrentDeviceSession();
+              } catch (_) {}
+
               // Best-effort local cleanup.
               try {
                 await NotificationService.cancelAllPending();

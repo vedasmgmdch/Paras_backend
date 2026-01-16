@@ -7,8 +7,8 @@ class UserScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: Colors.white,
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
@@ -35,11 +35,11 @@ class UserScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 'Choose how you want to continue',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: Colors.black54,
+                  color: colorScheme.onSurfaceVariant,
                   fontSize: 15,
                 ),
               ),
@@ -64,22 +64,22 @@ class UserScreen extends StatelessWidget {
                 onTap: () => Navigator.of(context).pushReplacementNamed('/patient'),
               ),
               const SizedBox(height: 40),
-              const Column(
+              Column(
                 children: [
                   Text(
                     'ToothCareGuide',
                     style: TextStyle(
                       fontWeight: FontWeight.w600,
                       letterSpacing: 0.6,
-                      color: Colors.black54,
+                      color: colorScheme.onSurfaceVariant,
                     ),
                   ),
-                  SizedBox(height: 6),
+                  const SizedBox(height: 6),
                   Text(
                     'Better smiles. Better care.',
                     style: TextStyle(
                       fontSize: 12,
-                      color: Colors.black38,
+                      color: colorScheme.onSurfaceVariant.withValues(alpha: 0.80),
                     ),
                   ),
                 ],
@@ -113,6 +113,7 @@ class _TopLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return ClipRRect(
       borderRadius: BorderRadius.circular(12),
       child: Image.asset(
@@ -124,9 +125,9 @@ class _TopLogo extends StatelessWidget {
           return Container(
             width: 58,
             height: 58,
-            color: Colors.black12,
+            color: colorScheme.surfaceContainerHighest,
             alignment: Alignment.center,
-            child: const Icon(Icons.image_not_supported_outlined, color: Colors.black45),
+            child: Icon(Icons.image_not_supported_outlined, color: colorScheme.onSurfaceVariant),
           );
         },
       ),
@@ -152,6 +153,7 @@ class _PortalCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Card(
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
@@ -186,7 +188,7 @@ class _PortalCard extends StatelessWidget {
                       const SizedBox(height: 6),
                       Text(
                         description,
-                        style: const TextStyle(fontSize: 14, color: Colors.black54, height: 1.3),
+                        style: TextStyle(fontSize: 14, color: colorScheme.onSurfaceVariant, height: 1.3),
                       ),
                     ],
                   ),

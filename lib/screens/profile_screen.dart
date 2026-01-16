@@ -36,6 +36,11 @@ class ProfileScreen extends StatelessWidget {
       await ApiService.unregisterAllDeviceTokens();
     } catch (_) {}
 
+    // Mark this device session inactive (enables login on another device).
+    try {
+      await ApiService.logoutCurrentDeviceSession();
+    } catch (_) {}
+
     // Best-effort local cleanup.
     try {
       await NotificationService.cancelAllPending();
@@ -56,6 +61,7 @@ class ProfileScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     final appState = Provider.of<AppState>(context);
     final patientId = appState.patientId != null ? "#${appState.patientId}" : "Not specified";
     final fullName = appState.fullName ?? "Not specified";
@@ -82,7 +88,6 @@ class ProfileScreen extends StatelessWidget {
     final checks = appState.getChecklistForDate(today);
 
     return Scaffold(
-      backgroundColor: Colors.white,
       body: SafeArea(
         child: SingleChildScrollView(
           child: Center(
@@ -120,24 +125,84 @@ class ProfileScreen extends StatelessWidget {
                       padding: const EdgeInsets.all(22),
                       width: double.infinity,
                       decoration: BoxDecoration(
-                        color: const Color(0xFF2196F3),
+                        color: colorScheme.primary,
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
+                        children: [
                           Text(
                             'Patient Profile',
-                            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                              color: colorScheme.onPrimary,
+                            ),
                           ),
-                          SizedBox(height: 6),
+                          const SizedBox(height: 6),
                           Text(
                             "Your recovery information",
-                            style: TextStyle(fontSize: 15, color: Colors.white),
+                            style: TextStyle(fontSize: 15, color: colorScheme.onPrimary.withValues(alpha: 0.92)),
                           ),
                         ],
                       ),
                     ),
+
+                    Card(
+                      margin: const EdgeInsets.only(bottom: 20),
+                      elevation: 2,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      child: Padding(
+                        padding: const EdgeInsets.all(18.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(Icons.palette_outlined, color: colorScheme.primary),
+                                const SizedBox(width: 8),
+                                const Text(
+                                  'Appearance',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            SegmentedButton<ThemeMode>(
+                              showSelectedIcon: false,
+                              segments: const <ButtonSegment<ThemeMode>>[
+                                ButtonSegment<ThemeMode>(
+                                  value: ThemeMode.system,
+                                  icon: Icon(Icons.settings_suggest_outlined),
+                                  label: Text('System'),
+                                ),
+                                ButtonSegment<ThemeMode>(
+                                  value: ThemeMode.light,
+                                  icon: Icon(Icons.light_mode_outlined),
+                                  label: Text('Light'),
+                                ),
+                                ButtonSegment<ThemeMode>(
+                                  value: ThemeMode.dark,
+                                  icon: Icon(Icons.dark_mode_outlined),
+                                  label: Text('Dark'),
+                                ),
+                              ],
+                              selected: <ThemeMode>{appState.themeMode},
+                              onSelectionChanged: (selection) {
+                                final next = selection.isEmpty ? ThemeMode.system : selection.first;
+                                appState.setThemeMode(next);
+                              },
+                            ),
+                            const SizedBox(height: 10),
+                            Text(
+                              'Choose how the app looks on your device.',
+                              style: TextStyle(color: colorScheme.onSurfaceVariant),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
                     // Personal Information Card
                     Card(
                       margin: const EdgeInsets.only(bottom: 20),
@@ -152,15 +217,17 @@ class ProfileScreen extends StatelessWidget {
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Row(
-                                  children: const [
-                                    Icon(Icons.person_outline, color: Color(0xFF2196F3)),
-                                    SizedBox(width: 8),
-                                    Text('Personal Information',
-                                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
+                                  children: [
+                                    Icon(Icons.person_outline, color: colorScheme.primary),
+                                    const SizedBox(width: 8),
+                                    const Text(
+                                      'Personal Information',
+                                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
+                                    ),
                                   ],
                                 ),
                                 IconButton(
-                                  icon: const Icon(Icons.edit, color: Colors.blue),
+                                  icon: Icon(Icons.edit, color: colorScheme.primary),
                                   onPressed: () {
                                     _showEditBottomSheet(context, appState);
                                   },
@@ -168,40 +235,57 @@ class ProfileScreen extends StatelessWidget {
                               ],
                             ),
                             const SizedBox(height: 10),
-                            const Icon(Icons.account_circle, size: 54, color: Colors.blueGrey),
+                            Icon(Icons.account_circle, size: 54, color: colorScheme.primary.withValues(alpha: 0.55)),
                             const SizedBox(height: 8),
                             Text(fullName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 22)),
-                            Text('Patient ID: $patientId', style: const TextStyle(color: Colors.grey, fontSize: 15)),
+                            Text(
+                              'Patient ID: $patientId',
+                              style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 15),
+                            ),
                             const SizedBox(height: 16),
-                            _infoTile(Icons.badge, 'Full Name', fullName, Colors.blue[50]!),
-                            _infoTile(Icons.cake, 'Date of Birth', dob, Colors.blue[50]!),
-                            _infoTile(Icons.person, 'Gender', gender, Colors.blue[50]!),
-                            _infoTile(Icons.account_circle, 'Username', username, Colors.blue[50]!),
-                            _infoTile(Icons.phone, 'Phone', phone, Colors.blue[50]!),
-                            _infoTile(Icons.email, 'Email', email, Colors.blue[50]!, isEmail: true),
+                            _infoTile(context, Icons.badge, 'Full Name', fullName,
+                                colorScheme.primaryContainer.withValues(alpha: 0.55)),
+                            _infoTile(context, Icons.cake, 'Date of Birth', dob,
+                                colorScheme.primaryContainer.withValues(alpha: 0.55)),
+                            _infoTile(context, Icons.person, 'Gender', gender,
+                                colorScheme.primaryContainer.withValues(alpha: 0.55)),
+                            _infoTile(context, Icons.account_circle, 'Username', username,
+                                colorScheme.primaryContainer.withValues(alpha: 0.55)),
+                            _infoTile(context, Icons.phone, 'Phone', phone,
+                                colorScheme.primaryContainer.withValues(alpha: 0.55)),
+                            _infoTile(
+                              context,
+                              Icons.email,
+                              'Email',
+                              email,
+                              colorScheme.secondaryContainer.withValues(alpha: 0.55),
+                              isEmail: true,
+                            ),
                             const SizedBox(height: 16),
                             _infoTile(
+                              context,
                               Icons.calendar_today,
                               'Procedure Date',
                               procedureDate != null
                                   ? "${procedureDate.day}/${procedureDate.month}/${procedureDate.year}"
                                   : "-",
-                              const Color(0xFFE8F0FE),
+                              colorScheme.secondaryContainer.withValues(alpha: 0.55),
                             ),
                             _infoTile(
+                              context,
                               Icons.bar_chart,
                               'Recovery Day',
                               "Day $recoveryDay",
-                              const Color(0xFFFFF6E5),
+                              colorScheme.tertiaryContainer.withValues(alpha: 0.55),
                             ),
                           ],
                         ),
                       ),
                     ),
                     // Emergency Contact
-                    _buildEmergencyContact(),
+                    _buildEmergencyContact(context),
                     // Today's Checklist
-                    _buildChecklist(dosList, checks),
+                    _buildChecklist(context, dosList, checks),
                     // Quick Actions
                     _buildQuickActions(context),
                     const SizedBox(height: 24),
@@ -326,13 +410,21 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  static Widget _infoTile(IconData icon, String label, String value, Color color, {bool isEmail = false}) {
+  static Widget _infoTile(
+    BuildContext context,
+    IconData icon,
+    String label,
+    String value,
+    Color backgroundColor, {
+    bool isEmail = false,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(10)),
+      decoration: BoxDecoration(color: backgroundColor, borderRadius: BorderRadius.circular(10)),
       child: KeyValueRow(
-        leadingIcon: Icon(icon, color: Colors.blueGrey[700], size: 22),
+        leadingIcon: Icon(icon, color: colorScheme.onSurfaceVariant, size: 22),
         label: label,
         value: value,
         crossAxisAlignment: isEmail ? CrossAxisAlignment.start : CrossAxisAlignment.center,
@@ -340,7 +432,8 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  static Widget _buildEmergencyContact() {
+  static Widget _buildEmergencyContact(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Card(
       margin: const EdgeInsets.only(bottom: 20),
       elevation: 2,
@@ -351,10 +444,13 @@ class ProfileScreen extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-              children: const [
-                Icon(Icons.local_phone, color: Colors.redAccent),
-                SizedBox(width: 8),
-                Text("Emergency Contact", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
+              children: [
+                Icon(Icons.local_phone, color: colorScheme.error),
+                const SizedBox(width: 8),
+                const Text(
+                  "Emergency Contact",
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
+                ),
               ],
             ),
             const SizedBox(height: 12),
@@ -362,30 +458,42 @@ class ProfileScreen extends StatelessWidget {
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: const Color(0xFFFFE6E6),
+                color: colorScheme.errorContainer,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text("Dental Office",
-                      style: TextStyle(fontWeight: FontWeight.bold, color: Colors.redAccent, fontSize: 16)),
+                  Text(
+                    "Dental Office",
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: colorScheme.onErrorContainer,
+                      fontSize: 16,
+                    ),
+                  ),
                   const SizedBox(height: 4),
                   Row(
-                    children: const [
-                      Icon(Icons.phone, size: 18, color: Colors.redAccent),
-                      SizedBox(width: 6),
+                    children: [
+                      Icon(Icons.phone, size: 18, color: colorScheme.onErrorContainer),
+                      const SizedBox(width: 6),
                       // Not const because of TextStyle
-                      Text("022-27433404 , 022-27437992", style: TextStyle(fontSize: 15)),
+                      Text(
+                        "022-27433404 , 022-27437992",
+                        style: TextStyle(fontSize: 15, color: colorScheme.onErrorContainer),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 4),
                   Row(
-                    children: const [
-                      Icon(Icons.email, size: 18, color: Colors.redAccent),
-                      SizedBox(width: 6),
+                    children: [
+                      Icon(Icons.email, size: 18, color: colorScheme.onErrorContainer),
+                      const SizedBox(width: 6),
                       // Not const because of TextStyle
-                      Text("mgmmcnb@gmail.com", style: TextStyle(fontSize: 15)),
+                      Text(
+                        "mgmmcnb@gmail.com",
+                        style: TextStyle(fontSize: 15, color: colorScheme.onErrorContainer),
+                      ),
                     ],
                   ),
                 ],
@@ -410,7 +518,8 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildChecklist(List<String> dosList, List<bool> checks) {
+  Widget _buildChecklist(BuildContext context, List<String> dosList, List<bool> checks) {
+    final colorScheme = Theme.of(context).colorScheme;
     // Compute completion status inside the function
     final allCompleted = checks.isNotEmpty && checks.every((c) => c);
 
@@ -433,7 +542,7 @@ class ProfileScreen extends StatelessWidget {
                   children: [
                     Icon(
                       checked ? Icons.check_box : Icons.check_box_outline_blank,
-                      color: checked ? Colors.green : Colors.grey,
+                      color: checked ? colorScheme.primary : colorScheme.outline,
                     ),
                     const SizedBox(width: 8),
                     Expanded(
@@ -453,7 +562,7 @@ class ProfileScreen extends StatelessWidget {
                 margin: const EdgeInsets.only(top: 4),
                 padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFDEDED),
+                  color: colorScheme.errorContainer,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Row(
@@ -461,15 +570,15 @@ class ProfileScreen extends StatelessWidget {
                     // Red exclamation icon
                     CircleAvatar(
                       radius: 16,
-                      backgroundColor: Colors.red,
-                      child: const Icon(Icons.error_outline, color: Colors.white, size: 20),
+                      backgroundColor: colorScheme.error,
+                      child: Icon(Icons.error_outline, color: colorScheme.onError, size: 20),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
                         "Please Complete Your Today's Checklist By Clicking On View Care Instructions, If Not Completed.",
                         style: TextStyle(
-                          color: Colors.red[800],
+                          color: colorScheme.onErrorContainer,
                           fontWeight: FontWeight.w600,
                           fontSize: 15,
                         ),
@@ -485,6 +594,7 @@ class ProfileScreen extends StatelessWidget {
   }
 
   Widget _buildQuickActions(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Card(
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -499,8 +609,8 @@ class ProfileScreen extends StatelessWidget {
               width: double.infinity,
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.amber[700],
-                  foregroundColor: Colors.white,
+                  backgroundColor: colorScheme.tertiary,
+                  foregroundColor: colorScheme.onTertiary,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
@@ -521,8 +631,8 @@ class ProfileScreen extends StatelessWidget {
               width: double.infinity,
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green[600],
-                  foregroundColor: Colors.white,
+                  backgroundColor: colorScheme.secondary,
+                  foregroundColor: colorScheme.onSecondary,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),

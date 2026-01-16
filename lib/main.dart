@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/rendering.dart';
 import 'dart:async';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -16,6 +18,7 @@ import 'screens/user_screen.dart';
 import 'screens/doctor_login_screen.dart';
 import 'screens/doctors_patients_list_screen.dart';
 import 'screens/doctor_select_screen.dart';
+import 'theme/app_theme.dart';
 // ignore_for_file: avoid_print
 // Firebase messaging handled centrally in PushService.
 // import 'package:firebase_messaging/firebase_messaging.dart';
@@ -23,6 +26,14 @@ import 'screens/doctor_select_screen.dart';
 
 // Add RouteObserver for navigation events (must be after all imports)
 final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<void>>();
+
+// Debug-only workaround switch for a recurring framework assertion:
+// '!semantics.parentDataDirty'. When this triggers, Flutter can spam the
+// scheduler error and effectively freeze the UI in debug.
+//
+// This does NOT affect release/profile builds.
+const bool _kDebugDisableSemanticsWorkaround = true;
+bool _didLogSemanticsParentDataDirty = false;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -32,7 +43,23 @@ void main() async {
 
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.presentError(details);
-    print('[FlutterError] ${details.exceptionAsString()}');
+    final message = details.exceptionAsString();
+    print('[FlutterError] $message');
+    if (!_didLogSemanticsParentDataDirty && message.contains('!semantics.parentDataDirty')) {
+      _didLogSemanticsParentDataDirty = true;
+      print('[Diag] Detected semantics parentDataDirty assertion.');
+      print('[Diag] Applying debug-only semantics suppression via MaterialApp.builder: '
+          '${kDebugMode && _kDebugDisableSemanticsWorkaround}');
+      try {
+        debugDumpApp();
+      } catch (_) {}
+      try {
+        debugDumpRenderTree();
+      } catch (_) {}
+      try {
+        debugDumpSemanticsTree();
+      } catch (_) {}
+    }
     if (details.stack != null) {
       print(details.stack);
     }
@@ -69,6 +96,9 @@ Future<void> _postStartupInit(AppState appState) async {
   // Let the first frame render before doing heavy startup work.
   await Future<void>.delayed(Duration.zero);
   try {
+    // Apply persisted theme mode early in startup.
+    await appState.loadThemeMode();
+
     // Server-only reminders: rely on backend pushes.
     NotificationService.serverOnlyMode = true;
     // AlarmManager initialization removed: we rely on plugin pre-scheduled daily notifications.
@@ -150,20 +180,33 @@ class ToothCareGuideApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final themeMode = context.watch<AppState>().themeMode;
+    const transitions = PageTransitionsTheme(
+      builders: {
+        TargetPlatform.android: _NoTransitionsBuilder(),
+        TargetPlatform.iOS: _NoTransitionsBuilder(),
+        TargetPlatform.windows: _NoTransitionsBuilder(),
+        TargetPlatform.macOS: _NoTransitionsBuilder(),
+        TargetPlatform.linux: _NoTransitionsBuilder(),
+      },
+    );
+
     return MaterialApp(
       title: 'ToothCareGuide',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-        pageTransitionsTheme: const PageTransitionsTheme(
-          builders: {
-            TargetPlatform.android: _NoTransitionsBuilder(),
-            TargetPlatform.iOS: _NoTransitionsBuilder(),
-            TargetPlatform.windows: _NoTransitionsBuilder(),
-            TargetPlatform.macOS: _NoTransitionsBuilder(),
-            TargetPlatform.linux: _NoTransitionsBuilder(),
-          },
-        ),
+      builder: (context, child) {
+        final w = child ?? const SizedBox.shrink();
+        if (!kDebugMode || !_kDebugDisableSemanticsWorkaround) return w;
+        // Suppress semantics in debug as a workaround for a framework assertion
+        // that can otherwise flood the scheduler and lock up interactions.
+        return Semantics(container: true, excludeSemantics: true, child: w);
+      },
+      theme: AppTheme.light().copyWith(
+        pageTransitionsTheme: transitions,
       ),
+      darkTheme: AppTheme.dark().copyWith(
+        pageTransitionsTheme: transitions,
+      ),
+      themeMode: themeMode,
       navigatorObservers: [routeObserver],
       routes: {
         // Root route now decides dynamically: if a patient is already logged in (token + username)
@@ -226,9 +269,80 @@ class _AppEntryGateState extends State<AppEntryGate> {
     try {
       final appState = Provider.of<AppState>(context, listen: false);
 
-    // If user data exists (from shared prefs), skip login!
-    if (appState.token != null && appState.username != null) {
-      // If all info is present, go directly to HomeScreen or instructions
+      // If user data exists (from shared prefs), skip login!
+      if (appState.token != null && appState.username != null) {
+        // If all info is present, go directly to HomeScreen or instructions
+        if (appState.department != null &&
+            appState.doctor != null &&
+            appState.treatment != null &&
+            appState.procedureDate != null &&
+            appState.procedureTime != null &&
+            appState.procedureCompleted == false) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            // After restart/hot-restart, always land on the dashboard (bottom navigation).
+            // The user can open the instruction screen from Home as needed.
+            Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomeScreen()));
+          });
+          return;
+        }
+        // If only category info is present, but treatment is missing
+        if (appState.department != null &&
+            appState.doctor != null &&
+            (appState.treatment == null || appState.procedureDate == null || appState.procedureTime == null)) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => TreatmentScreenMain(userName: appState.username ?? "User")),
+            );
+          });
+          return;
+        }
+        // If nothing, go to category
+        if (appState.department == null || appState.doctor == null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const CategoryScreen()));
+          });
+          return;
+        }
+
+        setState(() => _loading = false);
+        return;
+      }
+
+      // If not persisted, fallback to API check (for first run/after logout)
+      final isLoggedIn = await ApiService.checkIfLoggedIn();
+      if (!isLoggedIn) {
+        if (mounted) setState(() => _loading = false);
+        return;
+      }
+
+      final userDetails = await ApiService.getUserDetails();
+      if (userDetails == null) {
+        setState(() => _loading = false);
+        return;
+      }
+
+      appState.setUserDetails(
+        patientId: userDetails['id'] is int ? userDetails['id'] : int.tryParse((userDetails['id'] ?? '').toString()),
+        fullName: userDetails['name'],
+        dob: DateTime.tryParse((userDetails['dob'] ?? '').toString()) ?? DateTime.now(),
+        gender: userDetails['gender'],
+        username: userDetails['username'],
+        password: '', // Password not retrievable
+        phone: userDetails['phone'],
+        email: userDetails['email'],
+      );
+      // Load persisted data for this user
+      await appState.loadAllChecklists(username: appState.username);
+      await appState.loadInstructionLogs(username: appState.username);
+      appState.setDepartment(userDetails['department']);
+      appState.setDoctor(userDetails['doctor']);
+      appState.setTreatment(userDetails['treatment'], subtype: userDetails['treatment_subtype']);
+      appState.procedureDate = DateTime.tryParse((userDetails['procedure_date'] ?? '').toString());
+      appState.procedureTime = parseTimeOfDay(userDetails['procedure_time']);
+      appState.procedureCompleted = userDetails['procedure_completed'] == true;
+
+      // Repeat the same auto-skip logic after login
       if (appState.department != null &&
           appState.doctor != null &&
           appState.treatment != null &&
@@ -237,12 +351,11 @@ class _AppEntryGateState extends State<AppEntryGate> {
           appState.procedureCompleted == false) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           // After restart/hot-restart, always land on the dashboard (bottom navigation).
-          // The user can open the instruction screen from Home as needed.
           Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomeScreen()));
         });
         return;
       }
-      // If only category info is present, but treatment is missing
+
       if (appState.department != null &&
           appState.doctor != null &&
           (appState.treatment == null || appState.procedureDate == null || appState.procedureTime == null)) {
@@ -254,85 +367,13 @@ class _AppEntryGateState extends State<AppEntryGate> {
         });
         return;
       }
-      // If nothing, go to category
+
       if (appState.department == null || appState.doctor == null) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const CategoryScreen()));
         });
         return;
       }
-
-      setState(() => _loading = false);
-      return;
-    }
-
-      // If not persisted, fallback to API check (for first run/after logout)
-      final isLoggedIn = await ApiService.checkIfLoggedIn();
-      if (!isLoggedIn) {
-        if (mounted) setState(() => _loading = false);
-        return;
-      }
-
-      final userDetails = await ApiService.getUserDetails();
-      if (userDetails == null) {
-      setState(() => _loading = false);
-      return;
-      }
-
-    appState.setUserDetails(
-      patientId: userDetails['id'] is int
-          ? userDetails['id']
-          : int.tryParse((userDetails['id'] ?? '').toString()),
-      fullName: userDetails['name'],
-      dob: DateTime.tryParse((userDetails['dob'] ?? '').toString()) ?? DateTime.now(),
-      gender: userDetails['gender'],
-      username: userDetails['username'],
-      password: '', // Password not retrievable
-      phone: userDetails['phone'],
-      email: userDetails['email'],
-    );
-    // Load persisted data for this user
-    await appState.loadAllChecklists(username: appState.username);
-    await appState.loadInstructionLogs(username: appState.username);
-    appState.setDepartment(userDetails['department']);
-    appState.setDoctor(userDetails['doctor']);
-    appState.setTreatment(userDetails['treatment'], subtype: userDetails['treatment_subtype']);
-    appState.procedureDate = DateTime.tryParse((userDetails['procedure_date'] ?? '').toString());
-    appState.procedureTime = parseTimeOfDay(userDetails['procedure_time']);
-    appState.procedureCompleted = userDetails['procedure_completed'] == true;
-
-    // Repeat the same auto-skip logic after login
-    if (appState.department != null &&
-        appState.doctor != null &&
-        appState.treatment != null &&
-        appState.procedureDate != null &&
-        appState.procedureTime != null &&
-        appState.procedureCompleted == false) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        // After restart/hot-restart, always land on the dashboard (bottom navigation).
-        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomeScreen()));
-      });
-      return;
-    }
-
-    if (appState.department != null &&
-        appState.doctor != null &&
-        (appState.treatment == null || appState.procedureDate == null || appState.procedureTime == null)) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => TreatmentScreenMain(userName: appState.username ?? "User")),
-        );
-      });
-      return;
-    }
-
-    if (appState.department == null || appState.doctor == null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const CategoryScreen()));
-      });
-      return;
-    }
 
       setState(() => _loading = false);
     } catch (e) {
@@ -349,55 +390,54 @@ class _AppEntryGateState extends State<AppEntryGate> {
     }
     // Fallback to WelcomeScreen if not auto-logged in
     return WelcomeScreen(
-      onSignUp:
-          (
-            BuildContext context,
-            String username,
-            String password,
-            String phone,
-            String email,
-            String name,
-            String dob,
-            String gender,
-            VoidCallback switchToLogin,
-          ) async {
-            final error = await ApiService.register({
-              'username': username,
-              'password': password,
-              'phone': phone,
-              'email': email,
-              'name': name,
-              'dob': dob,
-              'gender': gender,
-            });
+      onSignUp: (
+        BuildContext context,
+        String username,
+        String password,
+        String phone,
+        String email,
+        String name,
+        String dob,
+        String gender,
+        VoidCallback switchToLogin,
+      ) async {
+        final error = await ApiService.register({
+          'username': username,
+          'password': password,
+          'phone': phone,
+          'email': email,
+          'name': name,
+          'dob': dob,
+          'gender': gender,
+        });
 
-            if (error != null) {
-              // Optionally, show error dialog here, or let WelcomeScreen handle it
-              return error; // <-- Fix: Return the error to WelcomeScreen
-            } else {
-              final appState = Provider.of<AppState>(context, listen: false);
-              final token = await ApiService.getSavedToken();
-              if (token != null) {
-                appState.setToken(token);
-              }
+        if (error != null) {
+          // Optionally, show error dialog here, or let WelcomeScreen handle it
+          return error; // <-- Fix: Return the error to WelcomeScreen
+        } else {
+          final appState = Provider.of<AppState>(context, listen: false);
+          final token = await ApiService.getSavedToken();
+          if (token != null) {
+            appState.setToken(token);
+          }
 
-              // Register push token as soon as logged in so backend catch-up can run
-              await PushService.registerNow();
-              await PushService.flushPendingIfAny();
-              appState.setUserDetails(
-                fullName: name,
-                dob: DateTime.parse(dob),
-                gender: gender,
-                username: username,
-                password: password,
-                phone: phone,
-                email: email,
-              );
-              // Optionally, show success snack bar, but let WelcomeScreen show dialog
-              switchToLogin();
-              return null; // <-- Fix: Return null to WelcomeScreen
-            }
-          },
+          // Register push token as soon as logged in so backend catch-up can run
+          await PushService.registerNow();
+          await PushService.flushPendingIfAny();
+          appState.setUserDetails(
+            fullName: name,
+            dob: DateTime.parse(dob),
+            gender: gender,
+            username: username,
+            password: password,
+            phone: phone,
+            email: email,
+          );
+          // Optionally, show success snack bar, but let WelcomeScreen show dialog
+          switchToLogin();
+          return null; // <-- Fix: Return null to WelcomeScreen
+        }
+      },
       onLogin: (BuildContext context, String username, String password) async {
         print('Attempting login...');
         final error = await ApiService.login(username.trim(), password);
@@ -422,9 +462,8 @@ class _AppEntryGateState extends State<AppEntryGate> {
 
           if (userDetails != null) {
             appState.setUserDetails(
-              patientId: userDetails['id'] is int
-                  ? userDetails['id']
-                  : int.tryParse((userDetails['id'] ?? '').toString()),
+              patientId:
+                  userDetails['id'] is int ? userDetails['id'] : int.tryParse((userDetails['id'] ?? '').toString()),
               fullName: userDetails['name'],
               dob: DateTime.tryParse((userDetails['dob'] ?? '').toString()) ?? DateTime.now(),
               gender: userDetails['gender'],

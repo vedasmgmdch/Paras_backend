@@ -230,9 +230,10 @@ ${buildSection("Specific Instructions", notFollowedSpecific)}
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     if (currentDay >= totalDays) {
       return Scaffold(
-        backgroundColor: const Color(0xFFF9FAFB),
+        backgroundColor: colorScheme.surface,
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(24.0),
@@ -245,7 +246,7 @@ ${buildSection("Specific Instructions", notFollowedSpecific)}
                   curve: Curves.easeOutBack,
                   builder: (context, value, child) => Transform.scale(scale: value, child: child),
                   child: Container(
-                    decoration: BoxDecoration(color: Colors.green[50], shape: BoxShape.circle),
+                    decoration: BoxDecoration(color: colorScheme.secondaryContainer, shape: BoxShape.circle),
                     padding: const EdgeInsets.all(22),
                     child: const Icon(Icons.emoji_events_rounded, color: Color(0xFF2ECC71), size: 64),
                   ),
@@ -254,24 +255,24 @@ ${buildSection("Specific Instructions", notFollowedSpecific)}
                 Card(
                   elevation: 6,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-                  color: Colors.white,
+                  color: colorScheme.surfaceContainerLow,
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 28),
                     child: Column(
-                      children: const [
+                      children: [
                         Text(
                           "Recovery Complete!",
                           style: TextStyle(
                             fontSize: 24,
                             fontWeight: FontWeight.bold,
-                            color: Color(0xFF222B45),
+                            color: colorScheme.onSurface,
                             letterSpacing: 1.1,
                           ),
                         ),
-                        SizedBox(height: 10),
+                        const SizedBox(height: 10),
                         Text(
                           "Congratulations! Your procedure recovery is complete. You can now select a new treatment.",
-                          style: TextStyle(fontSize: 16, color: Color(0xFF6B7280)),
+                          style: TextStyle(fontSize: 16, color: colorScheme.onSurfaceVariant),
                           textAlign: TextAlign.center,
                         ),
                       ],
@@ -284,8 +285,8 @@ ${buildSection("Specific Instructions", notFollowedSpecific)}
                   child: ElevatedButton.icon(
                     icon: const Icon(Icons.assignment_turned_in_rounded, size: 22),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF0052CC),
-                      foregroundColor: Colors.white,
+                      backgroundColor: colorScheme.primary,
+                      foregroundColor: colorScheme.onPrimary,
                       padding: const EdgeInsets.symmetric(vertical: 18),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                       elevation: 3,
@@ -315,20 +316,20 @@ ${buildSection("Specific Instructions", notFollowedSpecific)}
       }
 
       return Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: colorScheme.surface,
         appBar: showSpecific
             ? AppBar(
-                backgroundColor: Colors.white,
+                backgroundColor: colorScheme.surface,
                 elevation: 1,
                 leading: IconButton(
-                  icon: const Icon(Icons.arrow_back, color: Colors.blue),
+                  icon: Icon(Icons.arrow_back, color: colorScheme.primary),
                   onPressed: () {
                     setState(() => showSpecific = false);
                   },
                 ),
                 title: Text(
                   selectedLang == 'en' ? "Specific Instructions - Day $currentDay" : "विशिष्ट सूचना - दिवस $currentDay",
-                  style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold),
+                  style: TextStyle(color: colorScheme.primary, fontWeight: FontWeight.bold),
                 ),
                 centerTitle: true,
               )
@@ -346,8 +347,8 @@ ${buildSection("Specific Instructions", notFollowedSpecific)}
                       alignment: Alignment.centerRight,
                       child: ElevatedButton.icon(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue[100],
-                          foregroundColor: Colors.blue[900],
+                          backgroundColor: colorScheme.primaryContainer,
+                          foregroundColor: colorScheme.onPrimaryContainer,
                         ),
                         icon: const Icon(Icons.language, size: 20),
                         label: Text(selectedLang == 'en' ? 'मराठी' : 'English'),
@@ -396,7 +397,7 @@ ${buildSection("Specific Instructions", notFollowedSpecific)}
                       const SizedBox(height: 18),
                       Container(
                         decoration: BoxDecoration(
-                          color: const Color(0xFFFFE6E6),
+                          color: colorScheme.errorContainer,
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Padding(
@@ -406,15 +407,11 @@ ${buildSection("Specific Instructions", notFollowedSpecific)}
                             children: [
                               Row(
                                 children: [
-                                  const Icon(Icons.cancel, color: Colors.red),
+                                  Icon(Icons.cancel, color: colorScheme.error),
                                   const SizedBox(width: 8),
                                   Text(
                                     selectedLang == 'en' ? "Don'ts" : "टाळा",
-                                    style: const TextStyle(
-                                      color: Colors.red,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 18,
-                                    ),
+                                    style: TextStyle(color: colorScheme.error, fontWeight: FontWeight.bold, fontSize: 18),
                                   ),
                                 ],
                               ),
@@ -424,7 +421,7 @@ ${buildSection("Specific Instructions", notFollowedSpecific)}
                                   padding: const EdgeInsets.only(left: 28, top: 4, bottom: 4),
                                   child: Row(
                                     children: [
-                                      const Icon(Icons.close, color: Colors.red, size: 18),
+                                      Icon(Icons.close, color: colorScheme.error, size: 18),
                                       const SizedBox(width: 6),
                                       Expanded(child: Text(item[selectedLang]!, style: const TextStyle(fontSize: 15))),
                                     ],

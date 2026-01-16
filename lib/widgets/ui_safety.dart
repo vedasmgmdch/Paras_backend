@@ -50,6 +50,7 @@ class KeyValueRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Row(
       crossAxisAlignment: crossAxisAlignment,
       children: [
@@ -58,13 +59,16 @@ class KeyValueRow extends StatelessWidget {
           const SizedBox(width: 12),
         ],
         Expanded(
-          child: SafeText(label, style: labelStyle ?? const TextStyle(color: Colors.black87, fontWeight: FontWeight.w500, fontSize: 15)),
+          child: SafeText(
+            label,
+            style: labelStyle ?? TextStyle(color: colorScheme.onSurfaceVariant, fontWeight: FontWeight.w500, fontSize: 15),
+          ),
         ),
         Expanded(
           flex: 2,
           child: SafeText(
             value,
-            style: valueStyle ?? const TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 15),
+            style: valueStyle ?? TextStyle(color: colorScheme.onSurface, fontWeight: FontWeight.bold, fontSize: 15),
             textAlign: TextAlign.right,
           ),
         ),
