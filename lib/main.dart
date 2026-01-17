@@ -9,6 +9,7 @@ import 'services/api_service.dart';
 import 'services/notification_service.dart';
 import 'services/push_service.dart';
 import 'services/reminder_api.dart';
+import 'services/auth_flow.dart';
 import 'screens/welcome_screen.dart';
 import 'screens/category_screen.dart';
 import 'screens/home_screen.dart';
@@ -508,27 +509,12 @@ class _AppEntryGateState extends State<AppEntryGate> {
       },
       onLogin: (BuildContext context, String username, String password) async {
         print('Attempting login...');
-        String? error = await ApiService.login(username.trim(), password);
+        String? error = await AuthFlow.loginWithTakeoverPrompt(
+          context: context,
+          username: username.trim(),
+          password: password,
+        );
         print('Login response: $error');
-
-        if (error != null && ApiService.lastLoginStatusCode == 409) {
-          final takeover = await showDialog<bool>(
-            context: context,
-            builder: (_) => AlertDialog(
-              title: const Text('Account in use'),
-              content: const Text(
-                'This account is currently active on another device. Do you want to login here and sign out the other device?',
-              ),
-              actions: [
-                TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-                TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Login here')),
-              ],
-            ),
-          );
-          if (takeover == true) {
-            error = await ApiService.login(username.trim(), password, forceTakeover: true);
-          }
-        }
 
         if (error != null) {
           final String msg = error;
@@ -539,38 +525,13 @@ class _AppEntryGateState extends State<AppEntryGate> {
           return msg; // satisfy Future<String?>
         } else {
           final appState = Provider.of<AppState>(context, listen: false);
-          // --- Ensure token is stored after login ---
-          final token = await ApiService.getSavedToken();
-          if (token != null) {
-            appState.setToken(token);
-          }
-
-          // Fetch full user details using stored token
-          final userDetails = await ApiService.getUserDetails();
-
-          if (userDetails != null) {
-            appState.setUserDetails(
-              patientId:
-                  userDetails['id'] is int ? userDetails['id'] : int.tryParse((userDetails['id'] ?? '').toString()),
-              fullName: userDetails['name'],
-              dob: DateTime.tryParse((userDetails['dob'] ?? '').toString()) ?? DateTime.now(),
-              gender: userDetails['gender'],
-              username: userDetails['username'],
-              password: password,
-              phone: userDetails['phone'],
-              email: userDetails['email'],
+          final hydrateError = await AuthFlow.hydrateAfterLogin(appState: appState, password: password);
+          if (hydrateError != null) {
+            showDialog(
+              context: context,
+              builder: (_) => AlertDialog(title: const Text('Login Failed'), content: Text(hydrateError)),
             );
-
-            await appState.applyThemeModeFromServer(userDetails['theme_mode']);
-            // Load persisted data for this user
-            await appState.loadAllChecklists(username: appState.username);
-            await appState.loadInstructionLogs(username: appState.username);
-            appState.setDepartment(userDetails['department']);
-            appState.setDoctor(userDetails['doctor']);
-            appState.setTreatment(userDetails['treatment'], subtype: userDetails['treatment_subtype']);
-            appState.procedureDate = DateTime.tryParse((userDetails['procedure_date'] ?? '').toString());
-            appState.procedureTime = parseTimeOfDay(userDetails['procedure_time']);
-            appState.procedureCompleted = userDetails['procedure_completed'] == true;
+            return hydrateError;
           }
 
           // Now repeat the auto-skip logic after login

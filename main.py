@@ -1168,7 +1168,19 @@ async def debug_auth(request: Request):
     }
 
 def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+    """Verify a password hash safely.
+
+    Passlib can raise for malformed/legacy hashes; treat as non-match instead of
+    crashing the request (which would surface as HTTP 500 on login).
+    """
+    try:
+        if not plain_password or not hashed_password:
+            return False
+        return pwd_context.verify(plain_password, hashed_password)
+    except Exception as exc:
+        # Avoid leaking secrets; keep logs minimal for ops.
+        print(f"[auth] verify_password failed: {type(exc).__name__}: {exc}")
+        return False
 
 def get_password_hash(password):
     return pwd_context.hash(password)
@@ -1374,7 +1386,36 @@ async def login(
     normalized = (username or "").strip()
     result = await db.execute(select(models.Patient).where(models.Patient.username == normalized))
     user = result.scalars().first()
-    if not user or not verify_password(password, user.password):
+    if not user:
+        raise HTTPException(status_code=401, detail="Incorrect username or password")
+
+    password_ok = verify_password(password, user.password)
+
+    # Legacy fallback: some older deployments may have stored plaintext passwords.
+    # If the plaintext matches, upgrade to a proper hash and proceed.
+    if not password_ok:
+        try:
+            stored = getattr(user, "password", None)
+            if isinstance(stored, str) and stored == password:
+                try:
+                    object.__setattr__(user, "password", get_password_hash(password))
+                    db.add(user)
+                    await db.commit()
+                    password_ok = True
+                    print(f"[auth] Upgraded plaintext password to hash for user={normalized}")
+                except Exception as exc:
+                    try:
+                        await db.rollback()
+                    except Exception:
+                        pass
+                    # Still allow login if the plaintext matched; the upgrade can retry later.
+                    password_ok = True
+                    print(f"[auth] Password upgrade commit failed for user={normalized}: {type(exc).__name__}: {exc}")
+        except Exception:
+            # Ignore legacy upgrade errors and fall through to 401 below.
+            pass
+
+    if not password_ok:
         raise HTTPException(status_code=401, detail="Incorrect username or password")
 
     # Single-device enforcement is best-effort; if session tracking fails we still allow login.

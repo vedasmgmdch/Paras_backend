@@ -10,7 +10,7 @@ import 'home_screen.dart';
 import 'treatment_screen.dart';
 import '../services/api_service.dart';
 import 'signup_otp_verification_screen.dart';
-import '../services/push_service.dart';
+import '../services/auth_flow.dart';
 
 class WelcomeScreen extends StatefulWidget {
   final Future<String?> Function(
@@ -106,23 +106,6 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     );
   }
 
-  Future<bool> _confirmSessionTakeover() async {
-    final res = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Account in use'),
-        content: const Text(
-          'This account is currently active on another device. Do you want to login here and sign out the other device?',
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Login here')),
-        ],
-      ),
-    );
-    return res == true;
-  }
-
   bool _isValidDate(String? y, String? m, String? d) {
     if (y == null || m == null || d == null || y.isEmpty || m.isEmpty || d.isEmpty) return false;
     final year = int.tryParse(y);
@@ -148,17 +131,11 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     // If user initiated another login while we were clearing state, stop.
     if (!mounted || attemptId != _loginAttemptId) return null;
 
-    String? error = await ApiService.login(username, password);
-
-    if (!mounted || attemptId != _loginAttemptId) return null;
-
-    if (error != null && ApiService.lastLoginStatusCode == 409) {
-      final takeover = await _confirmSessionTakeover();
-      if (!mounted || attemptId != _loginAttemptId) return null;
-      if (takeover) {
-        error = await ApiService.login(username, password, forceTakeover: true);
-      }
-    }
+    final error = await AuthFlow.loginWithTakeoverPrompt(
+      context: context,
+      username: username,
+      password: password,
+    );
 
     if (!mounted || attemptId != _loginAttemptId) return null;
 
@@ -166,78 +143,28 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       return error;
     }
 
-    // Ensure token is in AppState
-    final savedToken = await ApiService.getSavedToken();
-    if (savedToken != null) {
-      await appState.setToken(savedToken);
+    final hydrateError = await AuthFlow.hydrateAfterLogin(appState: appState, password: password);
+
+    if (!mounted || attemptId != _loginAttemptId) return null;
+
+    if (hydrateError != null) {
+      return hydrateError;
     }
 
-    if (!mounted || attemptId != _loginAttemptId) return null;
-
-    // Register push token in the background so login doesn't feel stuck.
-    unawaited(PushService.registerNow().timeout(const Duration(seconds: 6), onTimeout: () {}));
-    unawaited(PushService.flushPendingIfAny().timeout(const Duration(seconds: 6), onTimeout: () {}));
-
-    final userDetails = await ApiService.getUserDetails();
-
-    if (!mounted || attemptId != _loginAttemptId) return null;
-
-    if (userDetails != null) {
-      appState.setUserDetails(
-        patientId: userDetails['id'] is int ? userDetails['id'] : int.tryParse((userDetails['id'] ?? '').toString()),
-        fullName: userDetails['name'],
-        dob: DateTime.tryParse((userDetails['dob'] ?? '').toString()) ?? DateTime.now(),
-        gender: userDetails['gender'],
-        username: userDetails['username'],
-        password: password,
-        phone: userDetails['phone'],
-        email: userDetails['email'],
+    if (appState.hasSelectedCategory) {
+      Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => HomeScreen()), (route) => false);
+    } else if (appState.department != null &&
+        appState.doctor != null &&
+        (appState.treatment == null || appState.procedureDate == null || appState.procedureTime == null)) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => TreatmentScreenMain(userName: appState.username ?? 'User')),
+        (route) => false,
       );
-
-      await appState.applyThemeModeFromServer(userDetails['theme_mode']);
-      appState.setDepartment(userDetails['department']);
-      appState.setDoctor(userDetails['doctor']);
-      appState.setTreatment(userDetails['treatment'], subtype: userDetails['treatment_subtype']);
-      appState.procedureDate = DateTime.tryParse((userDetails['procedure_date'] ?? '').toString());
-      appState.procedureTime = _parseTimeOfDay(userDetails['procedure_time']);
-      appState.procedureCompleted = userDetails['procedure_completed'] == true;
-
-      // Kick off heavier hydration in the background.
-      unawaited(appState.loadAllChecklists(username: appState.username));
-      unawaited(appState.loadInstructionLogs(username: appState.username, force: true));
-
-      // Best-effort: if backend lost rows during deploy, re-upload local truth.
-      // Non-blocking to keep login fast.
-      unawaited(appState.forceResyncInstructionLogs());
-
-      // Pull server-side instruction ticks (non-blocking) so a new device matches the account.
-      unawaited(appState.pullInstructionStatusChanges());
-
-      if (!mounted || attemptId != _loginAttemptId) return null;
-
-      if (appState.hasSelectedCategory) {
-        Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => HomeScreen()), (route) => false);
-      } else if (appState.department != null &&
-          appState.doctor != null &&
-          (appState.treatment == null || appState.procedureDate == null || appState.procedureTime == null)) {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => TreatmentScreenMain(userName: appState.username ?? 'User')),
-          (route) => false,
-        );
-      } else {
-        Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => CategoryScreen()), (route) => false);
-      }
-      return null;
+    } else {
+      Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => CategoryScreen()), (route) => false);
     }
-    return ApiService.lastUserDetailsError ?? "Login failed. Could not retrieve user details.";
-  }
 
-  static TimeOfDay? _parseTimeOfDay(dynamic timeStr) {
-    if (timeStr == null) return null;
-    final str = timeStr is String ? timeStr : timeStr.toString();
-    final parts = str.split(":");
-    if (parts.length < 2) return null;
-    return TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
+    return null;
   }
 
   Future<String?> _handleSignUp() async {

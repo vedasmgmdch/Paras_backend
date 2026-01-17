@@ -1,11 +1,7 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../app_state.dart';
-import '../services/api_service.dart';
-import '../services/notification_service.dart';
-import '../services/push_service.dart';
-import 'welcome_screen.dart'; // <-- Adjust this path if needed!
+import '../services/auth_flow.dart';
 import 'calendar_screen.dart';
 import '../widgets/ui_safety.dart';
 
@@ -21,49 +17,7 @@ class ProfileScreen extends StatelessWidget {
 
   // --- Fixed sign out method ---
   Future<void> _signOut(BuildContext context) async {
-    final rootNav = Navigator.of(context, rootNavigator: true);
-
-    // Show a blocking loader so the UI doesn't look stuck.
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
-    );
-
-    final appState = Provider.of<AppState>(context, listen: false);
-
-    Future<void> bestEffort(Future<void> f) async {
-      try {
-        await f.timeout(const Duration(seconds: 4));
-      } catch (_) {}
-    }
-
-    Future<bool> bestEffortBool(Future<bool> f) async {
-      try {
-        return await f.timeout(const Duration(seconds: 4));
-      } catch (_) {
-        return false;
-      }
-    }
-
-    // Stop future pushes for this user/device.
-    unawaited(bestEffort(ApiService.unregisterAllDeviceTokens().then((_) {})));
-
-    // Mark this device session inactive (enables login on another device).
-    await bestEffortBool(ApiService.logoutCurrentDeviceSession());
-
-    // Best-effort local cleanup.
-    unawaited(bestEffort(NotificationService.cancelAllPending()));
-    unawaited(bestEffort(PushService.onLogout()));
-
-    await ApiService.clearToken();
-    await appState.reset();
-
-    // Replace the full stack (also removes the loading dialog route).
-    rootNav.pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => WelcomeScreen()),
-      (route) => false,
-    );
+    await AuthFlow.signOut(context);
   }
 
   @override
