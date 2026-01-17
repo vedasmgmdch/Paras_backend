@@ -3601,6 +3601,30 @@ async def register_device(
             except Exception:
                 pass
     # Upsert by unique token; if token exists, reassign to current user and update platform
+    async def _commit_or_race_recover() -> Optional[models.DeviceToken]:
+        """Commit the current unit of work.
+
+        If another concurrent request inserted the same device token (unique constraint),
+        rollback and return the row that now exists.
+        """
+        try:
+            await db.commit()
+            return None
+        except IntegrityError as exc:
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            msg = str(exc)
+            # If this looks like the token unique constraint, treat it as an upsert race.
+            if "device_tokens" in msg and "token" in msg and ("duplicate" in msg.lower() or "unique" in msg.lower()):
+                try:
+                    q = await db.execute(select(models.DeviceToken).where(models.DeviceToken.token == payload.token))
+                    return q.scalars().first()
+                except Exception:
+                    return None
+            raise
+
     existing_q = await db.execute(select(models.DeviceToken).where(models.DeviceToken.token == payload.token))
     existing = existing_q.scalars().first()
     if existing:
@@ -3617,7 +3641,9 @@ async def register_device(
             object.__setattr__(existing, 'deactivated_at', None)
             object.__setattr__(existing, 'deactivated_reason', None)
         db.add(existing)
-        await db.commit()
+        raced = await _commit_or_race_recover()
+        if raced is not None:
+            existing = raced
         await db.refresh(existing)
         # Enforce single-device-per-user if enabled
         if os.getenv("PUSH_SINGLE_DEVICE", "true").lower() in {"1", "true", "yes", "on"}:
@@ -3628,7 +3654,13 @@ async def register_device(
             )
             for d in others_q.scalars().all():
                 await db.delete(d)
-            await db.commit()
+            try:
+                await db.commit()
+            except Exception:
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
         return existing
     create_kwargs = {
         'patient_id': current_user_id,
@@ -3640,7 +3672,26 @@ async def register_device(
 
     row = models.DeviceToken(**create_kwargs)
     db.add(row)
-    await db.commit()
+    raced = await _commit_or_race_recover()
+    if raced is not None:
+        # Another request inserted the same token concurrently. Update it to this user/platform.
+        row = raced
+        try:
+            object.__setattr__(row, 'patient_id', current_user_id)
+            object.__setattr__(row, 'platform', payload.platform)
+            if hasattr(models.DeviceToken, 'local_reminders_enabled'):
+                object.__setattr__(row, 'local_reminders_enabled', bool(getattr(payload, 'local_reminders_enabled', False)))
+            if hasattr(row, 'active'):
+                object.__setattr__(row, 'active', True)
+                object.__setattr__(row, 'deactivated_at', None)
+                object.__setattr__(row, 'deactivated_reason', None)
+            db.add(row)
+            await db.commit()
+        except Exception:
+            try:
+                await db.rollback()
+            except Exception:
+                pass
     await db.refresh(row)
     # Enforce single-device-per-user if enabled
     if os.getenv("PUSH_SINGLE_DEVICE", "true").lower() in {"1", "true", "yes", "on"}:
@@ -3651,7 +3702,13 @@ async def register_device(
         )
         for d in others_q.scalars().all():
             await db.delete(d)
-        await db.commit()
+        try:
+            await db.commit()
+        except Exception:
+            try:
+                await db.rollback()
+            except Exception:
+                pass
 
     return row
 
