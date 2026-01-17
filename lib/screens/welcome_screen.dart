@@ -57,6 +57,10 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   bool _showSignUp = true;
   bool _isLoading = false;
 
+  // Incremented for each login attempt so we can ignore stale async results
+  // (e.g., user quickly switches accounts and presses Login again).
+  int _loginAttemptId = 0;
+
   bool _agreedToHipaa = false;
 
   String? _usernameError;
@@ -102,6 +106,23 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     );
   }
 
+  Future<bool> _confirmSessionTakeover() async {
+    final res = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Account in use'),
+        content: const Text(
+          'This account is currently active on another device. Do you want to login here and sign out the other device?',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Login here')),
+        ],
+      ),
+    );
+    return res == true;
+  }
+
   bool _isValidDate(String? y, String? m, String? d) {
     if (y == null || m == null || d == null || y.isEmpty || m.isEmpty || d.isEmpty) return false;
     final year = int.tryParse(y);
@@ -118,12 +139,28 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
 
   // Default login implementation if onLogin is not provided
   Future<String?> _defaultLogin(BuildContext context, String username, String password) async {
+    final int attemptId = ++_loginAttemptId;
     final appState = Provider.of<AppState>(context, listen: false);
 
     // Always clear all state before loading new user!
     await appState.clearUserData();
 
-    final error = await ApiService.login(username, password);
+    // If user initiated another login while we were clearing state, stop.
+    if (!mounted || attemptId != _loginAttemptId) return null;
+
+    String? error = await ApiService.login(username, password);
+
+    if (!mounted || attemptId != _loginAttemptId) return null;
+
+    if (error != null && ApiService.lastLoginStatusCode == 409) {
+      final takeover = await _confirmSessionTakeover();
+      if (!mounted || attemptId != _loginAttemptId) return null;
+      if (takeover) {
+        error = await ApiService.login(username, password, forceTakeover: true);
+      }
+    }
+
+    if (!mounted || attemptId != _loginAttemptId) return null;
 
     if (error != null) {
       return error;
@@ -135,11 +172,15 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       await appState.setToken(savedToken);
     }
 
-    // Register device token now that we're authenticated (triggers backend catch-up)
-    await PushService.registerNow();
-    await PushService.flushPendingIfAny();
+    if (!mounted || attemptId != _loginAttemptId) return null;
+
+    // Register push token in the background so login doesn't feel stuck.
+    unawaited(PushService.registerNow().timeout(const Duration(seconds: 6), onTimeout: () {}));
+    unawaited(PushService.flushPendingIfAny().timeout(const Duration(seconds: 6), onTimeout: () {}));
 
     final userDetails = await ApiService.getUserDetails();
+
+    if (!mounted || attemptId != _loginAttemptId) return null;
 
     if (userDetails != null) {
       appState.setUserDetails(
@@ -161,10 +202,9 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       appState.procedureTime = _parseTimeOfDay(userDetails['procedure_time']);
       appState.procedureCompleted = userDetails['procedure_completed'] == true;
 
-      // Hydrate locally persisted data for this user so past days don't appear as "Not Followed"
-      // after a backend redeploy/reset or a sign-out/login cycle.
-      await appState.loadAllChecklists(username: appState.username);
-      await appState.loadInstructionLogs(username: appState.username, force: true);
+      // Kick off heavier hydration in the background.
+      unawaited(appState.loadAllChecklists(username: appState.username));
+      unawaited(appState.loadInstructionLogs(username: appState.username, force: true));
 
       // Best-effort: if backend lost rows during deploy, re-upload local truth.
       // Non-blocking to keep login fast.
@@ -172,6 +212,8 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
 
       // Pull server-side instruction ticks (non-blocking) so a new device matches the account.
       unawaited(appState.pullInstructionStatusChanges());
+
+      if (!mounted || attemptId != _loginAttemptId) return null;
 
       if (appState.hasSelectedCategory) {
         Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => HomeScreen()), (route) => false);
@@ -187,7 +229,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       }
       return null;
     }
-    return "Login failed. Could not retrieve user details.";
+    return ApiService.lastUserDetailsError ?? "Login failed. Could not retrieve user details.";
   }
 
   static TimeOfDay? _parseTimeOfDay(dynamic timeStr) {

@@ -1368,6 +1368,7 @@ async def login(
     password: str = Form(...),
     device_id: Optional[str] = Form(None),
     device_name: Optional[str] = Form(None),
+    force_takeover: Optional[bool] = Form(False),
     db: AsyncSession = Depends(get_db),
 ):
     normalized = (username or "").strip()
@@ -1399,10 +1400,14 @@ async def login(
             )
             other_recent = other_recent_q.scalars().first()
             if other_recent:
-                raise HTTPException(
-                    status_code=409,
-                    detail="Account is in use on another device. Please log out on that device first.",
-                )
+                # By default, block to enforce single-device sessions.
+                # If the client explicitly opts in, allow a "takeover" that deactivates
+                # other active sessions and proceeds with login.
+                if not force_takeover:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Account is in use on another device. Please log out on that device first.",
+                    )
 
             # Deactivate any other active sessions (stale), then upsert this device as active.
             stale_q = await db.execute(

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -206,26 +207,33 @@ class _CategoryScreenState extends State<CategoryScreen> {
                 builder: (_) => const Center(child: CircularProgressIndicator()),
               );
 
+              // Keep auth token until we attempt session logout.
+              // Network calls are time-bounded so sign-out is never "stuck".
+              Future<void> bestEffort(Future<void> f) async {
+                try {
+                  await f.timeout(const Duration(seconds: 4));
+                } catch (_) {}
+              }
+
+              Future<bool> bestEffortBool(Future<bool> f) async {
+                try {
+                  return await f.timeout(const Duration(seconds: 4));
+                } catch (_) {
+                  return false;
+                }
+              }
+
               // Stop future pushes for this user/device.
-              try {
-                await ApiService.unregisterAllDeviceTokens();
-              } catch (_) {}
+              unawaited(bestEffort(ApiService.unregisterAllDeviceTokens().then((_) {})));
 
               // Mark this device session inactive (enables login on another device).
-              try {
-                await ApiService.logoutCurrentDeviceSession();
-              } catch (_) {}
+              await bestEffortBool(ApiService.logoutCurrentDeviceSession());
 
               // Best-effort local cleanup.
-              try {
-                await NotificationService.cancelAllPending();
-              } catch (_) {}
-              try {
-                await PushService.onLogout();
-              } catch (_) {}
+              unawaited(bestEffort(NotificationService.cancelAllPending()));
+              unawaited(bestEffort(PushService.onLogout()));
 
-              final prefs = await SharedPreferences.getInstance();
-              await prefs.remove('token');
+              await ApiService.clearToken();
               // Clear all in-memory user/account state
               final appState = Provider.of<AppState>(context, listen: false);
               await appState.clearUserData();

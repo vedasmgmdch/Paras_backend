@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../app_state.dart';
@@ -31,23 +32,29 @@ class ProfileScreen extends StatelessWidget {
 
     final appState = Provider.of<AppState>(context, listen: false);
 
+    Future<void> bestEffort(Future<void> f) async {
+      try {
+        await f.timeout(const Duration(seconds: 4));
+      } catch (_) {}
+    }
+
+    Future<bool> bestEffortBool(Future<bool> f) async {
+      try {
+        return await f.timeout(const Duration(seconds: 4));
+      } catch (_) {
+        return false;
+      }
+    }
+
     // Stop future pushes for this user/device.
-    try {
-      await ApiService.unregisterAllDeviceTokens();
-    } catch (_) {}
+    unawaited(bestEffort(ApiService.unregisterAllDeviceTokens().then((_) {})));
 
     // Mark this device session inactive (enables login on another device).
-    try {
-      await ApiService.logoutCurrentDeviceSession();
-    } catch (_) {}
+    await bestEffortBool(ApiService.logoutCurrentDeviceSession());
 
     // Best-effort local cleanup.
-    try {
-      await NotificationService.cancelAllPending();
-    } catch (_) {}
-    try {
-      await PushService.onLogout();
-    } catch (_) {}
+    unawaited(bestEffort(NotificationService.cancelAllPending()));
+    unawaited(bestEffort(PushService.onLogout()));
 
     await ApiService.clearToken();
     await appState.reset();

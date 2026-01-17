@@ -508,15 +508,35 @@ class _AppEntryGateState extends State<AppEntryGate> {
       },
       onLogin: (BuildContext context, String username, String password) async {
         print('Attempting login...');
-        final error = await ApiService.login(username.trim(), password);
+        String? error = await ApiService.login(username.trim(), password);
         print('Login response: $error');
 
+        if (error != null && ApiService.lastLoginStatusCode == 409) {
+          final takeover = await showDialog<bool>(
+            context: context,
+            builder: (_) => AlertDialog(
+              title: const Text('Account in use'),
+              content: const Text(
+                'This account is currently active on another device. Do you want to login here and sign out the other device?',
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+                TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Login here')),
+              ],
+            ),
+          );
+          if (takeover == true) {
+            error = await ApiService.login(username.trim(), password, forceTakeover: true);
+          }
+        }
+
         if (error != null) {
+          final String msg = error;
           showDialog(
             context: context,
-            builder: (_) => AlertDialog(title: const Text("Login Failed"), content: Text(error)),
+            builder: (_) => AlertDialog(title: const Text("Login Failed"), content: Text(msg)),
           );
-          return error; // satisfy Future<String?>
+          return msg; // satisfy Future<String?>
         } else {
           final appState = Provider.of<AppState>(context, listen: false);
           // --- Ensure token is stored after login ---

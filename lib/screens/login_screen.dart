@@ -61,13 +61,37 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     final appState = Provider.of<AppState>(context, listen: false);
-    final result = await ApiService.login(_username, _password);
+    String? result = await ApiService.login(_username, _password);
+
+    if (!mounted) return;
+
+    if (result != null && ApiService.lastLoginStatusCode == 409) {
+      final takeover = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Account in use'),
+          content: const Text(
+            'This account is currently active on another device. Do you want to login here and sign out the other device?',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Login here')),
+          ],
+        ),
+      );
+
+      if (!mounted) return;
+      if (takeover == true) {
+        result = await ApiService.login(_username, _password, forceTakeover: true);
+      }
+    }
 
     if (!mounted) return;
 
     if (result != null) {
+      final String msg = result;
       setState(() {
-        _error = result;
+        _error = msg;
         _loading = false;
       });
       return;
@@ -87,8 +111,8 @@ class _LoginScreenState extends State<LoginScreen> {
     await _persistLoginToken(_username, token);
     await appState.setToken(token);
     // Ensure this account owns the device token on the backend
-    await PushService.registerNow();
-    await PushService.flushPendingIfAny();
+    unawaited(PushService.registerNow().timeout(const Duration(seconds: 6), onTimeout: () {}));
+    unawaited(PushService.flushPendingIfAny().timeout(const Duration(seconds: 6), onTimeout: () {}));
 
     if (!mounted) return;
 

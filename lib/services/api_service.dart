@@ -4,13 +4,21 @@ import 'dart:async';
 import 'dart:math';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter/foundation.dart' show compute;
+import 'package:flutter/foundation.dart' show compute, kIsWeb;
 import 'package:flutter/material.dart';
 
 dynamic _jsonDecodeInBackground(String body) => jsonDecode(body);
 
 class ApiService {
   static const Duration _slowEndpointTimeout = Duration(seconds: 60);
+
+  // Last error captured by getUserDetails(), useful for showing a meaningful
+  // message to the user instead of a generic failure.
+  static String? _lastUserDetailsError;
+  static String? get lastUserDetailsError => _lastUserDetailsError;
+
+  static int? _lastLoginStatusCode;
+  static int? get lastLoginStatusCode => _lastLoginStatusCode;
 
   // --------------------------
   // ✅ Stable per-install device id
@@ -474,44 +482,108 @@ class ApiService {
   // --------------------------
   // ✅ LOGIN (Improved)
   // --------------------------
-  static Future<String?> login(String username, String password) async {
-    try {
-      final normalizedUsername = username.trim();
-      final response = await http.post(
-        Uri.parse('$baseUrl/login'),
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: {'username': normalizedUsername, 'password': password},
-      ).timeout(_slowEndpointTimeout);
+  static Future<String?> login(String username, String password, {bool forceTakeover = false}) async {
+    const int retries = 1; // total attempts = 1 + retries
+    for (int attempt = 0; attempt <= retries; attempt++) {
+      try {
+        final normalizedUsername = username.trim();
+        final deviceId = await getOrCreateDeviceId();
+        // Keep device_name short; backend truncates to 200.
+        final deviceName = kIsWeb ? 'web' : Platform.operatingSystem;
+        final response = await http
+            .post(
+              Uri.parse('$baseUrl/login'),
+              headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+              body: {
+                'username': normalizedUsername,
+                'password': password,
+                // Enable single-device enforcement and session tracking.
+                'device_id': deviceId,
+                'device_name': deviceName,
+                if (forceTakeover) 'force_takeover': 'true',
+              },
+            )
+            .timeout(const Duration(seconds: 25));
 
-      if (response.statusCode == 200) {
-        final resBody = jsonDecode(response.body);
-        final token = resBody['access_token'];
-        if (token != null) {
-          await saveToken(token);
+        _lastLoginStatusCode = response.statusCode;
+
+        if (response.statusCode == 200) {
+          final resBody = jsonDecode(response.body);
+          final token = resBody['access_token'];
+          if (token != null) {
+            await saveToken(token);
+          }
+          return null;
         }
-        return null;
-      } else {
+
+        // A very common race: user logs out on the other device then logs in here immediately.
+        // Give the backend a moment to process /session/logout and retry once.
+        if (!forceTakeover && response.statusCode == 409 && attempt < retries) {
+          await Future<void>.delayed(const Duration(milliseconds: 800));
+          continue;
+        }
+
+        // Retry only on likely-transient server errors.
+        if (attempt < retries && response.statusCode >= 500) {
+          await Future<void>.delayed(Duration(milliseconds: 400 * (attempt + 1)));
+          continue;
+        }
+
+        // Parse FastAPI error bodies robustly.
         try {
-          final detail = jsonDecode(response.body)['detail'];
-          return _mapLoginError(detail);
+          final decoded = jsonDecode(response.body);
+          if (decoded is Map && decoded.containsKey('detail')) {
+            return _mapLoginError(decoded['detail']);
+          }
         } catch (_) {
-          return "Login failed. Please try again.";
+          // fall through
         }
+
+        // Fallback (non-JSON or unexpected shape).
+        if (response.statusCode == 409) {
+          return 'Account is in use on another device. Please log out on that device first.';
+        }
+        if (response.statusCode == 401) {
+          return 'Incorrect username or password.';
+        }
+        if (response.statusCode == 422) {
+          return 'Login request was rejected (missing/invalid fields). Please update the app and try again.';
+        }
+        return 'Login failed (${response.statusCode}). Please try again.';
+      } on TimeoutException {
+        if (attempt < retries) continue;
+        return 'Login timed out. Please try again.';
+      } on SocketException {
+        if (attempt < retries) continue;
+        return 'Unable to connect. Please check your internet connection.';
+      } catch (e) {
+        if (attempt < retries) continue;
+        return 'Login failed. Please try again.';
       }
-    } on SocketException {
-      return "Unable to connect. Please check your internet connection.";
-    } catch (_) {
-      return "An unexpected error occurred. Please try again.";
     }
+    return 'Login failed. Please try again.';
   }
 
   // Map backend login errors to user-friendly messages
-  static String _mapLoginError(String? detail) {
-    if (detail == null) return "Login failed. Please try again.";
-    if (detail.contains("Incorrect username or password")) {
-      return "Incorrect username or password.";
+  static String _mapLoginError(dynamic detail) {
+    if (detail == null) return 'Login failed. Please try again.';
+
+    // FastAPI validation errors sometimes come as list/dict.
+    if (detail is List) {
+      // Try to produce a short readable message.
+      return 'Login failed. Please check your inputs and try again.';
     }
-    return detail;
+    if (detail is Map) {
+      // Common shape: {"msg": "..."} or field->error.
+      if (detail['msg'] != null) return detail['msg'].toString();
+      return 'Login failed. Please try again.';
+    }
+
+    final msg = detail.toString();
+    if (msg.contains('Incorrect username or password')) {
+      return 'Incorrect username or password.';
+    }
+    return msg;
   }
 
   // --------------------------
@@ -606,18 +678,59 @@ class ApiService {
   // ✅ Get Current Patient Details After Login
   // --------------------------
   static Future<Map<String, dynamic>?> getUserDetails() async {
-    try {
-      final headers = await getAuthHeaders();
-      final response =
-          await http.get(Uri.parse('$baseUrl/patients/me'), headers: headers).timeout(_slowEndpointTimeout);
+    _lastUserDetailsError = null;
+    const int retries = 1; // total attempts = 1 + retries
+    for (int attempt = 0; attempt <= retries; attempt++) {
+      try {
+        final headers = await getAuthHeaders();
+        if (!headers.containsKey('Authorization')) {
+          _lastUserDetailsError = 'Not authenticated. Please log in again.';
+          return null;
+        }
 
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body);
+        final response = await http
+            .get(Uri.parse('$baseUrl/patients/me'), headers: headers)
+            .timeout(const Duration(seconds: 25));
+
+        if (response.statusCode == 200) {
+          return jsonDecode(response.body);
+        }
+
+        // Try to extract a useful backend message.
+        try {
+          final decoded = jsonDecode(response.body);
+          if (decoded is Map && decoded['detail'] != null) {
+            _lastUserDetailsError = decoded['detail'].toString();
+          } else {
+            _lastUserDetailsError = 'Failed to load profile (${response.statusCode}).';
+          }
+        } catch (_) {
+          _lastUserDetailsError = 'Failed to load profile (${response.statusCode}).';
+        }
+
+        // Retry only on likely-transient failures.
+        final canRetry = response.statusCode >= 500;
+        if (attempt < retries && canRetry) {
+          await Future<void>.delayed(Duration(milliseconds: 500 * (attempt + 1)));
+          continue;
+        }
+        return null;
+      } on TimeoutException {
+        _lastUserDetailsError = 'Profile request timed out. Please try again.';
+        if (attempt < retries) continue;
+        return null;
+      } on SocketException {
+        _lastUserDetailsError = 'Network error while loading profile. Please check connection.';
+        if (attempt < retries) continue;
+        return null;
+      } catch (e) {
+        _lastUserDetailsError = 'Failed to load profile: $e';
+        // Unknown error: one retry max.
+        if (attempt < retries) continue;
+        return null;
       }
-      return null;
-    } catch (e) {
-      return null;
     }
+    return null;
   }
 
   // --------------------------

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import 'package:provider/provider.dart';
 import 'app_state.dart';
 import 'services/api_service.dart';
@@ -64,17 +65,37 @@ Future<String?> handleLogin(
   String username,
   String password,
 ) async {
-  final error = await ApiService.login(username, password);
+  String? error = await ApiService.login(username, password);
+
+  if (error != null && ApiService.lastLoginStatusCode == 409) {
+    final takeover = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Account in use'),
+        content: const Text(
+          'This account is currently active on another device. Do you want to login here and sign out the other device?',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Login here')),
+        ],
+      ),
+    );
+    if (takeover == true) {
+      error = await ApiService.login(username, password, forceTakeover: true);
+    }
+  }
 
   if (error != null) {
+    final String msg = error;
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text("Login Failed"),
-        content: Text(error),
+        content: Text(msg),
       ),
     );
-    return error;
+    return msg;
   } else {
     final appState = Provider.of<AppState>(context, listen: false);
     final token = await ApiService.getSavedToken();
@@ -103,6 +124,16 @@ Future<String?> handleLogin(
       appState.procedureDate = DateTime.tryParse((userDetails['procedure_date'] ?? '').toString());
       appState.procedureTime = _safeParseTimeOfDay(userDetails['procedure_time']);
       appState.procedureCompleted = userDetails['procedure_completed'] == true;
+    } else {
+      final msg = ApiService.lastUserDetailsError ?? 'Login failed. Could not retrieve user details.';
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Login Failed'),
+          content: Text(msg),
+        ),
+      );
+      return msg;
     }
 
     // Guarantee state is in sync with saved prefs after login
@@ -110,7 +141,8 @@ Future<String?> handleLogin(
 
     // Ensure the device token is registered immediately after login
     try {
-      await PushService.initializeAndRegister();
+      // Best-effort; don't block navigation on slow FCM calls.
+      unawaited(PushService.initializeAndRegister().timeout(const Duration(seconds: 8), onTimeout: () {}));
     } catch (_) {}
 
     return null;
