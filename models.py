@@ -97,6 +97,9 @@ class DeviceToken(Base):
     active = Column(Boolean, default=True, nullable=False)
     deactivated_at = Column(DateTime, nullable=True)
     deactivated_reason = Column(String, nullable=True)
+    # Whether the device supports local reminder scheduling (server uses this as a hint).
+    # Column is added via startup migration for existing DBs.
+    local_reminders_enabled = Column(Boolean, default=False, nullable=False)
     patient = relationship("Patient", back_populates="device_tokens")
 
 class Appointment(Base):

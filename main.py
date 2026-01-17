@@ -3556,6 +3556,12 @@ async def register_device(
     db: AsyncSession = Depends(get_db),
     current_user: models.Patient = Depends(get_current_user),
 ):
+    # Avoid ORM lazy-load surprises; grab scalar user id once.
+    try:
+        current_user_id = object.__getattribute__(current_user, 'id')
+    except Exception:
+        current_user_id = getattr(current_user, 'id', None)
+
     if payload is None:
         # Try form first
         form = None
@@ -3598,10 +3604,11 @@ async def register_device(
     existing_q = await db.execute(select(models.DeviceToken).where(models.DeviceToken.token == payload.token))
     existing = existing_q.scalars().first()
     if existing:
-        object.__setattr__(existing, 'patient_id', current_user.id)
+        object.__setattr__(existing, 'patient_id', current_user_id)
         object.__setattr__(existing, 'platform', payload.platform)
         try:
-            object.__setattr__(existing, 'local_reminders_enabled', bool(getattr(payload, 'local_reminders_enabled', False)))
+            if hasattr(models.DeviceToken, 'local_reminders_enabled'):
+                object.__setattr__(existing, 'local_reminders_enabled', bool(getattr(payload, 'local_reminders_enabled', False)))
         except Exception:
             pass
         # Reactivate if previously deactivated
@@ -3616,19 +3623,22 @@ async def register_device(
         if os.getenv("PUSH_SINGLE_DEVICE", "true").lower() in {"1", "true", "yes", "on"}:
             others_q = await db.execute(
                 select(models.DeviceToken)
-                .where(models.DeviceToken.patient_id == current_user.id)
+                .where(models.DeviceToken.patient_id == current_user_id)
                 .where(models.DeviceToken.id != object.__getattribute__(existing, 'id'))
             )
             for d in others_q.scalars().all():
                 await db.delete(d)
             await db.commit()
         return existing
-    row = models.DeviceToken(
-        patient_id=current_user.id,
-        platform=payload.platform,
-        token=payload.token,
-        local_reminders_enabled=bool(getattr(payload, 'local_reminders_enabled', False)),
-    )
+    create_kwargs = {
+        'patient_id': current_user_id,
+        'platform': payload.platform,
+        'token': payload.token,
+    }
+    if hasattr(models.DeviceToken, 'local_reminders_enabled'):
+        create_kwargs['local_reminders_enabled'] = bool(getattr(payload, 'local_reminders_enabled', False))
+
+    row = models.DeviceToken(**create_kwargs)
     db.add(row)
     await db.commit()
     await db.refresh(row)
@@ -3636,7 +3646,7 @@ async def register_device(
     if os.getenv("PUSH_SINGLE_DEVICE", "true").lower() in {"1", "true", "yes", "on"}:
         others_q = await db.execute(
             select(models.DeviceToken)
-            .where(models.DeviceToken.patient_id == current_user.id)
+            .where(models.DeviceToken.patient_id == current_user_id)
             .where(models.DeviceToken.id != object.__getattribute__(row, 'id'))
         )
         for d in others_q.scalars().all():
