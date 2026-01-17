@@ -1389,13 +1389,29 @@ async def login(
     if not user:
         raise HTTPException(status_code=401, detail="Incorrect username or password")
 
-    password_ok = verify_password(password, user.password)
+    # Extract frequently used scalar fields without triggering SQLAlchemy attribute
+    # instrumentation / lazy loads. This prevents MissingGreenlet if attributes
+    # get expired (e.g., after a commit in best-effort session tracking).
+    try:
+        patient_id = object.__getattribute__(user, "id")
+    except Exception:
+        patient_id = getattr(user, "id", None)
+    try:
+        token_subject = str(object.__getattribute__(user, "username"))
+    except Exception:
+        token_subject = str(getattr(user, "username", normalized))
+    try:
+        stored_hash_or_pw = object.__getattribute__(user, "password")
+    except Exception:
+        stored_hash_or_pw = getattr(user, "password", None)
+
+    password_ok = verify_password(password, stored_hash_or_pw)
 
     # Legacy fallback: some older deployments may have stored plaintext passwords.
     # If the plaintext matches, upgrade to a proper hash and proceed.
     if not password_ok:
         try:
-            stored = getattr(user, "password", None)
+            stored = stored_hash_or_pw
             if isinstance(stored, str) and stored == password:
                 try:
                     object.__setattr__(user, "password", get_password_hash(password))
@@ -1420,7 +1436,7 @@ async def login(
 
     # Single-device enforcement is best-effort; if session tracking fails we still allow login.
     did = (device_id or "").strip()
-    if did:
+    if did and patient_id is not None:
         try:
             now = datetime.utcnow()
             try:
@@ -1432,7 +1448,7 @@ async def login(
 
             other_recent_q = await db.execute(
                 select(models.UserSession)
-                .where(models.UserSession.patient_id == user.id)
+                .where(models.UserSession.patient_id == patient_id)
                 .where(models.UserSession.active == True)
                 .where(models.UserSession.device_id != did)
                 .where(models.UserSession.last_seen_at >= cutoff)
@@ -1453,7 +1469,7 @@ async def login(
             # Deactivate any other active sessions (stale), then upsert this device as active.
             stale_q = await db.execute(
                 select(models.UserSession)
-                .where(models.UserSession.patient_id == user.id)
+                .where(models.UserSession.patient_id == patient_id)
                 .where(models.UserSession.active == True)
                 .where(models.UserSession.device_id != did)
             )
@@ -1463,7 +1479,7 @@ async def login(
 
             me_q = await db.execute(
                 select(models.UserSession)
-                .where(models.UserSession.patient_id == user.id)
+                .where(models.UserSession.patient_id == patient_id)
                 .where(models.UserSession.device_id == did)
                 .limit(1)
             )
@@ -1476,7 +1492,7 @@ async def login(
                 db.add(me)
             else:
                 db.add(models.UserSession(
-                    patient_id=user.id,
+                    patient_id=patient_id,
                     device_id=did,
                     device_name=(str(device_name)[:200] if device_name else None),
                     created_at=now,
@@ -1493,7 +1509,7 @@ async def login(
             except Exception:
                 pass
 
-    access_token = create_access_token(data={"sub": user.username})
+    access_token = create_access_token(data={"sub": token_subject})
     return {"access_token": access_token, "token_type": "bearer"}
 
 
