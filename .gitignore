@@ -24,3 +24,24 @@ Thumbs.db
 
 # PostgreSQL dumps
 *.sql
+
+# -----------------------------
+# Flutter / Dart (generated)
+# -----------------------------
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+
+# -----------------------------
+# Android / Gradle (generated)
+# -----------------------------
+android/.gradle/
+android/app/build/
+android/local.properties
+
+# -----------------------------
+# IDE
+# -----------------------------
+*.iml

@@ -635,6 +635,7 @@ class AppState extends ChangeNotifier {
           'treatment': treat,
           'subtype': sub,
           'everFollowed': item['everFollowed'] ?? (item['followed'] ?? false),
+          'updated_at': item['updated_at'] ?? item['updatedAt'],
           'instruction_index':
               item['instruction_index'] ?? item['instructionIndex'],
           'quarantined': item['quarantined'] ?? false,
@@ -661,6 +662,7 @@ class AppState extends ChangeNotifier {
             'username': user,
             'treatment': treat,
             'subtype': sub,
+            'updated_at': item['updated_at'] ?? item['updatedAt'],
             'instruction_index':
                 item['instruction_index'] ?? item['instructionIndex'],
             'quarantined': item['quarantined'] ?? false,
@@ -761,6 +763,17 @@ class AppState extends ChangeNotifier {
   void _normalizeAndDedupeInstructionLogs() {
     final Map<String, Map<String, dynamic>> latest = {};
 
+    DateTime? parseIsoUtcLocal(dynamic s) {
+      if (s == null) return null;
+      final str = s.toString();
+      if (str.trim().isEmpty) return null;
+      try {
+        return DateTime.parse(str).toUtc();
+      } catch (_) {
+        return null;
+      }
+    }
+
     String normKeyText(String s) =>
         s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
 
@@ -816,6 +829,9 @@ class AppState extends ChangeNotifier {
           raw['everFollowed']?.toString() == 'true';
       final ever = followed || prevEver;
 
+        final updatedAtStr = (raw['updated_at'] ?? raw['updatedAt'])?.toString();
+        final updatedAt = parseIsoUtcLocal(updatedAtStr);
+
       // If index is missing (or differs across sources), try to adopt the preferred index for the same text.
       final textKey =
           '$date|$user|$treat|$sub|$type|${normKeyText(instruction)}';
@@ -836,6 +852,7 @@ class AppState extends ChangeNotifier {
         'subtype': sub,
         'instruction_index': idx,
         'everFollowed': ever,
+        'updated_at': updatedAtStr,
         'quarantined': quarantined,
       };
 
@@ -845,10 +862,22 @@ class AppState extends ChangeNotifier {
         continue;
       }
 
-      // Keep "latest" as the last-seen item; merge everFollowed.
-      entry['everFollowed'] =
+      // Prefer the newest row by updated_at; always merge everFollowed.
+        final prevUpdatedAt =
+          parseIsoUtcLocal(prev['updated_at'] ?? prev['updatedAt']);
+
+      final mergedEver =
           (prev['everFollowed'] == true) || (entry['everFollowed'] == true);
-      latest[key] = entry;
+
+      final keepPrev = prevUpdatedAt != null &&
+          (updatedAt == null || prevUpdatedAt.isAfter(updatedAt));
+      if (keepPrev) {
+        prev['everFollowed'] = mergedEver;
+        latest[key] = prev;
+      } else {
+        entry['everFollowed'] = mergedEver;
+        latest[key] = entry;
+      }
     }
 
     _instructionLogs
@@ -950,6 +979,17 @@ class AppState extends ChangeNotifier {
             .replaceAll('—', '-');
       }
 
+      DateTime? parseIsoUtc(dynamic s) {
+        if (s == null) return null;
+        final str = s.toString();
+        if (str.trim().isEmpty) return null;
+        try {
+          return DateTime.parse(str).toUtc();
+        } catch (_) {
+          return null;
+        }
+      }
+
       int? asInt(dynamic v) {
         if (v is int) return v;
         return int.tryParse(v?.toString() ?? '');
@@ -1033,6 +1073,46 @@ class AppState extends ChangeNotifier {
           }
         }
 
+        // Last-write-wins: do not let an older server row overwrite a newer local change.
+        int? bestLocalIndex;
+        DateTime? bestLocalUpdatedAt;
+        for (final i in matchIndices) {
+          final ts =
+              parseIsoUtc(_instructionLogs[i]['updated_at'] ?? _instructionLogs[i]['updatedAt']);
+          if (ts == null) continue;
+          if (bestLocalUpdatedAt == null || ts.isAfter(bestLocalUpdatedAt)) {
+            bestLocalUpdatedAt = ts;
+            bestLocalIndex = i;
+          }
+        }
+
+        final keepLocal = bestLocalUpdatedAt != null &&
+            (updatedAt == null || bestLocalUpdatedAt.isAfter(updatedAt));
+        if (keepLocal) {
+          // Remove duplicates but keep the newest local row.
+          for (final i in matchIndices.reversed) {
+            if (i == bestLocalIndex) continue;
+            _instructionLogs.removeAt(i);
+            changed = true;
+            if (bestLocalIndex != null && i < bestLocalIndex) {
+              bestLocalIndex = bestLocalIndex - 1;
+            }
+          }
+
+          // Still merge everFollowed from the server row.
+          if (bestLocalIndex != null) {
+            final existing = _instructionLogs[bestLocalIndex];
+            final prevEver = existing['everFollowed'] == true ||
+                existing['everFollowed']?.toString() == 'true';
+            final mergedEver = prevEver || everFollowed || followed;
+            if (mergedEver != prevEver) {
+              existing['everFollowed'] = true;
+              changed = true;
+            }
+          }
+          continue;
+        }
+
         for (final i in matchIndices.reversed) {
           _instructionLogs.removeAt(i);
         }
@@ -1046,6 +1126,7 @@ class AppState extends ChangeNotifier {
           'treatment': storeTreatment,
           'subtype': storeSubtype,
           'everFollowed': everFollowed || followed,
+          'updated_at': updatedAt?.toIso8601String(),
           'instruction_index': canonicalIdx,
           'quarantined': quarantined,
         };
@@ -1163,6 +1244,7 @@ class AppState extends ChangeNotifier {
         'subtype': sub,
         'instruction_index': idx,
         'everFollowed': followed || anyPrevEver,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
         'quarantined': quarantined,
       };
 
@@ -1788,6 +1870,10 @@ class AppState extends ChangeNotifier {
     }
     // After loading user details, attempt loading instruction logs and optionally run one-time bulk sync.
     await loadInstructionLogs(username: username);
+
+    // Always pull server-side changes first so multi-device state is canonical.
+    await pullInstructionStatusChanges();
+
     if (runBulkSync) {
       await maybeBulkSyncInstructionLogs();
     }
@@ -1884,7 +1970,8 @@ class AppState extends ChangeNotifier {
     try {
       final items = _instructionLogs.where((e) {
         final q = e['quarantined'];
-        return !(q == true || q?.toString() == 'true');
+        final followed = e['followed'] == true || e['followed']?.toString() == 'true';
+        return !(q == true || q?.toString() == 'true') && followed;
       }).map((e) {
         final type = (e['type'] ?? '').toString();
         final instruction = (e['instruction'] ?? e['note'] ?? '').toString();

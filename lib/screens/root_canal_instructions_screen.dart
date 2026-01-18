@@ -17,34 +17,29 @@ class RootCanalInstructionsScreen extends StatefulWidget {
 
 class _RootCanalInstructionsScreenState extends State<RootCanalInstructionsScreen>
     with InstructionSnapshotHelper<RootCanalInstructionsScreen> {
-  void _saveAllLogsForDay() {
-    // Always use the selected date (widget.date) for log saving
-    final procedureDate = DateTime(widget.date.year, widget.date.month, widget.date.day);
-    final logDate = procedureDate;
-    final logDateStr = AppState.formatYMD(logDate);
+  DateTime _selectedLogDate() {
+    return DateTime(widget.date.year, widget.date.month, widget.date.day);
+  }
+
+  void _logInstructionChange({
+    required DateTime logDate,
+    required String group,
+    required String instructionEn,
+    required bool followed,
+  }) {
     final appState = Provider.of<AppState>(context, listen: false);
-    for (int i = 0; i < generalInstructions.length; i++) {
-      appState.addInstructionLog(
-        generalInstructions[i]['en'] ?? '',
-        date: logDateStr,
-        type: 'general',
-        followed: _generalChecked.length > i ? _generalChecked[i] : false,
-        username: appState.username,
-        treatment: appState.treatment,
-        subtype: appState.treatmentSubtype,
-      );
-    }
-    for (int i = 0; i < specificInstructions.length; i++) {
-      appState.addInstructionLog(
-        specificInstructions[i]['en'] ?? '',
-        date: logDateStr,
-        type: 'specific',
-        followed: _specificChecked.length > i ? _specificChecked[i] : false,
-        username: appState.username,
-        treatment: appState.treatment,
-        subtype: appState.treatmentSubtype,
-      );
-    }
+    final logDateStr = AppState.formatYMD(logDate);
+    final idx = appState.stableInstructionIndex(group, instructionEn);
+    appState.addInstructionLog(
+      instructionEn,
+      date: logDateStr,
+      type: group,
+      followed: followed,
+      username: appState.username,
+      treatment: appState.treatment,
+      subtype: appState.treatmentSubtype,
+      instructionIndex: idx,
+    );
   }
 
   String selectedLang = 'en'; // 'en' for English, 'mr' for Marathi
@@ -101,6 +96,7 @@ class _RootCanalInstructionsScreenState extends State<RootCanalInstructionsScree
   late int currentDay;
   late List<bool> _generalChecked;
   late List<bool> _specificChecked;
+  bool _hasUserInteracted = false;
 
   String _generalChecklistKey(DateTime date) => "root_canal_general_${date.year}_${date.month}_${date.day}";
   String _specificChecklistKey(DateTime date) => "root_canal_specific_${date.year}_${date.month}_${date.day}";
@@ -165,39 +161,51 @@ class _RootCanalInstructionsScreenState extends State<RootCanalInstructionsScree
       }
 
       hydrateFromAppState();
-      _saveAllLogsForDay();
 
       unawaited(() async {
         await appState.pullInstructionStatusChanges();
         if (!mounted) return;
+        if (_hasUserInteracted) return;
         hydrateFromAppState();
-        _saveAllLogsForDay();
       }());
     });
   }
 
   void _updateGeneral(int idx, bool? value) {
+    _hasUserInteracted = true;
     setState(() {
       _generalChecked[idx] = value ?? false;
     });
-    final selectedDate = DateTime(widget.date.year, widget.date.month, widget.date.day);
+    final selectedDate = _selectedLogDate();
+    final followed = value ?? false;
     Provider.of<AppState>(
       context,
       listen: false,
     ).setChecklistForKey(_generalChecklistKey(selectedDate), _generalChecked);
-    _saveAllLogsForDay();
+    _logInstructionChange(
+      logDate: selectedDate,
+      group: 'general',
+      instructionEn: generalInstructions[idx]['en'] ?? '',
+      followed: followed,
+    );
   }
 
   void _updateSpecificChecklist(int idx, bool value) {
+    _hasUserInteracted = true;
     setState(() {
       _specificChecked[idx] = value;
     });
-    final selectedDate = DateTime(widget.date.year, widget.date.month, widget.date.day);
+    final selectedDate = _selectedLogDate();
     Provider.of<AppState>(
       context,
       listen: false,
     ).setChecklistForKey(_specificChecklistKey(selectedDate), _specificChecked);
-    _saveAllLogsForDay();
+    _logInstructionChange(
+      logDate: selectedDate,
+      group: 'specific',
+      instructionEn: specificInstructions[idx]['en'] ?? '',
+      followed: value,
+    );
   }
 
   void _logInstructionStatusIfNeeded() {

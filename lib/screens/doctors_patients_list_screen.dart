@@ -21,7 +21,8 @@ DateTime? _parseDateOnlyFlexible(String raw) {
   }
 
   // Try parsing full timestamp first (preserves timezone), including "YYYY-MM-DD HH:mm:ss".
-  final isoCandidate = s.contains(' ') && !s.contains('T') ? s.replaceFirst(' ', 'T') : s;
+  final isoCandidate =
+      s.contains(' ') && !s.contains('T') ? s.replaceFirst(' ', 'T') : s;
   final full = DateTime.tryParse(isoCandidate);
   if (full != null) {
     final local = full.toLocal();
@@ -58,10 +59,15 @@ class DoctorsPatientsListScreen extends StatefulWidget {
   final String? initialDoctor;
   final bool lockSelection;
 
-  const DoctorsPatientsListScreen({super.key, this.initialDepartment, this.initialDoctor, this.lockSelection = false});
+  const DoctorsPatientsListScreen(
+      {super.key,
+      this.initialDepartment,
+      this.initialDoctor,
+      this.lockSelection = false});
 
   @override
-  State<DoctorsPatientsListScreen> createState() => _DoctorsPatientsListScreenState();
+  State<DoctorsPatientsListScreen> createState() =>
+      _DoctorsPatientsListScreenState();
 }
 
 class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
@@ -100,7 +106,8 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
     return '${dt.year.toString().padLeft(4, '0')}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
   }
 
-  List<Map<String, dynamic>> _applyTreatmentStartDateFilter(List<Map<String, dynamic>> src) {
+  List<Map<String, dynamic>> _applyTreatmentStartDateFilter(
+      List<Map<String, dynamic>> src) {
     final selected = _treatmentStartDateFilter;
     if (selected == null) return src;
     final selectedYmd = _formatYMD(selected);
@@ -134,9 +141,11 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
       barrierColor: Colors.black.withValues(alpha: 0.45),
       transitionDuration: const Duration(milliseconds: 220),
       transitionBuilder: (ctx, anim, secondaryAnim, child) {
-        final curved = CurvedAnimation(parent: anim, curve: Curves.easeOutCubic);
+        final curved =
+            CurvedAnimation(parent: anim, curve: Curves.easeOutCubic);
         return SlideTransition(
-          position: Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero).animate(curved),
+          position: Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
+              .animate(curved),
           child: FadeTransition(opacity: curved, child: child),
         );
       },
@@ -148,7 +157,8 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
             final cs = Theme.of(sheetCtx).colorScheme;
             final media = MediaQuery.of(sheetCtx);
             final maxHeight = media.size.height * 0.85;
-            final calendarHeight = (media.size.height * 0.45).clamp(320.0, 460.0);
+            final calendarHeight =
+                (media.size.height * 0.45).clamp(320.0, 460.0);
 
             return SizedBox.expand(
               child: Align(
@@ -160,7 +170,8 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
                     child: Material(
                       color: cs.surface,
                       shape: const RoundedRectangleBorder(
-                        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                        borderRadius:
+                            BorderRadius.vertical(top: Radius.circular(16)),
                       ),
                       clipBehavior: Clip.antiAlias,
                       child: ConstrainedBox(
@@ -179,7 +190,8 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
                                   width: 40,
                                   height: 4,
                                   decoration: BoxDecoration(
-                                    color: cs.onSurfaceVariant.withValues(alpha: 0.35),
+                                    color: cs.onSurfaceVariant
+                                        .withValues(alpha: 0.35),
                                     borderRadius: BorderRadius.circular(999),
                                   ),
                                 ),
@@ -187,12 +199,16 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
                               const SizedBox(height: 12),
                               const Text(
                                 'Filter by treatment start date',
-                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                                style: TextStyle(
+                                    fontSize: 16, fontWeight: FontWeight.w600),
                               ),
                               const SizedBox(height: 6),
                               Text(
-                                temp == null ? 'No date selected' : 'Selected: ${_formatDMY(temp!)}',
-                                style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant),
+                                temp == null
+                                    ? 'No date selected'
+                                    : 'Selected: ${_formatDMY(temp!)}',
+                                style: TextStyle(
+                                    fontSize: 13, color: cs.onSurfaceVariant),
                               ),
                               const SizedBox(height: 12),
                               SizedBox(
@@ -205,7 +221,8 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
                                     lastDate: DateTime(2100, 12, 31),
                                     onDateChanged: (picked) {
                                       setSheetState(() {
-                                        temp = DateTime(picked.year, picked.month, picked.day);
+                                        temp = DateTime(picked.year,
+                                            picked.month, picked.day);
                                       });
                                     },
                                   ),
@@ -220,13 +237,17 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
                                       setState(() {
                                         _treatmentStartDateFilter = null;
                                       });
-                                      Navigator.of(sheetCtx, rootNavigator: true).pop();
+                                      Navigator.of(sheetCtx,
+                                              rootNavigator: true)
+                                          .pop();
                                     },
                                     child: const Text('Clear'),
                                   ),
                                   const Spacer(),
                                   TextButton(
-                                    onPressed: () => Navigator.of(sheetCtx, rootNavigator: true).pop(),
+                                    onPressed: () => Navigator.of(sheetCtx,
+                                            rootNavigator: true)
+                                        .pop(),
                                     child: const Text('Cancel'),
                                   ),
                                   const SizedBox(width: 8),
@@ -237,15 +258,19 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
                                     // Override locally to ensure finite constraints.
                                     style: ElevatedButton.styleFrom(
                                       minimumSize: const Size(0, 40),
-                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 16, vertical: 12),
+                                      tapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
                                     ),
                                     onPressed: () {
                                       if (!mounted) return;
                                       setState(() {
                                         _treatmentStartDateFilter = temp;
                                       });
-                                      Navigator.of(sheetCtx, rootNavigator: true).pop();
+                                      Navigator.of(sheetCtx,
+                                              rootNavigator: true)
+                                          .pop();
                                     },
                                     child: const Text('Apply'),
                                   ),
@@ -286,7 +311,8 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
           _loading = false;
           _error = 'Request timed out. Please refresh.';
         });
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Timeout loading patients (15s)')));
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Timeout loading patients (15s)')));
       }
     });
     List<Map<String, dynamic>> list = const [];
@@ -305,7 +331,8 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
         _error = 'Failed to load patients';
       });
       // Show transient feedback so user knows it failed
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error loading patients: $e')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Error loading patients: $e')));
     } finally {
       if (mounted) {
         setState(() {
@@ -346,7 +373,21 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
                         context,
                       ).push(
                         NoAnimationPageRoute(
-                          builder: (_) => DoctorPatientFullProgressScreen(username: username),
+                          builder: (_) => DoctorPatientFullProgressScreen(
+                            username: username,
+                            initialProcedureDate:
+                                (picked?.procedureDate ?? '').trim().isEmpty
+                                    ? null
+                                    : picked?.procedureDate,
+                            initialTreatment:
+                                (picked?.treatment ?? '').trim().isEmpty
+                                    ? null
+                                    : picked?.treatment,
+                            initialSubtype:
+                                (picked?.subtype ?? '').trim().isEmpty
+                                    ? null
+                                    : picked?.subtype,
+                          ),
                         ),
                       );
                     },
@@ -361,7 +402,8 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
                       } else {
                         ScaffoldMessenger.of(
                           context,
-                        ).showSnackBar(const SnackBar(content: Text('Select a doctor first')));
+                        ).showSnackBar(const SnackBar(
+                            content: Text('Select a doctor first')));
                       }
                     },
             ),
@@ -375,7 +417,8 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
                 child: LayoutBuilder(
                   builder: (context, constraints) {
-                    final bool narrow = constraints.maxWidth < 520; // threshold for stacking
+                    final bool narrow =
+                        constraints.maxWidth < 520; // threshold for stacking
                     // Build dropdown widgets once
                     final departmentWidget = _DepartmentDropdown(
                       departments: kDepartments,
@@ -383,7 +426,8 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
                       onChanged: (val) {
                         setState(() {
                           _selectedDepartment = val;
-                          _selectedDoctor = null; // reset doctor when dept changes
+                          _selectedDoctor =
+                              null; // reset doctor when dept changes
                           _patients = [];
                           _error = null;
                         });
@@ -400,7 +444,8 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
                           _patients = [];
                           _error = null;
                         });
-                        debugPrint('[DoctorDash] Doctor selected: $val (dept=$_selectedDepartment)');
+                        debugPrint(
+                            '[DoctorDash] Doctor selected: $val (dept=$_selectedDepartment)');
                         if (val != null) {
                           _fetchPatients();
                         }
@@ -412,7 +457,11 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         mainAxisSize: MainAxisSize.min,
-                        children: [departmentWidget, const SizedBox(height: 12), doctorWidget],
+                        children: [
+                          departmentWidget,
+                          const SizedBox(height: 12),
+                          doctorWidget
+                        ],
                       );
                     }
                     // Wide layout: place dropdowns in a Row with Expanded to share space
@@ -442,8 +491,12 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
                     ),
                     IconButton(
                       tooltip: 'Filter by treatment start date',
-                      onPressed: (_selectedDoctor == null || _loading) ? null : _openTreatmentStartDateFilterCard,
-                      icon: Icon(_treatmentStartDateFilter == null ? Icons.filter_alt_outlined : Icons.filter_alt),
+                      onPressed: (_selectedDoctor == null || _loading)
+                          ? null
+                          : _openTreatmentStartDateFilterCard,
+                      icon: Icon(_treatmentStartDateFilter == null
+                          ? Icons.filter_alt_outlined
+                          : Icons.filter_alt),
                     ),
                   ],
                 ),
@@ -464,8 +517,11 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
                     ),
                     IconButton(
                       tooltip: 'Filter by treatment start date',
-                      onPressed: _loading ? null : _openTreatmentStartDateFilterCard,
-                      icon: Icon(_treatmentStartDateFilter == null ? Icons.filter_alt_outlined : Icons.filter_alt),
+                      onPressed:
+                          _loading ? null : _openTreatmentStartDateFilterCard,
+                      icon: Icon(_treatmentStartDateFilter == null
+                          ? Icons.filter_alt_outlined
+                          : Icons.filter_alt),
                     ),
                   ],
                 ),
@@ -498,26 +554,58 @@ class _DoctorsPatientsListScreenState extends State<DoctorsPatientsListScreen> {
                           ? Center(child: Text(_error ?? 'No patients'))
                           : ListView.separated(
                               itemCount: filteredPatients.length,
-                              separatorBuilder: (_, __) => const Divider(height: 1),
+                              separatorBuilder: (_, __) =>
+                                  const Divider(height: 1),
                               itemBuilder: (ctx, idx) {
                                 final p = filteredPatients[idx];
                                 final name = p['name'] ?? 'Unknown';
                                 final username = p['username'] ?? '';
-                                final treatment = p['treatment'] ?? 'No treatment set';
-                                final subtype = (p['treatment_subtype'] ?? '').toString().trim();
-                                final rawDate = (p['procedure_date'] ?? '').toString();
+                                final treatment =
+                                    p['treatment'] ?? 'No treatment set';
+                                final subtype = (p['treatment_subtype'] ?? '')
+                                    .toString()
+                                    .trim();
+                                final rawDate =
+                                    (p['procedure_date'] ?? '').toString();
                                 final pd = _parseDateOnlyFlexible(rawDate);
-                                final dateLabel = pd == null ? '-' : _formatDMY(pd);
-                                final tLabel = subtype.isNotEmpty ? '$treatment ($subtype)' : '$treatment';
+                                final dateLabel =
+                                    pd == null ? '-' : _formatDMY(pd);
+                                final tLabel = subtype.isNotEmpty
+                                    ? '$treatment ($subtype)'
+                                    : '$treatment';
                                 return ListTile(
                                   title: SafeText(name),
-                                  subtitle: SafeText('$username • $tLabel • $dateLabel', maxLines: 2),
+                                  subtitle: SafeText(
+                                      '$username • $tLabel • $dateLabel',
+                                      maxLines: 2),
                                   trailing: const Icon(Icons.chevron_right),
                                   onTap: () {
                                     if (username.isEmpty) return;
+                                    final procRaw = (p['procedure_date'] ?? '')
+                                        .toString()
+                                        .trim();
+                                    final procDate = procRaw.isEmpty
+                                        ? null
+                                        : (procRaw.contains('T')
+                                            ? procRaw.split('T').first
+                                            : procRaw);
+                                    final t = (p['treatment'] ?? '')
+                                        .toString()
+                                        .trim();
+                                    final st = (p['treatment_subtype'] ?? '')
+                                        .toString()
+                                        .trim();
                                     Navigator.of(context).push(
                                       NoAnimationPageRoute(
-                                        builder: (_) => DoctorPatientFullProgressScreen(username: username),
+                                        builder: (_) =>
+                                            DoctorPatientFullProgressScreen(
+                                          username: username,
+                                          initialProcedureDate: procDate,
+                                          initialTreatment:
+                                              t.isEmpty ? null : t,
+                                          initialSubtype:
+                                              st.isEmpty ? null : st,
+                                        ),
                                       ),
                                     );
                                   },
@@ -536,12 +624,16 @@ class _DepartmentDropdown extends StatelessWidget {
   final List<String> departments;
   final String? value;
   final ValueChanged<String?> onChanged;
-  const _DepartmentDropdown({required this.departments, required this.value, required this.onChanged});
+  const _DepartmentDropdown(
+      {required this.departments,
+      required this.value,
+      required this.onChanged});
   @override
   Widget build(BuildContext context) {
     return DropdownButtonFormField<String>(
       initialValue: value,
-      decoration: const InputDecoration(labelText: 'Department', border: OutlineInputBorder(), isDense: true),
+      decoration: const InputDecoration(
+          labelText: 'Department', border: OutlineInputBorder(), isDense: true),
       isExpanded: true,
       selectedItemBuilder: (ctx) => departments
           .map(
@@ -569,12 +661,17 @@ class _DoctorDropdown extends StatelessWidget {
   final String? value;
   final bool enabled;
   final ValueChanged<String?> onChanged;
-  const _DoctorDropdown({required this.doctors, required this.value, required this.enabled, required this.onChanged});
+  const _DoctorDropdown(
+      {required this.doctors,
+      required this.value,
+      required this.enabled,
+      required this.onChanged});
   @override
   Widget build(BuildContext context) {
     return DropdownButtonFormField<String>(
       initialValue: enabled ? value : null,
-      decoration: const InputDecoration(labelText: 'Doctor', border: OutlineInputBorder(), isDense: true),
+      decoration: const InputDecoration(
+          labelText: 'Doctor', border: OutlineInputBorder(), isDense: true),
       isExpanded: true,
       selectedItemBuilder: (ctx) => doctors
           .map(
@@ -599,7 +696,11 @@ class _DoctorDropdown extends StatelessWidget {
 
 class _PatientPick {
   final String username;
-  const _PatientPick(this.username);
+  final String procedureDate; // YYYY-MM-DD
+  final String treatment;
+  final String subtype;
+  const _PatientPick(this.username,
+      {this.procedureDate = '', this.treatment = '', this.subtype = ''});
 }
 
 class _PatientSearchDelegate extends SearchDelegate<_PatientPick?> {
@@ -614,13 +715,20 @@ class _PatientSearchDelegate extends SearchDelegate<_PatientPick?> {
   @override
   List<Widget>? buildActions(BuildContext context) {
     return [
-      if (query.isNotEmpty) IconButton(tooltip: 'Clear', onPressed: () => query = '', icon: const Icon(Icons.clear)),
+      if (query.isNotEmpty)
+        IconButton(
+            tooltip: 'Clear',
+            onPressed: () => query = '',
+            icon: const Icon(Icons.clear)),
     ];
   }
 
   @override
   Widget? buildLeading(BuildContext context) {
-    return IconButton(tooltip: 'Back', onPressed: () => close(context, null), icon: const Icon(Icons.arrow_back));
+    return IconButton(
+        tooltip: 'Back',
+        onPressed: () => close(context, null),
+        icon: const Icon(Icons.arrow_back));
   }
 
   List<Map<String, dynamic>> _filtered() {
@@ -633,7 +741,8 @@ class _PatientSearchDelegate extends SearchDelegate<_PatientPick?> {
       String dateYmd = '';
       String dateDmy = '';
       if (rawDate.trim().isNotEmpty) {
-        final normalized = rawDate.contains('T') ? rawDate.split('T').first : rawDate;
+        final normalized =
+            rawDate.contains('T') ? rawDate.split('T').first : rawDate;
         final dt = DateTime.tryParse(normalized);
         if (dt != null) {
           dateYmd =
@@ -652,19 +761,19 @@ class _PatientSearchDelegate extends SearchDelegate<_PatientPick?> {
   @override
   Widget buildResults(BuildContext context) {
     final list = _filtered();
-    return _ResultsList(list: list, onPick: (u) => close(context, _PatientPick(u)));
+    return _ResultsList(list: list, onPick: (pick) => close(context, pick));
   }
 
   @override
   Widget buildSuggestions(BuildContext context) {
     final list = _filtered();
-    return _ResultsList(list: list, onPick: (u) => close(context, _PatientPick(u)));
+    return _ResultsList(list: list, onPick: (pick) => close(context, pick));
   }
 }
 
 class _ResultsList extends StatelessWidget {
   final List<Map<String, dynamic>> list;
-  final ValueChanged<String> onPick;
+  final ValueChanged<_PatientPick> onPick;
   const _ResultsList({required this.list, required this.onPick});
 
   String _formatDMY(DateTime dt) {
@@ -691,10 +800,15 @@ class _ResultsList extends StatelessWidget {
         final tLabel = subtype.isNotEmpty ? '$treatment ($subtype)' : treatment;
         final base = tLabel.isEmpty ? username : '$username • $tLabel';
         final subtitle = dateLabel.isEmpty ? base : '$base • $dateLabel';
+        final procRaw = rawDate.trim();
+        final procDate = procRaw.isEmpty
+            ? ''
+            : (procRaw.contains('T') ? procRaw.split('T').first : procRaw);
         return ListTile(
           title: SafeText(name),
           subtitle: SafeText(subtitle, maxLines: 2),
-          onTap: () => onPick(username),
+          onTap: () => onPick(_PatientPick(username,
+              procedureDate: procDate, treatment: treatment, subtype: subtype)),
         );
       },
     );
