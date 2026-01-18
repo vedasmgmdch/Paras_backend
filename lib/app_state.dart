@@ -461,8 +461,10 @@ class AppState extends ChangeNotifier {
     final sub =
         _canonicalSubtype(treat, (subtype ?? _treatmentSubtype ?? '').trim());
 
-    String norm(String s) =>
-        s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+    String norm(String s) => _canonicalInstructionText(s)
+      .trim()
+      .toLowerCase()
+      .replaceAll(RegExp(r'\s+'), ' ');
     final wantedText = instructionText == null ? null : norm(instructionText);
 
     bool anyFollowed = false;
@@ -503,17 +505,25 @@ class AppState extends ChangeNotifier {
     String? treatment,
     String? subtype,
   }) {
+    final typeCanon = _canonicalGroup(type);
     return List<bool>.generate(
       length,
-      (i) => isInstructionFollowedForDay(
-        day: day,
-        type: type,
-        instructionIndex: i,
-        instructionText: instructionTextForIndex(i),
-        username: username,
-        treatment: treatment,
-        subtype: subtype,
-      ),
+      (i) {
+        final instructionText = instructionTextForIndex(i);
+        final idx = stableInstructionIndex(
+          typeCanon,
+          _canonicalInstructionText(instructionText),
+        );
+        return isInstructionFollowedForDay(
+          day: day,
+          type: typeCanon,
+          instructionIndex: idx,
+          instructionText: instructionText,
+          username: username,
+          treatment: treatment,
+          subtype: subtype,
+        );
+      },
     );
   }
 
@@ -1954,8 +1964,9 @@ class AppState extends ChangeNotifier {
   }
 
   int stableInstructionIndex(String group, String instruction) {
-    final s =
-        (group.trim().toLowerCase() + '|' + instruction.trim().toLowerCase());
+    final g = _canonicalGroup(group);
+    final i = _canonicalInstructionText(instruction).toLowerCase();
+    final s = '$g|$i';
     int hash = 0x811C9DC5; // FNV offset basis 32-bit
     const int prime = 0x01000193; // FNV prime
     for (final codeUnit in s.codeUnits) {

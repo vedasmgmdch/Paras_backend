@@ -4,6 +4,8 @@ import '../services/api_service.dart';
 import 'chat_screen.dart';
 import '../widgets/no_animation_page_route.dart';
 import '../theme/semantic_colors.dart';
+import '../instruction_catalog.dart';
+import '../utils/instruction_log_materializer.dart';
 
 // This doctor view is a read-only mirror of the patient's ProgressScreen, showing:
 // - Recovery Dashboard (day of recovery + progress bar)
@@ -52,11 +54,11 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
   Map<String, dynamic>? _chatInfo; // current patient meta (for chat lock/banner)
   List<Map<String, dynamic>> _episodes = [];
   bool _lastUsedSubtypeFallback = false; // track if fallback applied for current selection (for rebuild messages)
-  // NOTE: This screen now enforces STRICT parity with the patient ProgressScreen:
-  // - Only "followed" instruction logs are displayed for the selected day
-  // - No synthetic placeholders / timeline expansion
-  // - No toggle to show unfollowed or placeholder entries
-  // - Dates list derives ONLY from procedure_date (if missing -> message)
+  // NOTE: This screen aims for strict parity with the patient ProgressScreen:
+  // - Uses the same expected instruction catalog
+  // - Uses stable IDs + canonicalization to dedupe logs reliably
+  // - Materializes missing expected items as synthetic "Not Followed" entries
+  // - Dates list derives from procedure_date (if missing -> message)
 
   // Derived recovery stats
   int? _daysSinceProcedure;
@@ -105,7 +107,9 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
       return _isAllowedForPfdFixed(raw);
     }).toList();
 
-    final latest = _getLatestInstructionLogs(filtered);
+    final latest = InstructionLogMaterializer.dedupeLatestByDateTypeInstruction(
+      filtered.map((e) => Map<String, dynamic>.from(e)).toList(),
+    );
     if (latest.isEmpty) {
       return const _ProgressStatus(
         label: 'No data yet',
@@ -325,10 +329,15 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
             status.add({
               ...r,
               'type': _normType((r['group'] ?? r['type'] ?? '').toString()),
-              'instruction': (r['instruction_text'] ?? r['instruction'] ?? r['note'] ?? '').toString(),
+              'instruction': InstructionLogMaterializer.canonicalInstructionText(
+                (r['instruction_text'] ?? r['instruction'] ?? r['note'] ?? '').toString(),
+              ),
               'followed': (r['followed'] == true || r['followed']?.toString() == 'true'),
               'date': rawDate,
-              'instruction_index': _asInt(r['instruction_index'] ?? r['instructionIndex']),
+              'instruction_index': InstructionLogMaterializer.stableInstructionIndex(
+                _normType((r['group'] ?? r['type'] ?? '').toString()),
+                (r['instruction_text'] ?? r['instruction'] ?? r['note'] ?? '').toString(),
+              ),
               'synthetic': (r['synthetic'] == true || r['synthetic']?.toString() == 'true'),
             });
           }
@@ -350,10 +359,15 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
           return {
             ...r,
             'type': _normType((r['group'] ?? r['type'] ?? '').toString()),
-            'instruction': (r['instruction_text'] ?? r['instruction'] ?? r['note'] ?? '').toString(),
+            'instruction': InstructionLogMaterializer.canonicalInstructionText(
+              (r['instruction_text'] ?? r['instruction'] ?? r['note'] ?? '').toString(),
+            ),
             'followed': (r['followed'] == true || r['followed']?.toString() == 'true'),
             'date': rawDate,
-            'instruction_index': _asInt(r['instruction_index'] ?? r['instructionIndex']),
+            'instruction_index': InstructionLogMaterializer.stableInstructionIndex(
+              _normType((r['group'] ?? r['type'] ?? '').toString()),
+              (r['instruction_text'] ?? r['instruction'] ?? r['note'] ?? '').toString(),
+            ),
             'synthetic': (r['synthetic'] == true || r['synthetic']?.toString() == 'true'),
           };
         }).toList();
@@ -401,36 +415,8 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
     }
   }
 
-  // --- Instruction log helpers (aligned with patient screen) ---
-  String _normType(String s) => s.trim().toLowerCase();
-
-  String _normText(String s) =>
-      s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ').replaceAll('–', '-').replaceAll('—', '-');
-
-  int? _asInt(dynamic v) {
-    if (v is int) return v;
-    return int.tryParse(v?.toString() ?? '');
-  }
-
-  String _stableLogKey(Map<String, dynamic> log) {
-    final date = (log['date'] ?? '').toString();
-    final type = _normType((log['type'] ?? '').toString());
-    final instruction = (log['instruction'] ?? log['note'] ?? '').toString();
-    final idx = log['instruction_index'];
-    final idxStr = (idx == null) ? '' : idx.toString();
-    if (idxStr.isNotEmpty) return '$date|$type|#${idxStr}';
-    final n = _normText(instruction);
-    return '$date|$type|$n';
-  }
-
-  List<Map<String, dynamic>> _getLatestInstructionLogs(List<Map<String, dynamic>> logs) {
-    final latest = <String, Map<String, dynamic>>{};
-    for (final log in logs) {
-      final key = _stableLogKey(log);
-      latest[key] = log;
-    }
-    return latest.values.toList();
-  }
+  // --- Instruction log helpers (shared with patient screen) ---
+  String _normType(String s) => InstructionLogMaterializer.canonicalGroup(s);
 
   bool _isAllowedForPfdFixed(Map<String, dynamic> log) {
     final treatment = (_patientInfo?['treatment'] ?? '').toString();
@@ -439,7 +425,7 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
 
     final type = _normType((log['type'] ?? '').toString());
     final instruction = (log['instruction'] ?? log['note'] ?? '').toString();
-    final n = _normText(instruction);
+    final n = InstructionLogMaterializer.normalizedInstructionKeyText(instruction);
 
     const pfdGeneralEn = [
       'Whenever local anesthesia is used, avoid chewing on your teeth until the numbness has worn off.',
@@ -466,37 +452,14 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
       'दुखणे, सूज किंवा रक्तस्राव सतत राहिल्यास दंतवैद्याशी संपर्क साधा.',
     ];
 
-    final allowedGeneral = {...pfdGeneralEn, ...pfdGeneralMr}.map(_normText).toSet();
-    final allowedSpecific = {...pfdSpecificEn, ...pfdSpecificMr}.map(_normText).toSet();
+    final allowedGeneral =
+        {...pfdGeneralEn, ...pfdGeneralMr}.map(InstructionLogMaterializer.normalizedInstructionKeyText).toSet();
+    final allowedSpecific =
+        {...pfdSpecificEn, ...pfdSpecificMr}.map(InstructionLogMaterializer.normalizedInstructionKeyText).toSet();
 
     if (type == 'general') return allowedGeneral.contains(n);
     if (type == 'specific') return allowedSpecific.contains(n);
     return true;
-  }
-
-  Map<String, int> _getInstructionStats(List<Map<String, dynamic>> logs) {
-    int generalFollowed = 0, specificFollowed = 0, generalNot = 0, specificNot = 0;
-    for (final log in _getLatestInstructionLogs(logs)) {
-      final type = (log['type'] ?? '').toString().toLowerCase();
-      final followed = log['followed'] == true || log['followed']?.toString() == 'true';
-      if (type == 'general') {
-        if (followed)
-          generalFollowed++;
-        else
-          generalNot++;
-      } else if (type == 'specific') {
-        if (followed)
-          specificFollowed++;
-        else
-          specificNot++;
-      }
-    }
-    return {
-      'GeneralFollowed': generalFollowed,
-      'SpecificFollowed': specificFollowed,
-      'GeneralNotFollowed': generalNot,
-      'SpecificNotFollowed': specificNot,
-    };
   }
 
   String _formatDisplayDate(String dateStr) {
@@ -553,16 +516,35 @@ class _DoctorPatientFullProgressScreenState extends State<DoctorPatientFullProgr
           allDates.isNotEmpty ? (allDates.contains(_todayStr()) ? _todayStr() : allDates.last) : '';
     }
 
-    // Parity: Show latest per instruction for selected date (dedupe).
-    final rawLogsForSelectedDate = _instructionStatus
-        .where((l) => l['date']?.toString() == _selectedDateForInstructionsLog)
-        .where(_isAllowedForPfdFixed)
-        .toList();
-    final logsForSelectedDate = _getLatestInstructionLogs(rawLogsForSelectedDate);
+    final treatment = (_patientInfo?['treatment'] ?? '').toString();
+    final subtype = (_patientInfo?['subtype'] ?? _patientInfo?['treatment_subtype'] ?? '').toString();
+    final expected = InstructionCatalog.getExpected(treatment: treatment, subtype: subtype);
+    final generalCatalog =
+        (expected?['general'] ?? const []).map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
+    final specificCatalog =
+        (expected?['specific'] ?? const []).map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
+
+    final filteredAllowedLogs =
+        _instructionStatus.where(_isAllowedForPfdFixed).map((e) => Map<String, dynamic>.from(e)).toList();
+
+    // Parity with patient ProgressScreen: materialize expected instructions for the day.
+    final logsForSelectedDate = (_selectedDateForInstructionsLog.isEmpty)
+        ? <Map<String, dynamic>>[]
+        : InstructionLogMaterializer.materializeForSelectedDate(
+            filteredLogs: filteredAllowedLogs,
+            selectedDate: _selectedDateForInstructionsLog,
+            generalCatalog: generalCatalog,
+            specificCatalog: specificCatalog,
+          );
     bool usedSubtypeFallbackLocal = false;
     // Subtype fallback no longer needs latest collapse; just reuse matches (already done above).
     _lastUsedSubtypeFallback = usedSubtypeFallbackLocal;
-    final stats = _getInstructionStats(_instructionStatus.where(_isAllowedForPfdFixed).toList());
+    final stats = InstructionLogMaterializer.computeStatsAcrossDates(
+      filteredLogs: filteredAllowedLogs,
+      allDates: allDates,
+      generalCatalog: generalCatalog,
+      specificCatalog: specificCatalog,
+    );
     final cs = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 

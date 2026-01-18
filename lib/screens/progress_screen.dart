@@ -7,6 +7,7 @@ import '../main.dart'; // Import for global routeObserver
 import 'chat_screen.dart';
 import '../widgets/no_animation_page_route.dart';
 import '../theme/semantic_colors.dart';
+import '../utils/instruction_log_materializer.dart';
 
 class ProgressScreen extends StatefulWidget {
   const ProgressScreen({super.key});
@@ -212,160 +213,16 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
 
     // Always materialize the selected day against the expected instruction catalog.
     // This prevents duplicates and ensures "Not Followed" never exceeds the real checklist size.
-    List<Map<String, dynamic>> materializedForSelectedDate() {
-      String canonText(String s) => s.trim().replaceAll(RegExp(r'\s+'), ' ').replaceAll('–', '-').replaceAll('—', '-');
-
-      String normText(String s) =>
-          s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ').replaceAll('–', '-').replaceAll('—', '-');
-
-      int? asInt(dynamic v) {
-        if (v == null) return null;
-        if (v is int) return v;
-        return int.tryParse(v.toString());
-      }
-
-      DateTime? parseUpdatedAt(Map<String, dynamic> raw) {
-        final candidates = [
-          raw['updated_at'],
-          raw['updatedAt'],
-          raw['timestamp'],
-          raw['created_at'],
-          raw['createdAt'],
-        ];
-        for (final c in candidates) {
-          if (c == null) continue;
-          final dt = DateTime.tryParse(c.toString());
-          if (dt != null) return dt;
-        }
-        return null;
-      }
-
-      // IMPORTANT: Only include items that are actually *logged* by the instruction screens.
-      // Most screens show "don'ts" as text without checkboxes and they are not saved to logs.
-      final generalCatalog = appState.currentDos.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
-      final specificCatalog =
-          appState.currentSpecificSteps.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
-
-      // Build ordered expected list (deduped by stable identity).
-      final List<Map<String, dynamic>> expectedOrdered = [];
-      final Map<String, Map<String, dynamic>> expectedByKey = {};
-
-      void addExpectedFromCatalog(String type, List<String> items) {
-        for (final instruction in items) {
-          final canonical = canonText(instruction);
-          if (canonical.isEmpty) continue;
-          final idx = appState.stableInstructionIndex(type, canonical);
-          final key = '$type|#${idx.toString()}';
-          if (expectedByKey.containsKey(key)) continue;
-          final row = {
-            'type': type,
-            'instruction_index': idx,
-            'instruction': canonical,
-          };
-          expectedByKey[key] = row;
-          expectedOrdered.add(row);
-        }
-      }
-
-      addExpectedFromCatalog('general', generalCatalog);
-      addExpectedFromCatalog('specific', specificCatalog);
-
-      // Fallback: infer expected instructions from what we've observed in this recovery window.
-      if (expectedOrdered.isEmpty) {
-        for (final rawAny in filteredLogs) {
-          final raw = Map<String, dynamic>.from(rawAny);
-          final type = (raw['type']?.toString() ?? '').trim().toLowerCase();
-          if (type.isEmpty) continue;
-          final instruction = (raw['instruction'] ?? raw['note'] ?? '').toString();
-          final canonical = canonText(instruction);
-          final idx = asInt(raw['instruction_index']) ??
-              (canonical.isEmpty ? null : appState.stableInstructionIndex(type, canonical));
-          final key = idx != null ? '$type|#${idx.toString()}' : '$type|${canonical.toLowerCase()}';
-          if (expectedByKey.containsKey(key)) continue;
-          final row = {
-            'type': type,
-            'instruction_index': idx,
-            'instruction': canonical,
-          };
-          expectedByKey[key] = row;
-          expectedOrdered.add(row);
-        }
-      }
-
-      // Build latest per-day logs, de-duped by stable identity.
-      final List<Map<String, dynamic>> rawForDate = filteredLogs
-          .where((l) => (l['date']?.toString() ?? '') == _selectedDateForInstructionsLog)
-          .map((l) => Map<String, dynamic>.from(l))
-          .toList();
-
-      final Map<String, Map<String, dynamic>> latestByKey = {};
-      final Map<String, Map<String, dynamic>> latestByText = {};
-      for (final raw in rawForDate) {
-        final type = (raw['type']?.toString() ?? '').trim().toLowerCase();
-        if (type.isEmpty) continue;
-        final instruction = (raw['instruction'] ?? raw['note'] ?? '').toString();
-        final canonical = canonText(instruction);
-        final stableIdx =
-            canonical.isNotEmpty ? appState.stableInstructionIndex(type, canonical) : asInt(raw['instruction_index']);
-        final key = stableIdx != null ? '$type|#${stableIdx.toString()}' : '$type|${canonical.toLowerCase()}';
-
-        // Normalize the stored index to the stable one so old inconsistent indices don't create duplicates.
-        raw['instruction_index'] = stableIdx;
-        raw['instruction'] = canonical.isNotEmpty ? canonical : instruction;
-
-        final existing = latestByKey[key];
-        if (existing == null) {
-          latestByKey[key] = raw;
-        } else {
-          final a = parseUpdatedAt(existing);
-          final b = parseUpdatedAt(raw);
-          if (a == null || b == null) {
-            // Fall back to last-write-wins if we can't compare timestamps.
-            latestByKey[key] = raw;
-          } else if (b.isAfter(a)) {
-            latestByKey[key] = raw;
-          }
-        }
-
-        // Also keep a text-keyed view so we can match expected items even if indices drift.
-        final tKey = '$type|${normText(raw['instruction']?.toString() ?? '')}';
-        final existingT = latestByText[tKey];
-        if (existingT == null) {
-          latestByText[tKey] = raw;
-        } else {
-          final a2 = parseUpdatedAt(existingT);
-          final b2 = parseUpdatedAt(raw);
-          if (a2 == null || b2 == null) {
-            latestByText[tKey] = raw;
-          } else if (b2.isAfter(a2)) {
-            latestByText[tKey] = raw;
-          }
-        }
-      }
-
-      if (expectedOrdered.isEmpty) {
-        // Nothing to materialize; just show de-duped day logs.
-        return latestByKey.values.toList();
-      }
-
-      // Merge: for each expected item, show real log if present; otherwise synthetic Not Followed.
-      return expectedOrdered.map((e) {
-        final type = (e['type'] ?? '').toString().trim().toLowerCase();
-        final idx = e['instruction_index'];
-        final key = idx != null ? '$type|#${idx.toString()}' : null;
-        final tKey = '$type|${normText((e['instruction'] ?? '').toString())}';
-        final log = (key != null ? latestByKey[key] : null) ?? latestByText[tKey];
-        if (log != null) return log;
-        return {
-          ...e,
-          'date': _selectedDateForInstructionsLog,
-          'followed': false,
-          'synthetic': true,
-        };
-      }).toList();
-    }
-
-    final shownLogsForSelectedDate = materializedForSelectedDate();
+    final generalCatalog = appState.currentDos.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
+    final specificCatalog =
+        appState.currentSpecificSteps.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
+    final shownLogsForSelectedDate = InstructionLogMaterializer.materializeForSelectedDate(
+      filteredLogs: filteredLogs.map((e) => Map<String, dynamic>.from(e)).toList(),
+      selectedDate: _selectedDateForInstructionsLog,
+      generalCatalog: generalCatalog,
+      specificCatalog: specificCatalog,
+      stableIndex: appState.stableInstructionIndex,
+    );
 
     final cs = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -595,17 +452,6 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
       return "${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}";
     });
 
-    String normText(String s) =>
-        s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ').replaceAll('–', '-').replaceAll('—', '-');
-
-    String canonText(String s) => s.trim().replaceAll(RegExp(r'\s+'), ' ').replaceAll('–', '-').replaceAll('—', '-');
-
-    int? asInt(dynamic v) {
-      if (v == null) return null;
-      if (v is int) return v;
-      return int.tryParse(v.toString());
-    }
-
     // IMPORTANT: Only include items that are actually logged by instruction screens (checkboxed).
     // "Don'ts" are generally shown as text without checkboxes and are not stored, so they must
     // NOT be counted as expected items.
@@ -613,101 +459,13 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
     final specificCatalog =
         appState.currentSpecificSteps.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
 
-    final Map<String, Map<String, dynamic>> expectedByKey = {};
-    void addExpected(String type, List<String> items) {
-      for (final instruction in items) {
-        final canonical = canonText(instruction);
-        if (canonical.isEmpty) continue;
-        final idx = appState.stableInstructionIndex(type, canonical);
-        expectedByKey.putIfAbsent('$type|#${idx.toString()}', () {
-          return {
-            'type': type,
-            'instruction_index': idx,
-            'instruction': canonical,
-          };
-        });
-      }
-    }
-
-    addExpected('general', generalCatalog);
-    addExpected('specific', specificCatalog);
-
-    final List<Map<String, dynamic>> expected = expectedByKey.values.toList();
-
-    if (expected.isEmpty) {
-      // Fallback to observed union.
-      final Map<String, Map<String, dynamic>> byKey = {};
-      for (final raw in filteredLogs) {
-        final type = (raw['type']?.toString() ?? '').trim().toLowerCase();
-        final instruction = (raw['instruction'] ?? raw['note'] ?? '').toString();
-        final canonical = canonText(instruction);
-        final idx = asInt(raw['instruction_index']) ??
-            (canonical.isEmpty ? null : appState.stableInstructionIndex(type, canonical));
-        final idxStr = (idx == null) ? '' : idx.toString();
-        final key = idxStr.isNotEmpty ? '$type|#${idxStr}' : '$type|${normText(canonical)}';
-        byKey.putIfAbsent(key, () {
-          return {
-            'type': type,
-            'instruction_index': idx,
-            'instruction': canonical,
-          };
-        });
-      }
-      expected.addAll(byKey.values);
-    }
-
-    final Map<String, Map<String, dynamic>> latestByIdx = {};
-    final Map<String, Map<String, dynamic>> latestByText = {};
-    for (final raw in filteredLogs) {
-      final date = (raw['date'] ?? '').toString();
-      final type = (raw['type']?.toString() ?? '').trim().toLowerCase();
-      final instruction = (raw['instruction'] ?? raw['note'] ?? '').toString();
-      final idx = raw['instruction_index'];
-      if (date.isEmpty || type.isEmpty) continue;
-      if (idx != null && idx.toString().isNotEmpty) {
-        latestByIdx['$date|$type|#${idx.toString()}'] = Map<String, dynamic>.from(raw);
-      }
-      if (instruction.trim().isNotEmpty) {
-        latestByText['$date|$type|${normText(instruction)}'] = Map<String, dynamic>.from(raw);
-      }
-    }
-
-    int generalFollowed = 0;
-    int specificFollowed = 0;
-    int notFollowedGeneral = 0;
-    int notFollowedSpecific = 0;
-
-    for (final date in allDates) {
-      for (final e in expected) {
-        final type = (e['type'] ?? '').toString().trim().toLowerCase();
-        if (type.isEmpty) continue;
-        final idx = e['instruction_index'];
-        final idxKey = (idx == null) ? null : '$date|$type|#${idx.toString()}';
-        final textKey = '$date|$type|${normText((e['instruction'] ?? '').toString())}';
-        final log = (idxKey != null ? latestByIdx[idxKey] : null) ?? latestByText[textKey];
-        final followed = log != null && (log['followed'] == true || log['followed']?.toString() == 'true');
-        if (type == 'general') {
-          if (followed) {
-            generalFollowed++;
-          } else {
-            notFollowedGeneral++;
-          }
-        } else if (type == 'specific') {
-          if (followed) {
-            specificFollowed++;
-          } else {
-            notFollowedSpecific++;
-          }
-        }
-      }
-    }
-
-    final stats = {
-      'GeneralFollowed': generalFollowed,
-      'SpecificFollowed': specificFollowed,
-      'GeneralNotFollowed': notFollowedGeneral,
-      'SpecificNotFollowed': notFollowedSpecific,
-    };
+    final stats = InstructionLogMaterializer.computeStatsAcrossDates(
+      filteredLogs: filteredLogs.map((e) => Map<String, dynamic>.from(e)).toList(),
+      allDates: allDates,
+      generalCatalog: generalCatalog,
+      specificCatalog: specificCatalog,
+      stableIndex: appState.stableInstructionIndex,
+    );
 
     final generalCount = stats['GeneralFollowed'] ?? 0;
     final specificCount = stats['SpecificFollowed'] ?? 0;
@@ -849,9 +607,7 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
                       decoration: BoxDecoration(
                         color: isDark ? colorScheme.surfaceContainerLow : colorScheme.primary,
                         borderRadius: BorderRadius.circular(20),
-                        border: isDark
-                            ? Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.70))
-                            : null,
+                        border: isDark ? Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.70)) : null,
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -907,9 +663,7 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
                       decoration: BoxDecoration(
                         color: isDark ? colorScheme.surfaceContainerLow : colorScheme.primary,
                         borderRadius: BorderRadius.circular(20),
-                        border: isDark
-                            ? Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.70))
-                            : null,
+                        border: isDark ? Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.70)) : null,
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1010,7 +764,8 @@ class _ProgressScreenState extends State<ProgressScreen> with RouteAware {
     );
   }
 
-  Widget _buildSummaryRow(BuildContext context, String label, String value, String unit, Color bgColor, Color textColor) {
+  Widget _buildSummaryRow(
+      BuildContext context, String label, String value, String unit, Color bgColor, Color textColor) {
     final cs = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
