@@ -76,6 +76,9 @@ class PatientPublic(BaseModel):
     procedure_date: Optional[date] = None
     procedure_time: Optional[time] = None
     procedure_completed: Optional[bool] = None
+    ever_completed: Optional[bool] = None
+    last_completed_episode_id: Optional[int] = None
+    last_completed_at: Optional[datetime] = None
     theme_mode: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
@@ -261,6 +264,28 @@ class MarkCompleteRequest(BaseModel):
 class RotateIfDueResponse(BaseModel):
     rotated: bool
     new_episode_id: Optional[int] = None
+
+class StartNewEpisodeResponse(BaseModel):
+    started: bool
+    locked_episode_id: Optional[int] = None
+    new_episode_id: Optional[int] = None
+
+
+class CompletedPatientRow(BaseModel):
+    episode_id: int
+    patient_id: int
+    username: str
+    name: str
+    phone: str
+    email: EmailStr
+    department: Optional[str] = None
+    doctor: Optional[str] = None
+    treatment: Optional[str] = None
+    treatment_subtype: Optional[str] = None
+    procedure_date: Optional[date] = None
+    procedure_time: Optional[time] = None
+    episode_created_at: datetime
+    patient_last_completed_at: Optional[datetime] = None
 
 # ---- Push Notifications ----
 class DeviceRegisterRequest(BaseModel):

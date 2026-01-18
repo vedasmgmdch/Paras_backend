@@ -290,6 +290,75 @@ async def startup():
                 print(f"[Startup] user_sessions migration note: {sess_mig_e}")
         except Exception as mig_all:
             print(f"[Startup] WARNING push/reminder migration block failed: {mig_all}")
+
+        # --- Patients table lightweight migrations (completion history flags) ---
+        try:
+            patients_cols: set[str] = set()
+            try:
+                pcols = await conn.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name='patients';"))
+                patients_cols = {r[0] for r in pcols.fetchall()}
+            except Exception:
+                # SQLite fallback
+                try:
+                    pcols = await conn.execute(text("PRAGMA table_info(patients);"))
+                    patients_cols = {r[1] for r in pcols.fetchall()}
+                except Exception:
+                    patients_cols = set()
+
+            p_alter: list[str] = []
+            if 'ever_completed' not in patients_cols:
+                p_alter.append("ALTER TABLE patients ADD COLUMN ever_completed BOOLEAN DEFAULT FALSE NOT NULL;")
+            if 'last_completed_episode_id' not in patients_cols:
+                p_alter.append("ALTER TABLE patients ADD COLUMN last_completed_episode_id INTEGER NULL;")
+            if 'last_completed_at' not in patients_cols:
+                p_alter.append("ALTER TABLE patients ADD COLUMN last_completed_at TIMESTAMP WITHOUT TIME ZONE NULL;")
+
+            for stmt in p_alter:
+                try:
+                    await conn.execute(text(stmt))
+                except Exception as _e:
+                    print(f"[Startup] patients migration note: {_e}")
+        except Exception as p_mig_all:
+            print(f"[Startup] WARNING patients migration block failed: {p_mig_all}")
+
+        # --- Read-only view: completed_patients (one row per completed+locked episode) ---
+        # This view intentionally allows multiple rows with the same email/phone/etc.
+        # because it represents historical procedures (episodes), not unique accounts.
+        try:
+            dialect_name = getattr(getattr(engine, "dialect", None), "name", "") or ""
+            where_clause = "te.procedure_completed = TRUE AND te.locked = TRUE"
+            if dialect_name.lower() == "sqlite":
+                # SQLite stores booleans as integers.
+                where_clause = "te.procedure_completed = 1 AND te.locked = 1"
+
+            view_body = f"""
+                SELECT
+                  te.id AS episode_id,
+                  p.id AS patient_id,
+                  p.username AS username,
+                  p.name AS name,
+                  p.phone AS phone,
+                  p.email AS email,
+                  te.department AS department,
+                  te.doctor AS doctor,
+                  te.treatment AS treatment,
+                  te.subtype AS treatment_subtype,
+                  te.procedure_date AS procedure_date,
+                  te.procedure_time AS procedure_time,
+                  te.created_at AS episode_created_at,
+                  p.last_completed_at AS patient_last_completed_at
+                FROM treatment_episodes te
+                JOIN patients p ON p.id = te.patient_id
+                WHERE {where_clause}
+            """
+
+            if dialect_name.lower() == "sqlite":
+                await conn.execute(text("DROP VIEW IF EXISTS completed_patients"))
+                await conn.execute(text(f"CREATE VIEW completed_patients AS {view_body}"))
+            else:
+                await conn.execute(text(f"CREATE OR REPLACE VIEW completed_patients AS {view_body}"))
+        except Exception as view_mig_e:
+            print(f"[Startup] completed_patients view migration note: {view_mig_e}")
     if os.getenv("SCHEDULER_ENABLED", "1") == "1":
         print("[Startup] Scheduler enabled (SCHEDULER_ENABLED=1)")
         scheduler = AsyncIOScheduler()
@@ -1255,7 +1324,35 @@ async def _get_or_create_open_episode(db: AsyncSession, patient_id: int) -> mode
             db.add(ep)
         if len(open_episodes) > 1:
             await db.commit()
-        return open_episodes[0]
+        newest = open_episodes[0]
+
+        # Safety: never allow a completed episode to remain editable.
+        # If some older client/version marked procedure_completed=True but forgot to lock,
+        # we auto-lock it and create a fresh open episode so new procedures don't overwrite
+        # completed treatment details.
+        if bool(getattr(newest, 'procedure_completed', False)) and not bool(getattr(newest, 'locked', False)):
+            object.__setattr__(newest, 'locked', True)
+            db.add(newest)
+            await db.commit()
+
+            new_ep = models.TreatmentEpisode(
+                patient_id=patient_id,
+                # Preserve assignment to keep doctor dashboards stable.
+                department=getattr(newest, 'department', None),
+                doctor=getattr(newest, 'doctor', None),
+                treatment=None,
+                subtype=None,
+                procedure_completed=False,
+                locked=False,
+                procedure_date=None,
+                procedure_time=None,
+            )
+            db.add(new_ep)
+            await db.commit()
+            await db.refresh(new_ep)
+            return new_ep
+
+        return newest
 
     new_ep = models.TreatmentEpisode(
         patient_id=patient_id,
@@ -1656,7 +1753,11 @@ async def update_my_theme_mode(
 # before production deployment.
 # -------------------------------------------------
 @app.get("/patients/by-doctor", response_model=List[schemas.PatientPublic])
-async def list_patients_by_doctor(doctor: str, db: AsyncSession = Depends(get_db)):
+async def list_patients_by_doctor(
+    doctor: str,
+    db: AsyncSession = Depends(get_db),
+    current_doctor: models.Doctor = Depends(get_current_doctor),
+):
     start = datetime.utcnow()
     print(f"[patients/by-doctor] inbound doctor='{doctor}' @ {start.isoformat()}Z")
     try:
@@ -1666,9 +1767,66 @@ async def list_patients_by_doctor(doctor: str, db: AsyncSession = Depends(get_db
             res = await db.execute(stmt)
             return res.scalars().all()
         patients = await asyncio.wait_for(_run(), timeout=5.0)
+
+        # Pull the latest episode per patient with a non-empty treatment.
+        # This keeps the dashboard stable even after an episode completes and a new blank episode is opened.
+        pt_ids = [object.__getattribute__(p, "id") for p in patients]
+        latest_by_patient: dict[int, Any] = {}
+        if pt_ids:
+            ep = models.TreatmentEpisode
+            ranked = (
+                select(
+                    ep.patient_id.label("patient_id"),
+                    ep.department.label("department"),
+                    ep.doctor.label("doctor"),
+                    ep.treatment.label("treatment"),
+                    ep.subtype.label("subtype"),
+                    ep.procedure_date.label("procedure_date"),
+                    ep.procedure_time.label("procedure_time"),
+                    ep.procedure_completed.label("procedure_completed"),
+                    ep.locked.label("locked"),
+                    ep.id.label("episode_id"),
+                    func.row_number().over(partition_by=ep.patient_id, order_by=ep.id.desc()).label("rn"),
+                )
+                .where(ep.patient_id.in_(pt_ids))
+                .where(ep.treatment.is_not(None))
+                .where(ep.treatment != "")
+                .subquery()
+            )
+            latest_stmt = select(ranked).where(ranked.c.rn == 1)
+            latest_rows = (await db.execute(latest_stmt)).mappings().all()
+            latest_by_patient = {int(r["patient_id"]): r for r in latest_rows}
+
+        # Build response objects using patient identity fields + episode-derived treatment fields when available.
+        out: list[dict[str, Any]] = []
+        for p in patients:
+            pid = object.__getattribute__(p, "id")
+            ep_row = latest_by_patient.get(int(pid))
+            out.append(
+                {
+                    "id": pid,
+                    "name": getattr(p, "name", None),
+                    "dob": getattr(p, "dob", None),
+                    "gender": getattr(p, "gender", None),
+                    "phone": getattr(p, "phone", None),
+                    "email": getattr(p, "email", None),
+                    "username": getattr(p, "username", None),
+                    "department": (ep_row.get("department") if ep_row else None) or getattr(p, "department", None),
+                    "doctor": (ep_row.get("doctor") if ep_row else None) or getattr(p, "doctor", None),
+                    "treatment": (ep_row.get("treatment") if ep_row else None) or getattr(p, "treatment", None),
+                    "treatment_subtype": (ep_row.get("subtype") if ep_row else None) or getattr(p, "treatment_subtype", None),
+                    "procedure_date": (ep_row.get("procedure_date") if ep_row else None) or getattr(p, "procedure_date", None),
+                    "procedure_time": (ep_row.get("procedure_time") if ep_row else None) or getattr(p, "procedure_time", None),
+                    "procedure_completed": (ep_row.get("procedure_completed") if ep_row else None) if ep_row else getattr(p, "procedure_completed", None),
+                    "ever_completed": getattr(p, "ever_completed", None),
+                    "last_completed_episode_id": getattr(p, "last_completed_episode_id", None),
+                    "last_completed_at": getattr(p, "last_completed_at", None),
+                    "theme_mode": getattr(p, "theme_mode", None),
+                }
+            )
         elapsed = (datetime.utcnow() - start).total_seconds()*1000
-        print(f"[patients/by-doctor] doctor='{doctor}' count={len(patients)} elapsed_ms={elapsed:.1f}")
-        return patients
+        print(f"[patients/by-doctor] doctor='{doctor}' count={len(out)} elapsed_ms={elapsed:.1f}")
+        return out
     except asyncio.TimeoutError:
         elapsed = (datetime.utcnow() - start).total_seconds()*1000
         print(f"[patients/by-doctor][timeout] doctor='{doctor}' after {elapsed:.1f}ms")
@@ -2469,6 +2627,63 @@ async def doctor_patient_info(username: str, db: AsyncSession = Depends(get_db),
     }
 
 
+@app.get("/completed-patients", response_model=List[schemas.CompletedPatientRow])
+async def list_completed_patients(
+    username: Optional[str] = None,
+    email: Optional[str] = None,
+    phone: Optional[str] = None,
+    limit: int = 200,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+    current_doctor: models.Doctor = Depends(get_current_doctor),
+):
+    """Read-only list of completed procedures.
+
+    This reads from the DB view `completed_patients` (one row per completed+locked episode).
+    Duplicates by phone/email are expected because this is historical.
+    """
+    limit = max(1, min(int(limit or 200), 500))
+    offset = max(0, int(offset or 0))
+
+    base_sql = """
+        SELECT
+          episode_id,
+          patient_id,
+          username,
+          name,
+          phone,
+          email,
+          department,
+          doctor,
+          treatment,
+          treatment_subtype,
+          procedure_date,
+          procedure_time,
+          episode_created_at,
+          patient_last_completed_at
+        FROM completed_patients
+    """
+    clauses: list[str] = []
+    params: dict[str, Any] = {"limit": limit, "offset": offset}
+    if username:
+        clauses.append("username = :username")
+        params["username"] = username
+    if email:
+        clauses.append("email = :email")
+        params["email"] = email
+    if phone:
+        clauses.append("phone = :phone")
+        params["phone"] = phone
+
+    where_sql = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    order_sql = " ORDER BY episode_id DESC"
+    page_sql = " LIMIT :limit OFFSET :offset"
+    stmt = text(base_sql + where_sql + order_sql + page_sql)
+    res = await db.execute(stmt, params)
+    rows = res.mappings().all()
+    return [schemas.CompletedPatientRow(**dict(r)) for r in rows]
+
+
 @app.get("/doctor/patients/{username}/chat", response_model=List[schemas.ChatMessage])
 async def doctor_get_chat_thread(username: str, db: AsyncSession = Depends(get_db), current_doctor: models.Doctor = Depends(get_current_doctor)):
     res = await db.execute(select(models.Patient).where(models.Patient.username == username))
@@ -2619,6 +2834,19 @@ async def mark_episode_complete(payload: schemas.MarkCompleteRequest, db: AsyncS
     await db.commit()
     await db.refresh(ep)
 
+    # Persist account-scoped completion markers on the Patient row so that
+    # "SELECT * FROM patients" shows that this account has completed a treatment.
+    try:
+        object.__setattr__(current_user, 'ever_completed', True)
+        object.__setattr__(current_user, 'last_completed_episode_id', int(object.__getattribute__(ep, 'id')))
+        object.__setattr__(current_user, 'last_completed_at', datetime.utcnow())
+        db.add(current_user)
+        await db.commit()
+        await db.refresh(current_user)
+    except Exception as _e:
+        # Best-effort only; don't block completion if the DB hasn't been migrated yet.
+        print(f"[episodes/mark-complete] patient completion marker write skipped: {_e}")
+
     # Immediately create a new open episode for the patient to start a fresh treatment
     new_ep = models.TreatmentEpisode(
         patient_id=object.__getattribute__(current_user, 'id'),
@@ -2648,6 +2876,69 @@ async def rotate_if_due_endpoint(db: AsyncSession = Depends(get_db), current_use
     if new_id is None:
         return schemas.RotateIfDueResponse(rotated=False, new_episode_id=None)
     return schemas.RotateIfDueResponse(rotated=True, new_episode_id=new_id)
+
+
+@app.post("/episodes/start-new", response_model=schemas.StartNewEpisodeResponse)
+async def start_new_episode(
+    db: AsyncSession = Depends(get_db),
+    current_user: models.Patient = Depends(get_current_user),
+):
+    """Start a new procedure AFTER the current one is completed.
+
+    Intended for the patient Instruction tab flow:
+      - Current procedure has been completed (procedure_completed=True)
+      - Patient taps "Start new procedure"
+      - Server locks the completed episode and creates a fresh open episode (new id)
+
+    This keeps the same account (patients row) and preserves old treatment history in treatment_episodes.
+    """
+    ep = await _get_or_create_open_episode(db, object.__getattribute__(current_user, 'id'))
+
+    # If current open episode is not completed, we refuse to start a new one.
+    # This prevents accidental loss/overwrite of an ongoing procedure.
+    if not bool(getattr(ep, 'procedure_completed', False)):
+        raise HTTPException(status_code=409, detail="Current procedure is not completed yet.")
+
+    locked_id: int | None = None
+    if not bool(getattr(ep, 'locked', False)):
+        object.__setattr__(ep, 'locked', True)
+        db.add(ep)
+        await db.commit()
+        await db.refresh(ep)
+    try:
+        locked_id = int(object.__getattribute__(ep, 'id'))
+    except Exception:
+        locked_id = getattr(ep, 'id', None)
+
+    # Persist account-scoped completion markers (best-effort).
+    try:
+        object.__setattr__(current_user, 'ever_completed', True)
+        object.__setattr__(current_user, 'last_completed_episode_id', locked_id)
+        object.__setattr__(current_user, 'last_completed_at', datetime.utcnow())
+        db.add(current_user)
+        await db.commit()
+        await db.refresh(current_user)
+    except Exception as _e:
+        print(f"[episodes/start-new] patient completion marker write skipped: {_e}")
+
+    new_ep = models.TreatmentEpisode(
+        patient_id=object.__getattribute__(current_user, 'id'),
+        # Preserve assignment to keep doctor dashboards stable.
+        department=getattr(ep, 'department', None) or getattr(current_user, 'department', None),
+        doctor=getattr(ep, 'doctor', None) or getattr(current_user, 'doctor', None),
+        treatment=None,
+        subtype=None,
+        procedure_completed=False,
+        locked=False,
+        procedure_date=None,
+        procedure_time=None,
+    )
+    db.add(new_ep)
+    await db.commit()
+    await db.refresh(new_ep)
+
+    await _mirror_episode_to_patient(db, current_user, new_ep)
+    return schemas.StartNewEpisodeResponse(started=True, locked_episode_id=locked_id, new_episode_id=new_ep.id)
 
 
 @app.post("/episodes/replace-treatment", response_model=schemas.PatientPublic)

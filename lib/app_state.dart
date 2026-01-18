@@ -16,7 +16,8 @@ class AppState extends ChangeNotifier {
   ThemeMode _themeMode = ThemeMode.light;
   ThemeMode get themeMode => _themeMode;
 
-  String _prefsThemeModeKeyForUser(String username) => 'theme_mode_v1_${username.trim()}';
+  String _prefsThemeModeKeyForUser(String username) =>
+      'theme_mode_v1_${username.trim()}';
 
   String _encodeThemeMode(ThemeMode mode) {
     switch (mode) {
@@ -44,11 +45,58 @@ class AppState extends ChangeNotifier {
   Future<void> loadThemeMode() async {
     final prefs = await SharedPreferences.getInstance();
     // Prefer per-user theme mode if we have a last-known username.
-    final lastUser = (prefs.getString('username') ?? '').trim();
+    var lastUser = (prefs.getString('username') ?? '').trim();
+    String? themeFromUserDetails;
+    // Back-compat: older builds did not persist 'username' separately.
+    // Fall back to the persisted user_details blob.
+    if (lastUser.isEmpty) {
+      try {
+        final raw = prefs.getString('user_details');
+        if (raw != null && raw.isNotEmpty) {
+          final decoded = jsonDecode(raw);
+          final u = (decoded is Map ? (decoded['username'] ?? '') : '')
+              .toString()
+              .trim();
+          themeFromUserDetails = (decoded is Map
+                  ? (decoded['themeMode'] ?? decoded['theme_mode'] ?? '')
+                  : '')
+              .toString();
+          if (u.isNotEmpty) {
+            lastUser = u;
+            // Cache for next startup.
+            await prefs.setString('username', lastUser);
+          }
+        }
+      } catch (_) {
+        // ignore
+      }
+    }
     // Theme is account-scoped. If logged out (no username), default to light.
     // Avoid the legacy global key here; it causes cross-account leakage.
-    final stored = lastUser.isNotEmpty ? prefs.getString(_prefsThemeModeKeyForUser(lastUser)) : null;
-    final next = _decodeThemeMode(stored);
+    final stored = lastUser.isNotEmpty
+        ? prefs.getString(_prefsThemeModeKeyForUser(lastUser))
+        : null;
+    // If the per-user theme key is missing, fall back to what was persisted in user_details.
+    // Also seed the per-user key so the next cold start is stable.
+    final fallback =
+        (stored == null || stored.trim().isEmpty) ? themeFromUserDetails : null;
+    final next = _decodeThemeMode(stored ?? fallback);
+
+    assert(() {
+      debugPrint(
+        '[theme] loadThemeMode: username=$lastUser stored=$stored fallback=$fallback next=${_encodeThemeMode(next)}',
+      );
+      return true;
+    }());
+
+    if (lastUser.isNotEmpty &&
+        (stored == null || stored.trim().isEmpty) &&
+        (fallback ?? '').trim().isNotEmpty) {
+      try {
+        await prefs.setString(
+            _prefsThemeModeKeyForUser(lastUser), _encodeThemeMode(next));
+      } catch (_) {}
+    }
     if (next == _themeMode) return;
     _themeMode = next;
     notifyListeners();
@@ -64,6 +112,12 @@ class AppState extends ChangeNotifier {
     if (u.isNotEmpty) {
       await prefs.setString(_prefsThemeModeKeyForUser(u), encoded);
     }
+
+    assert(() {
+      debugPrint(
+          '[theme] setThemeMode: username=$u encoded=$encoded syncToServer=$syncToServer');
+      return true;
+    }());
 
     if (!syncToServer) return;
 
@@ -84,7 +138,8 @@ class AppState extends ChangeNotifier {
 
   Future<void> flushPendingThemeMode() async {
     final prefs = await SharedPreferences.getInstance();
-    final pending = (prefs.getString(_prefsThemeModePendingKey) ?? '').trim().toLowerCase();
+    final pending =
+        (prefs.getString(_prefsThemeModePendingKey) ?? '').trim().toLowerCase();
     if (pending.isEmpty) return;
     final hasAuth = (token ?? '').trim().isNotEmpty;
     if (!hasAuth) return;
@@ -97,16 +152,20 @@ class AppState extends ChangeNotifier {
   Future<void> applyThemeModeFromServerIfNeeded(dynamic serverThemeMode) async {
     final prefs = await SharedPreferences.getInstance();
 
+    final rawServer = (serverThemeMode?.toString() ?? '').trim();
+    if (rawServer.isEmpty) return;
+
     // If there's a pending local choice to sync, don't override it with server data.
     final pending = (prefs.getString(_prefsThemeModePendingKey) ?? '').trim();
     if (pending.isNotEmpty) return;
 
     // If we already have a local preference for this device/user, keep it.
     final u = (username ?? prefs.getString('username') ?? '').trim();
-    final hasLocalPreference = u.isNotEmpty ? prefs.containsKey(_prefsThemeModeKeyForUser(u)) : false;
+    final hasLocalPreference =
+        u.isNotEmpty ? prefs.containsKey(_prefsThemeModeKeyForUser(u)) : false;
     if (hasLocalPreference) return;
 
-    final decoded = _decodeThemeMode(serverThemeMode?.toString());
+    final decoded = _decodeThemeMode(rawServer);
     // Set locally only (server is already the source of truth here).
     await setThemeMode(decoded, syncToServer: false);
   }
@@ -121,11 +180,14 @@ class AppState extends ChangeNotifier {
   Future<void> applyThemeModeFromServer(dynamic serverThemeMode) async {
     final prefs = await SharedPreferences.getInstance();
 
+    final rawServer = (serverThemeMode?.toString() ?? '').trim();
+    if (rawServer.isEmpty) return;
+
     // If there's a pending local choice to sync, don't override it with server data.
     final pending = (prefs.getString(_prefsThemeModePendingKey) ?? '').trim();
     if (pending.isNotEmpty) return;
 
-    final decoded = _decodeThemeMode(serverThemeMode?.toString());
+    final decoded = _decodeThemeMode(rawServer);
     await setThemeMode(decoded, syncToServer: false);
   }
 
@@ -145,8 +207,11 @@ class AppState extends ChangeNotifier {
     final s = raw.toLowerCase();
 
     if (t == 'Prosthesis Fitted') {
-      if (s == 'fixed' || s == 'fixed denture' || s == 'fixed dentures') return 'Fixed Dentures';
-      if (s == 'removable' || s == 'removable denture' || s == 'removable dentures') return 'Removable Dentures';
+      if (s == 'fixed' || s == 'fixed denture' || s == 'fixed dentures')
+        return 'Fixed Dentures';
+      if (s == 'removable' ||
+          s == 'removable denture' ||
+          s == 'removable dentures') return 'Removable Dentures';
     }
     return raw;
   }
@@ -154,7 +219,11 @@ class AppState extends ChangeNotifier {
   String _canonicalGroup(String? value) => (value ?? '').trim().toLowerCase();
 
   String _canonicalInstructionText(String? value) {
-    return (value ?? '').trim().replaceAll(RegExp(r'\s+'), ' ').replaceAll('–', '-').replaceAll('—', '-');
+    return (value ?? '')
+        .trim()
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .replaceAll('–', '-')
+        .replaceAll('—', '-');
   }
 
   /// Format a DateTime (local) to canonical yyyy-MM-dd string
@@ -182,8 +251,10 @@ class AppState extends ChangeNotifier {
   /// Compute days since procedure based on server time if available; falls back to device time.
   int daysSinceProcedure(DateTime selectedDate) {
     final proc = procedureDate;
-    final selected = DateTime(selectedDate.year, selectedDate.month, selectedDate.day);
-    final procLocal = proc != null ? DateTime(proc.year, proc.month, proc.day) : selected;
+    final selected =
+        DateTime(selectedDate.year, selectedDate.month, selectedDate.day);
+    final procLocal =
+        proc != null ? DateTime(proc.year, proc.month, proc.day) : selected;
     int day = selected.difference(procLocal).inDays + 1;
     if (day < 1) day = 1;
     return day;
@@ -272,7 +343,8 @@ class AppState extends ChangeNotifier {
       final List<dynamic> keys = jsonDecode(registryJson);
       for (final k in keys) {
         if (k is! String) continue;
-        final stored = prefs.getString(_checklistStorageKey(k, username: username));
+        final stored =
+            prefs.getString(_checklistStorageKey(k, username: username));
         if (stored == null) continue;
         final List<dynamic> decoded = jsonDecode(stored);
         final list = decoded.map((e) => e == true).toList();
@@ -340,10 +412,12 @@ class AppState extends ChangeNotifier {
     await prefs.remove(defaultRegistryKey);
   }
 
-  Future<void> _saveChecklistForKey(String key, List<bool> list, {String? username}) async {
+  Future<void> _saveChecklistForKey(String key, List<bool> list,
+      {String? username}) async {
     final prefs = await SharedPreferences.getInstance();
     // Save value
-    await prefs.setString(_checklistStorageKey(key, username: username), jsonEncode(list));
+    await prefs.setString(
+        _checklistStorageKey(key, username: username), jsonEncode(list));
     // Update registry
     final registryKey = _checklistRegistryKey(username: username);
     final registryJson = prefs.getString(registryKey);
@@ -384,19 +458,23 @@ class AppState extends ChangeNotifier {
     final dateStr = formatYMD(day);
     final user = (username ?? this.username ?? '').trim();
     final treat = _canonicalTreatment((treatment ?? _treatment ?? '').trim());
-    final sub = _canonicalSubtype(treat, (subtype ?? _treatmentSubtype ?? '').trim());
+    final sub =
+        _canonicalSubtype(treat, (subtype ?? _treatmentSubtype ?? '').trim());
 
-    String norm(String s) => s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+    String norm(String s) =>
+        s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
     final wantedText = instructionText == null ? null : norm(instructionText);
 
     bool anyFollowed = false;
     for (final log in _instructionLogs) {
       if ((log['date'] ?? '').toString() != dateStr) continue;
-      if (_canonicalGroup((log['type'] ?? '').toString()) != _canonicalGroup(type)) continue;
+      if (_canonicalGroup((log['type'] ?? '').toString()) !=
+          _canonicalGroup(type)) continue;
       if ((log['username'] ?? '').toString() != user) continue;
 
       final logTreat = _canonicalTreatment((log['treatment'] ?? '').toString());
-      final logSub = _canonicalSubtype(logTreat, (log['subtype'] ?? '').toString());
+      final logSub =
+          _canonicalSubtype(logTreat, (log['subtype'] ?? '').toString());
       if (treat.isNotEmpty && logTreat != treat) continue;
       if (sub.isNotEmpty && logSub != sub) continue;
 
@@ -409,7 +487,8 @@ class AppState extends ChangeNotifier {
       }
       if (!matchesIdx && !matchesText) continue;
 
-      final followed = log['followed'] == true || log['followed']?.toString() == 'true';
+      final followed =
+          log['followed'] == true || log['followed']?.toString() == 'true';
       anyFollowed = anyFollowed || followed;
     }
     return anyFollowed;
@@ -454,7 +533,8 @@ class AppState extends ChangeNotifier {
     if (user.isEmpty) return;
     if (token == null || token!.isEmpty) return;
 
-    _pendingUploadFlushTimer = Timer.periodic(_pendingUploadFlushInterval, (_) async {
+    _pendingUploadFlushTimer =
+        Timer.periodic(_pendingUploadFlushInterval, (_) async {
       if (_pendingUploadFlushInProgress) return;
       if (token == null || token!.isEmpty) return;
       final u = (username ?? '').trim();
@@ -478,9 +558,11 @@ class AppState extends ChangeNotifier {
   String? _instructionLogsLoadedForUser;
   bool _instructionLogsHydrated = false;
 
-  List<Map<String, dynamic>> get instructionLogs => List.unmodifiable(_instructionLogs);
+  List<Map<String, dynamic>> get instructionLogs =>
+      List.unmodifiable(_instructionLogs);
 
-  Future<void> resetLocalStateForTreatmentReplacement({String? username}) async {
+  Future<void> resetLocalStateForTreatmentReplacement(
+      {String? username}) async {
     final user = username ?? this.username;
     // Clear instruction log cache so old treatment rows can't pollute UI.
     _instructionLogs.clear();
@@ -499,26 +581,34 @@ class AppState extends ChangeNotifier {
 
   Future<void> _saveInstructionLogs({String? username}) async {
     final prefs = await SharedPreferences.getInstance();
-    final key = username != null ? 'instruction_logs_${username}' : 'instruction_logs';
+    final key =
+        username != null ? 'instruction_logs_${username}' : 'instruction_logs';
     await prefs.setString(key, jsonEncode(_instructionLogs));
   }
 
-  Future<void> loadInstructionLogs({String? username, bool force = false}) async {
+  Future<void> loadInstructionLogs(
+      {String? username, bool force = false}) async {
     final userKey = (username ?? this.username)?.toString();
-    if (!force && _instructionLogsHydrated && _instructionLogsLoadedForUser == userKey) {
+    if (!force &&
+        _instructionLogsHydrated &&
+        _instructionLogsLoadedForUser == userKey) {
       return;
     }
 
     final wasHydrated = _instructionLogsHydrated;
 
     final prefs = await SharedPreferences.getInstance();
-    final key = username != null ? 'instruction_logs_${username}' : 'instruction_logs';
+    final key =
+        username != null ? 'instruction_logs_${username}' : 'instruction_logs';
     final data = prefs.getString(key);
     final legacy = prefs.getString('instruction_logs'); // migrate if present
 
     // If we already have logs in-memory and there is no persisted data to read or migrate,
     // just mark hydrated and return.
-    if (!force && data == null && legacy == null && _instructionLogs.isNotEmpty) {
+    if (!force &&
+        data == null &&
+        legacy == null &&
+        _instructionLogs.isNotEmpty) {
       _instructionLogsHydrated = true;
       _instructionLogsLoadedForUser = userKey;
       return;
@@ -533,7 +623,8 @@ class AppState extends ChangeNotifier {
         final type = _canonicalGroup(item['type'] ?? '');
         final treat = _canonicalTreatment(item['treatment']);
         final sub = _canonicalSubtype(treat, item['subtype']);
-        final instruction = _canonicalInstructionText(item['instruction'] ?? item['note'] ?? '');
+        final instruction = _canonicalInstructionText(
+            item['instruction'] ?? item['note'] ?? '');
         _instructionLogs.add({
           'date': item['date'] ?? '',
           'note': item['note'] ?? '',
@@ -544,7 +635,8 @@ class AppState extends ChangeNotifier {
           'treatment': treat,
           'subtype': sub,
           'everFollowed': item['everFollowed'] ?? (item['followed'] ?? false),
-          'instruction_index': item['instruction_index'] ?? item['instructionIndex'],
+          'instruction_index':
+              item['instruction_index'] ?? item['instructionIndex'],
           'quarantined': item['quarantined'] ?? false,
         });
       }
@@ -558,7 +650,8 @@ class AppState extends ChangeNotifier {
           final type = _canonicalGroup(item['type'] ?? '');
           final treat = _canonicalTreatment(item['treatment']);
           final sub = _canonicalSubtype(treat, item['subtype']);
-          final instruction = _canonicalInstructionText(item['instruction'] ?? item['note'] ?? '');
+          final instruction = _canonicalInstructionText(
+              item['instruction'] ?? item['note'] ?? '');
           final m = {
             'date': item['date'] ?? '',
             'note': item['note'] ?? '',
@@ -568,7 +661,8 @@ class AppState extends ChangeNotifier {
             'username': user,
             'treatment': treat,
             'subtype': sub,
-            'instruction_index': item['instruction_index'] ?? item['instructionIndex'],
+            'instruction_index':
+                item['instruction_index'] ?? item['instructionIndex'],
             'quarantined': item['quarantined'] ?? false,
           };
           // Avoid duplicates
@@ -598,20 +692,29 @@ class AppState extends ChangeNotifier {
     }
 
     // Avoid unnecessary writes/notifications when nothing actually changed.
-    final didChange = force || !wasHydrated || beforeCount != _instructionLogs.length || legacy != null;
+    final didChange = force ||
+        !wasHydrated ||
+        beforeCount != _instructionLogs.length ||
+        legacy != null;
 
     _instructionLogsHydrated = true;
     _instructionLogsLoadedForUser = userKey;
     if (didChange) {
       await _saveInstructionLogs(username: username ?? this.username);
-      debugPrint('Loaded instruction logs for $username: count = \${_instructionLogs.length}');
+      debugPrint(
+          'Loaded instruction logs for $username: count = \${_instructionLogs.length}');
       notifyListeners();
     }
   }
 
   // --- Quarantine / allowlist for known-bad legacy data ---
   static String _normAllowlistText(String s) {
-    return s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ').replaceAll('–', '-').replaceAll('—', '-');
+    return s
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .replaceAll('–', '-')
+        .replaceAll('—', '-');
   }
 
   static final Set<String> _pfdFixedAllowedGeneral = {
@@ -646,7 +749,8 @@ class AppState extends ChangeNotifier {
     required String group,
     required String instruction,
   }) {
-    if (!(treatment == 'Prosthesis Fitted' && subtype == 'Fixed Dentures')) return true;
+    if (!(treatment == 'Prosthesis Fitted' && subtype == 'Fixed Dentures'))
+      return true;
     final type = _canonicalGroup(group);
     final n = _normAllowlistText(instruction);
     if (type == 'general') return _pfdFixedAllowedGeneral.contains(n);
@@ -657,7 +761,8 @@ class AppState extends ChangeNotifier {
   void _normalizeAndDedupeInstructionLogs() {
     final Map<String, Map<String, dynamic>> latest = {};
 
-    String normKeyText(String s) => s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+    String normKeyText(String s) =>
+        s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
 
     // First pass: build a lookup from (date,user,treat,sub,type,text) -> preferred index.
     // This lets us merge legacy/server rows that have a different/missing instruction_index.
@@ -668,12 +773,18 @@ class AppState extends ChangeNotifier {
       final type = _canonicalGroup(raw['type']?.toString());
       final treat = _canonicalTreatment(raw['treatment']?.toString());
       final sub = _canonicalSubtype(treat, raw['subtype']?.toString());
-      final instruction = _canonicalInstructionText((raw['instruction'] ?? raw['note'] ?? '').toString());
-      final allowed = _isAllowedForPfdFixed(treatment: treat, subtype: sub, group: type, instruction: instruction);
+      final instruction = _canonicalInstructionText(
+          (raw['instruction'] ?? raw['note'] ?? '').toString());
+      final allowed = _isAllowedForPfdFixed(
+          treatment: treat,
+          subtype: sub,
+          group: type,
+          instruction: instruction);
       if (!allowed) continue;
       final idx = _asInt(raw['instruction_index'] ?? raw['instructionIndex']);
       if (idx == null) continue;
-      final textKey = '$date|$user|$treat|$sub|$type|${normKeyText(instruction)}';
+      final textKey =
+          '$date|$user|$treat|$sub|$type|${normKeyText(instruction)}';
       preferredIndexByTextKey.putIfAbsent(textKey, () => idx);
     }
 
@@ -683,10 +794,15 @@ class AppState extends ChangeNotifier {
       final type = _canonicalGroup(raw['type']?.toString());
       String treat = _canonicalTreatment(raw['treatment']?.toString());
       String sub = _canonicalSubtype(treat, raw['subtype']?.toString());
-      final instruction = _canonicalInstructionText((raw['instruction'] ?? raw['note'] ?? '').toString());
+      final instruction = _canonicalInstructionText(
+          (raw['instruction'] ?? raw['note'] ?? '').toString());
       int? idx = _asInt(raw['instruction_index'] ?? raw['instructionIndex']);
 
-      final allowed = _isAllowedForPfdFixed(treatment: treat, subtype: sub, group: type, instruction: instruction);
+      final allowed = _isAllowedForPfdFixed(
+          treatment: treat,
+          subtype: sub,
+          group: type,
+          instruction: instruction);
       final quarantined = !allowed;
       if (quarantined) {
         // Keep the text/history but un-assign it from PFD Fixed so it never pollutes progress.
@@ -694,12 +810,15 @@ class AppState extends ChangeNotifier {
         sub = '';
       }
 
-      final followed = raw['followed'] == true || raw['followed']?.toString() == 'true';
-      final prevEver = raw['everFollowed'] == true || raw['everFollowed']?.toString() == 'true';
+      final followed =
+          raw['followed'] == true || raw['followed']?.toString() == 'true';
+      final prevEver = raw['everFollowed'] == true ||
+          raw['everFollowed']?.toString() == 'true';
       final ever = followed || prevEver;
 
       // If index is missing (or differs across sources), try to adopt the preferred index for the same text.
-      final textKey = '$date|$user|$treat|$sub|$type|${normKeyText(instruction)}';
+      final textKey =
+          '$date|$user|$treat|$sub|$type|${normKeyText(instruction)}';
       idx = idx ?? preferredIndexByTextKey[textKey];
       idx = idx ?? stableInstructionIndex(type, instruction);
 
@@ -727,7 +846,8 @@ class AppState extends ChangeNotifier {
       }
 
       // Keep "latest" as the last-seen item; merge everFollowed.
-      entry['everFollowed'] = (prev['everFollowed'] == true) || (entry['everFollowed'] == true);
+      entry['everFollowed'] =
+          (prev['everFollowed'] == true) || (entry['everFollowed'] == true);
       latest[key] = entry;
     }
 
@@ -752,21 +872,25 @@ class AppState extends ChangeNotifier {
     try {
       if (token == null) return; // not logged in
 
-      final initialSince = DateTime.now().toUtc().subtract(const Duration(days: 60));
+      final initialSince =
+          DateTime.now().toUtc().subtract(const Duration(days: 60));
       final since = (_lastInstructionSyncUtc ?? initialSince).toIso8601String();
 
       Future<List<Map<String, dynamic>>?> retryChanges() async {
         for (int attempt = 0; attempt < 3; attempt++) {
-          final res = await ApiService.fetchInstructionStatusChanges(sinceIso: since);
+          final res =
+              await ApiService.fetchInstructionStatusChanges(sinceIso: since);
           if (res != null) return res;
           await Future.delayed(Duration(milliseconds: 500 * (attempt + 1)));
         }
         return null;
       }
 
-      Future<List<Map<String, dynamic>>?> retryRange(String dateFrom, String dateTo) async {
+      Future<List<Map<String, dynamic>>?> retryRange(
+          String dateFrom, String dateTo) async {
         for (int attempt = 0; attempt < 2; attempt++) {
-          final res = await ApiService.listInstructionStatus(dateFrom: dateFrom, dateTo: dateTo);
+          final res = await ApiService.listInstructionStatus(
+              dateFrom: dateFrom, dateTo: dateTo);
           if (res != null) return res;
           await Future.delayed(Duration(milliseconds: 700 * (attempt + 1)));
         }
@@ -786,9 +910,15 @@ class AppState extends ChangeNotifier {
                 (row) => {
                   'date': (row['date'] ?? '').toString(),
                   'group': (row['group'] ?? row['type'] ?? '').toString(),
-                  'instruction_text': (row['instruction_text'] ?? row['instruction'] ?? row['note'] ?? '').toString(),
-                  'followed': row['followed'] == true || row['followed']?.toString() == 'true',
-                  'ever_followed': row['ever_followed'] == true || row['ever_followed']?.toString() == 'true',
+                  'instruction_text': (row['instruction_text'] ??
+                          row['instruction'] ??
+                          row['note'] ??
+                          '')
+                      .toString(),
+                  'followed': row['followed'] == true ||
+                      row['followed']?.toString() == 'true',
+                  'ever_followed': row['ever_followed'] == true ||
+                      row['ever_followed']?.toString() == 'true',
                   'treatment': row['treatment'] ?? '',
                   'subtype': row['subtype'],
                   'instruction_index': row['instruction_index'] ??
@@ -806,12 +936,18 @@ class AppState extends ChangeNotifier {
       if (changes == null || changes.isEmpty) return;
 
       bool changed = false;
-      DateTime maxTs = _lastInstructionSyncUtc ?? DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+      DateTime maxTs = _lastInstructionSyncUtc ??
+          DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
 
       String normType(String s) => s.trim().toLowerCase();
 
       String normText(String s) {
-        return s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ').replaceAll('–', '-').replaceAll('—', '-');
+        return s
+            .trim()
+            .toLowerCase()
+            .replaceAll(RegExp(r'\s+'), ' ')
+            .replaceAll('–', '-')
+            .replaceAll('—', '-');
       }
 
       int? asInt(dynamic v) {
@@ -824,10 +960,13 @@ class AppState extends ChangeNotifier {
         final rawType = (row['group'] ?? row['type'] ?? '').toString();
         final type = normType(rawType);
         final instruction = _canonicalInstructionText(
-          (row['instruction_text'] ?? row['instruction'] ?? row['note'] ?? '').toString(),
+          (row['instruction_text'] ?? row['instruction'] ?? row['note'] ?? '')
+              .toString(),
         );
-        final followed = row['followed'] == true || row['followed']?.toString() == 'true';
-        final everFollowed = row['ever_followed'] == true || row['ever_followed']?.toString() == 'true';
+        final followed =
+            row['followed'] == true || row['followed']?.toString() == 'true';
+        final everFollowed = row['ever_followed'] == true ||
+            row['ever_followed']?.toString() == 'true';
         final updatedAtStr = row['updated_at']?.toString();
         DateTime? updatedAt;
         try {
@@ -840,8 +979,10 @@ class AppState extends ChangeNotifier {
         if (updatedAt != null && updatedAt.isAfter(maxTs)) maxTs = updatedAt;
         // Keep missing treatment/subtype as empty.
         // Filling them from current state can mis-attribute old rows to the wrong treatment.
-        final normTreatment = _canonicalTreatment((row['treatment'] ?? '').toString());
-        final normSubtype = _canonicalSubtype(normTreatment, (row['subtype'] ?? '').toString());
+        final normTreatment =
+            _canonicalTreatment((row['treatment'] ?? '').toString());
+        final normSubtype =
+            _canonicalSubtype(normTreatment, (row['subtype'] ?? '').toString());
         final quarantined = !_isAllowedForPfdFixed(
           treatment: normTreatment,
           subtype: normSubtype,
@@ -854,8 +995,10 @@ class AppState extends ChangeNotifier {
         final matchSubtype = normSubtype;
         final storeTreatment = quarantined ? '' : normTreatment;
         final storeSubtype = quarantined ? '' : normSubtype;
-        final incomingIdx = asInt(row['instruction_index'] ?? row['instructionIndex']);
-        final canonicalIdx = incomingIdx ?? stableInstructionIndex(type, instruction);
+        final incomingIdx =
+            asInt(row['instruction_index'] ?? row['instructionIndex']);
+        final canonicalIdx =
+            incomingIdx ?? stableInstructionIndex(type, instruction);
 
         bool matchesOrEmpty(dynamic a, dynamic b) {
           // Strict match (treat null as empty). Avoid wildcard matching that can mix treatments.
@@ -871,11 +1014,13 @@ class AppState extends ChangeNotifier {
           final e = _instructionLogs[i];
           if ((e['date'] ?? '').toString() != date) continue;
           if (normType((e['type'] ?? '').toString()) != type) continue;
-          if ((e['username'] ?? '').toString() != (username ?? this.username ?? '')) continue;
+          if ((e['username'] ?? '').toString() !=
+              (username ?? this.username ?? '')) continue;
           if (!matchesOrEmpty(e['treatment'], matchTreatment)) continue;
           if (!matchesOrEmpty(e['subtype'], matchSubtype)) continue;
 
-          final localIdx = asInt(e['instruction_index'] ?? e['instructionIndex']);
+          final localIdx =
+              asInt(e['instruction_index'] ?? e['instructionIndex']);
           if (localIdx != null && localIdx == canonicalIdx) {
             matchIndices.add(i);
             continue;
@@ -931,35 +1076,45 @@ class AppState extends ChangeNotifier {
     // Ensure all callers (even those not awaiting) mutate logs serially.
     _instructionLogOp = _instructionLogOp.then((_) async {
       final now = DateTime.now();
-      final formattedDate =
-          date ?? "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+      final formattedDate = date ??
+          "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
       final user = username ?? this.username ?? '';
       String treat = _canonicalTreatment(treatment ?? _treatment ?? '');
       String sub = _canonicalSubtype(treat, subtype ?? _treatmentSubtype ?? '');
       final String typeCanon = _canonicalGroup(type);
       final instruction = _canonicalInstructionText(note);
-      final idx = instructionIndex ?? stableInstructionIndex(typeCanon, instruction);
-      final quarantined =
-          !_isAllowedForPfdFixed(treatment: treat, subtype: sub, group: typeCanon, instruction: instruction);
+      final idx =
+          instructionIndex ?? stableInstructionIndex(typeCanon, instruction);
+      final quarantined = !_isAllowedForPfdFixed(
+          treatment: treat,
+          subtype: sub,
+          group: typeCanon,
+          instruction: instruction);
       if (quarantined) {
         treat = '';
         sub = '';
       }
 
-      String norm(String s) => s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+      String norm(String s) =>
+          s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
 
       bool sameRow(Map<String, dynamic> log) {
         if ((log['date'] ?? '').toString() != formattedDate) return false;
-        if (_canonicalGroup((log['type'] ?? '').toString()) != typeCanon) return false;
+        if (_canonicalGroup((log['type'] ?? '').toString()) != typeCanon)
+          return false;
         if ((log['username'] ?? '').toString() != user) return false;
 
-        final logTreat = _canonicalTreatment((log['treatment'] ?? '').toString());
-        final logSub = _canonicalSubtype(logTreat, (log['subtype'] ?? '').toString());
+        final logTreat =
+            _canonicalTreatment((log['treatment'] ?? '').toString());
+        final logSub =
+            _canonicalSubtype(logTreat, (log['subtype'] ?? '').toString());
         if (treat.isNotEmpty && logTreat != treat) return false;
         if (sub.isNotEmpty && logSub != sub) return false;
 
         final localIdx = log['instruction_index'];
-        final localInt = localIdx is int ? localIdx : int.tryParse(localIdx?.toString() ?? '');
+        final localInt = localIdx is int
+            ? localIdx
+            : int.tryParse(localIdx?.toString() ?? '');
         if (localInt != null && localInt == idx) return true;
 
         final localText = (log['instruction'] ?? log['note'] ?? '').toString();
@@ -976,8 +1131,10 @@ class AppState extends ChangeNotifier {
         final log = _instructionLogs[i];
         if (!sameRow(log)) continue;
         matchIndices.add(i);
-        final prevFollowed = log['followed'] == true || log['followed']?.toString() == 'true';
-        final prevEver = log['everFollowed'] == true || log['everFollowed']?.toString() == 'true';
+        final prevFollowed =
+            log['followed'] == true || log['followed']?.toString() == 'true';
+        final prevEver = log['everFollowed'] == true ||
+            log['everFollowed']?.toString() == 'true';
         anyPrevFollowed = anyPrevFollowed || prevFollowed;
         anyPrevEver = anyPrevEver || prevEver || prevFollowed;
         final lt = (log['treatment'] ?? '').toString();
@@ -1059,7 +1216,8 @@ class AppState extends ChangeNotifier {
   }
 
   // --- Debounced batching for instruction status uploads ---
-  final Map<String, Map<int, Map<String, dynamic>>> _pendingInstructionBatches = {};
+  final Map<String, Map<int, Map<String, dynamic>>> _pendingInstructionBatches =
+      {};
   final Map<String, DateTime> _pendingBatchTouched = {};
   Timer? _batchTimer;
   static const Duration _batchDebounce = Duration(milliseconds: 500);
@@ -1067,7 +1225,8 @@ class AppState extends ChangeNotifier {
   void _queueInstructionEntryForBatch(Map<String, dynamic> entry) {
     final date = (entry['date'] ?? '').toString();
     final group = (entry['type'] ?? entry['group'] ?? '').toString();
-    final idx = _asInt(entry['instruction_index'] ?? entry['instructionIndex']) ?? 0;
+    final idx =
+        _asInt(entry['instruction_index'] ?? entry['instructionIndex']) ?? 0;
     if (date.isEmpty || group.isEmpty) {
       // Fallback: send immediately if something is malformed
       _syncInstructionEntry(entry);
@@ -1109,21 +1268,25 @@ class AppState extends ChangeNotifier {
       try {
         final ok = await _postInstructionItems(items);
         if (ok) {
-          debugPrint('[InstructionBatch] Uploaded ${items.length} items for $k');
+          debugPrint(
+              '[InstructionBatch] Uploaded ${items.length} items for $k');
         } else {
           throw Exception('saveInstructionStatus returned false');
         }
       } catch (e) {
         debugPrint('[InstructionBatch][error] $k -> $e');
         // Requeue on failure (optional with simple retry strategy)
-        _pendingInstructionBatches[k] = {for (final it in items) it['instruction_index']: it};
+        _pendingInstructionBatches[k] = {
+          for (final it in items) it['instruction_index']: it
+        };
         _pendingBatchTouched[k] = DateTime.now();
         _scheduleBatchFlush();
       }
     }
   }
 
-  String _pendingInstructionUploadStorageKey(String user) => 'pending_instruction_uploads_${user}';
+  String _pendingInstructionUploadStorageKey(String user) =>
+      'pending_instruction_uploads_${user}';
 
   String _pendingUploadItemKey(Map<String, dynamic> e) {
     final date = (e['date'] ?? '').toString();
@@ -1134,7 +1297,9 @@ class AppState extends ChangeNotifier {
     return '$date|$group|#${idx.toString()}|$treatment|$subtype';
   }
 
-  Future<void> _enqueuePendingInstructionUploads(List<Map<String, dynamic>> payloadItems, {String? username}) async {
+  Future<void> _enqueuePendingInstructionUploads(
+      List<Map<String, dynamic>> payloadItems,
+      {String? username}) async {
     final user = (username ?? this.username ?? '').trim();
     if (user.isEmpty) return;
     try {
@@ -1166,7 +1331,8 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<List<Map<String, dynamic>>> _loadPendingInstructionUploads({String? username}) async {
+  Future<List<Map<String, dynamic>>> _loadPendingInstructionUploads(
+      {String? username}) async {
     final user = (username ?? this.username ?? '').trim();
     if (user.isEmpty) return const [];
     try {
@@ -1176,7 +1342,10 @@ class AppState extends ChangeNotifier {
       if (s == null || s.isEmpty) return const [];
       final decoded = jsonDecode(s);
       if (decoded is! List) return const [];
-      return decoded.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+      return decoded
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
     } catch (_) {
       return const [];
     }
@@ -1202,7 +1371,8 @@ class AppState extends ChangeNotifier {
     const int chunkSize = 200;
     int offset = 0;
     while (offset < pending.length) {
-      final chunk = pending.sublist(offset, (offset + chunkSize).clamp(0, pending.length));
+      final chunk = pending.sublist(
+          offset, (offset + chunkSize).clamp(0, pending.length));
       final ok = await ApiService.saveInstructionStatus(chunk);
       if (!ok) {
         // Keep queue for later retries.
@@ -1232,13 +1402,15 @@ class AppState extends ChangeNotifier {
               'instruction_index': e['instruction_index'] ?? 0,
               'instruction_text': e['instruction'] ?? e['note'] ?? '',
               'followed': e['followed'] ?? false,
-              'ever_followed': (e['everFollowed'] == true || e['everFollowed']?.toString() == 'true'),
+              'ever_followed': (e['everFollowed'] == true ||
+                  e['everFollowed']?.toString() == 'true'),
             },
           )
           .toList();
       final ok = await ApiService.saveInstructionStatus(payloadItems);
       if (!ok) {
-        await _enqueuePendingInstructionUploads(payloadItems, username: username);
+        await _enqueuePendingInstructionUploads(payloadItems,
+            username: username);
       }
       return ok;
     } catch (e) {
@@ -1263,7 +1435,8 @@ class AppState extends ChangeNotifier {
             )
             .toList();
         if (payloadItems.isNotEmpty) {
-          await _enqueuePendingInstructionUploads(payloadItems, username: username);
+          await _enqueuePendingInstructionUploads(payloadItems,
+              username: username);
         }
       } catch (_) {}
       return false;
@@ -1294,10 +1467,12 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  void setTreatment(String? treatment, {String? subtype, DateTime? procedureDate}) {
+  void setTreatment(String? treatment,
+      {String? subtype, DateTime? procedureDate}) {
     final canonicalTreatment = _canonicalTreatment(treatment);
     final canonicalSubtype = _canonicalSubtype(canonicalTreatment, subtype);
-    if (_treatment != canonicalTreatment || _treatmentSubtype != canonicalSubtype) {
+    if (_treatment != canonicalTreatment ||
+        _treatmentSubtype != canonicalSubtype) {
       _treatment = canonicalTreatment;
       _treatmentSubtype = canonicalSubtype;
       if (treatment == 'Implant' && subtype != null) {
@@ -1327,20 +1502,25 @@ class AppState extends ChangeNotifier {
   // was incorrect for several treatments and was never populated in this codebase.
   // We now use a centralized catalog of the *logged/checkable* instructions.
   Map<String, List<String>> _currentExpectedByGroup() {
-    final expected = InstructionCatalog.getExpected(treatment: _treatment, subtype: _treatmentSubtype);
+    final expected = InstructionCatalog.getExpected(
+        treatment: _treatment, subtype: _treatmentSubtype);
     if (expected == null) return const {};
     return expected;
   }
 
-  List<String> get currentDos => List<String>.from(
-      (_currentExpectedByGroup()['general'] ?? const []).map(_canonicalInstructionText).where((e) => e.isNotEmpty));
+  List<String> get currentDos =>
+      List<String>.from((_currentExpectedByGroup()['general'] ?? const [])
+          .map(_canonicalInstructionText)
+          .where((e) => e.isNotEmpty));
 
   // "Don'ts" are informational in most screens and are not logged as checklist items.
   // Keep this empty so Progress screens don't count them as expected.
   List<String> get currentDonts => const [];
 
-  List<String> get currentSpecificSteps => List<String>.from(
-      (_currentExpectedByGroup()['specific'] ?? const []).map(_canonicalInstructionText).where((e) => e.isNotEmpty));
+  List<String> get currentSpecificSteps =>
+      List<String>.from((_currentExpectedByGroup()['specific'] ?? const [])
+          .map(_canonicalInstructionText)
+          .where((e) => e.isNotEmpty));
 
   void setUserDetails({
     int? patientId,
@@ -1436,12 +1616,15 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  List<bool> getChecklistForTreatmentDay(String treatmentKey, int day, int itemCount) {
+  List<bool> getChecklistForTreatmentDay(
+      String treatmentKey, int day, int itemCount) {
     String key = "${treatmentKey}_day$day";
-    return List<bool>.from(_persistedChecklists[key] ?? List.filled(itemCount, false));
+    return List<bool>.from(
+        _persistedChecklists[key] ?? List.filled(itemCount, false));
   }
 
-  void setChecklistForTreatmentDay(String treatmentKey, int day, List<bool> values) {
+  void setChecklistForTreatmentDay(
+      String treatmentKey, int day, List<bool> values) {
     String key = "${treatmentKey}_day$day";
     _persistedChecklists[key] = List<bool>.from(values);
     // Persist as well
@@ -1485,19 +1668,22 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  static String _dateKey(DateTime date) => "${date.year.toString().padLeft(4, '0')}-"
+  static String _dateKey(DateTime date) =>
+      "${date.year.toString().padLeft(4, '0')}-"
       "${date.month.toString().padLeft(2, '0')}-"
       "${date.day.toString().padLeft(2, '0')}";
 
   final List<Map<String, String>> _progressFeedback = [];
 
-  List<Map<String, String>> get progressFeedback => List.unmodifiable(_progressFeedback);
+  List<Map<String, String>> get progressFeedback =>
+      List.unmodifiable(_progressFeedback);
 
   void addProgressFeedback(String title, String note, {String? date}) {
     final now = DateTime.now();
-    final formattedDate =
-        date ?? "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
-    _progressFeedback.add({'title': title, 'note': note, 'date': formattedDate});
+    final formattedDate = date ??
+        "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+    _progressFeedback
+        .add({'title': title, 'note': note, 'date': formattedDate});
     notifyListeners();
   }
 
@@ -1508,6 +1694,12 @@ class AppState extends ChangeNotifier {
 
   Future<void> _saveUserDetails() async {
     final prefs = await SharedPreferences.getInstance();
+    // Persist last username separately so account-scoped settings (theme, etc.) can load
+    // before the full user_details blob is hydrated.
+    final u = (username ?? '').trim();
+    if (u.isNotEmpty) {
+      await prefs.setString('username', u);
+    }
     await prefs.setString(
       'user_details',
       jsonEncode({
@@ -1520,6 +1712,7 @@ class AppState extends ChangeNotifier {
         'phone': phone,
         'email': email,
         'token': token,
+        'themeMode': _encodeThemeMode(_themeMode),
         'department': _department,
         'doctor': _doctor,
         'treatment': _treatment,
@@ -1541,8 +1734,9 @@ class AppState extends ChangeNotifier {
     String? loadedToken = prefs.getString('token');
     if (data != null) {
       final decoded = jsonDecode(data);
-      patientId =
-          decoded['patientId'] is int ? decoded['patientId'] : int.tryParse((decoded['patientId'] ?? '').toString());
+      patientId = decoded['patientId'] is int
+          ? decoded['patientId']
+          : int.tryParse((decoded['patientId'] ?? '').toString());
       fullName = decoded['fullName'];
       dob = decoded['dob'] != null ? DateTime.parse(decoded['dob']) : null;
       gender = decoded['gender'];
@@ -1554,12 +1748,38 @@ class AppState extends ChangeNotifier {
       _department = decoded['department'];
       _doctor = decoded['doctor'];
       _treatment = _canonicalTreatment(decoded['treatment']);
-      _treatmentSubtype = _canonicalSubtype(_treatment, decoded['treatmentSubtype']);
+      _treatmentSubtype =
+          _canonicalSubtype(_treatment, decoded['treatmentSubtype']);
       _implantStage = decoded['implantStage'];
       _procedureCompleted = decoded['procedureCompleted'];
-      procedureDate = decoded['procedureDate'] != null ? DateTime.parse(decoded['procedureDate']) : null;
-      procedureTime = decoded['procedureTime'] != null ? _parseTimeOfDay(decoded['procedureTime']) : null;
+      procedureDate = decoded['procedureDate'] != null
+          ? DateTime.parse(decoded['procedureDate'])
+          : null;
+      procedureTime = decoded['procedureTime'] != null
+          ? _parseTimeOfDay(decoded['procedureTime'])
+          : null;
+
+      // Restore theme for this account if present.
+      // This is a fallback; the primary path is loadThemeMode() before runApp.
+      try {
+        final raw = (decoded['themeMode'] ?? decoded['theme_mode'])?.toString();
+        if (raw != null && raw.trim().isNotEmpty) {
+          final restored = _decodeThemeMode(raw);
+          _themeMode = restored;
+
+          assert(() {
+            debugPrint('[theme] loadUserDetails: restoredFromUserDetails=$raw');
+            return true;
+          }());
+        }
+      } catch (_) {}
       notifyListeners();
+
+      // Cache last username for account-scoped preferences.
+      final u = (username ?? '').trim();
+      if (u.isNotEmpty) {
+        await prefs.setString('username', u);
+      }
     } else {
       if (loadedToken != null) {
         token = loadedToken;
@@ -1624,7 +1844,12 @@ class AppState extends ChangeNotifier {
     await prefs.remove(_prefsThemeModeKey); // legacy global key (avoid leakage)
   }
 
-  void updatePersonalInfo({String? fullName, String? email, String? phone, String? gender, DateTime? dob}) {
+  void updatePersonalInfo(
+      {String? fullName,
+      String? email,
+      String? phone,
+      String? gender,
+      DateTime? dob}) {
     this.fullName = fullName ?? this.fullName;
     this.email = email ?? this.email;
     this.phone = phone ?? this.phone;
@@ -1643,7 +1868,8 @@ class AppState extends ChangeNotifier {
   }
 
   int stableInstructionIndex(String group, String instruction) {
-    final s = (group.trim().toLowerCase() + '|' + instruction.trim().toLowerCase());
+    final s =
+        (group.trim().toLowerCase() + '|' + instruction.trim().toLowerCase());
     int hash = 0x811C9DC5; // FNV offset basis 32-bit
     const int prime = 0x01000193; // FNV prime
     for (final codeUnit in s.codeUnits) {
@@ -1665,7 +1891,8 @@ class AppState extends ChangeNotifier {
         final localIdx = e['instruction_index'];
         final idx = (localIdx is int)
             ? localIdx
-            : (int.tryParse(localIdx?.toString() ?? '') ?? stableInstructionIndex(type, instruction));
+            : (int.tryParse(localIdx?.toString() ?? '') ??
+                stableInstructionIndex(type, instruction));
         return {
           'date': e['date'],
           'treatment': e['treatment'] ?? '',
@@ -1674,7 +1901,8 @@ class AppState extends ChangeNotifier {
           'instruction_index': idx,
           'instruction_text': instruction,
           'followed': e['followed'] ?? false,
-          'ever_followed': (e['everFollowed'] == true || e['everFollowed']?.toString() == 'true'),
+          'ever_followed': (e['everFollowed'] == true ||
+              e['everFollowed']?.toString() == 'true'),
         };
       }).toList();
 

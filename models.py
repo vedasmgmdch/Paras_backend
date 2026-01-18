@@ -27,6 +27,13 @@ class Patient(Base):
     procedure_date = Column(Date, nullable=True)
     procedure_time = Column(Time, nullable=True)
     procedure_completed = Column(Boolean, nullable=True, default=None)
+
+    # Historical completion flags (account-scoped, never reset).
+    # NOTE: procedure_completed on Patient is mirrored from the CURRENT open episode.
+    # These fields preserve the fact that the account has completed at least one episode.
+    ever_completed = Column(Boolean, default=False, nullable=False)
+    last_completed_episode_id = Column(Integer, nullable=True)
+    last_completed_at = Column(DateTime, nullable=True)
     is_verified = Column(Boolean, default=False, nullable=False)
 
     # UI preferences (synced across devices via account)

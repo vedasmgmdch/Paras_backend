@@ -90,6 +90,9 @@ void main() async {
 
   // Render ASAP: do not block first frame on network/plugin init.
   final appState = AppState();
+  // Theme must be applied before first frame; otherwise users see a light-mode flash
+  // and it can appear like the theme "reset" on cold start.
+  await appState.loadThemeMode();
   runApp(ChangeNotifierProvider(create: (_) => appState, child: const ToothCareGuideApp()));
   unawaited(_postStartupInit(appState));
 }
@@ -400,7 +403,10 @@ class _AppEntryGateState extends State<AppEntryGate> {
         email: userDetails['email'],
       );
 
-      await appState.applyThemeModeFromServer(userDetails['theme_mode']);
+      final serverThemeMode = (userDetails['theme_mode'] ?? userDetails['themeMode'])?.toString().trim();
+      if (serverThemeMode != null && serverThemeMode.isNotEmpty) {
+        await appState.applyThemeModeFromServer(serverThemeMode);
+      }
       // Load persisted data for this user
       await appState.loadAllChecklists(username: appState.username);
       await appState.loadInstructionLogs(username: appState.username);

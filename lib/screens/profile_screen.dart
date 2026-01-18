@@ -142,8 +142,8 @@ class ProfileScreen extends StatelessWidget {
                               ),
                               secondary: Icon(Icons.dark_mode_outlined, color: colorScheme.primary),
                               value: appState.themeMode == ThemeMode.dark,
-                              onChanged: (isDark) {
-                                appState.setThemeMode(
+                              onChanged: (isDark) async {
+                                await appState.setThemeMode(
                                   isDark ? ThemeMode.dark : ThemeMode.light,
                                   syncToServer: true,
                                 );
