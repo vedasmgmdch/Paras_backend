@@ -1837,7 +1837,11 @@ async def list_patients_by_doctor(
 
 
 @app.get("/patients/by-doctor-episodes", response_model=List[schemas.PatientEpisodePublic])
-async def list_patient_episodes_by_doctor(doctor: str, db: AsyncSession = Depends(get_db)):
+async def list_patient_episodes_by_doctor(
+    doctor: str,
+    db: AsyncSession = Depends(get_db),
+    current_doctor: models.Doctor = Depends(get_current_doctor),
+):
     """Doctor dashboard feed that includes completed treatments as separate entries.
 
     Returns one row per treatment episode that belongs to the doctor.
